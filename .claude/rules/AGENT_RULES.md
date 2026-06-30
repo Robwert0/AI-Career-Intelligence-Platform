@@ -12,7 +12,7 @@
 
 When debugging or investigating issues:
 
-- When given a bug report, just fix it. Don't ask for hand-holding. Zero context switching required from the user.
+- When given a bug, investigate autonomously and find the root cause without hand-holding — but in learning-mode (see CLAUDE.md §1), explain the cause and the fix and let Robert apply it himself when it's a useful learning moment. Just-fix-it directly only for trivial/mechanical issues or when Robert asks.
 - First hypothesis is a candidate, not a conclusion
 - Identify ≥2 possible root causes before proposing a fix
 - Validate assumptions before acting on them
