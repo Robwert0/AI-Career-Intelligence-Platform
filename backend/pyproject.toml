@@ -2,7 +2,7 @@
 name = "career-intel-backend"
 version = "0.1.0"
 description = "AI Career Intelligence Platform — backend API"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -21,13 +21,13 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 strict = true
 plugins = ["pydantic.mypy"]
 
