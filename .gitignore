@@ -29,6 +29,9 @@ coverage/
 .coverage
 htmlcov/
 
+# Local working docs (specs, plans) — never committed
+docs/
+
 # Editors / OS
 .idea/
 .vscode/
