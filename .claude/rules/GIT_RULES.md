@@ -39,8 +39,8 @@ chore(p1): add docker-compose for postgres + redis
 
 ## Commit footers
 
-Follow the environment default (Co-Authored-By / session footer is added automatically).
-Do not strip it.
+No attribution footers. The Co-Authored-By / session trailer is disabled via
+`attribution` in `.claude/settings.json` — commit messages end at the body.
 
 ## Pull requests
 
