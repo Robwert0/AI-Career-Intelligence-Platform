@@ -86,7 +86,7 @@ HTTP only, and each has its own Dockerfile and tooling.
   /app
     main.py
     deps.py       # ALL FastAPI dependencies: get_db, get_current_user, get_*_service
-    /api          # route handlers: /auth /chat /cv /jobs
+    /routes       # route handlers: /auth /chat /cv /jobs
     /core         # config.py, security.py (JWT/hashing), rate_limiter.py
     /models       # SQLAlchemy: User, CV, Embedding, Analysis, Conversation
     /schemas      # Pydantic request/response validation
@@ -100,7 +100,7 @@ HTTP only, and each has its own Dockerfile and tooling.
   /lib          # API client, auth helpers
 ```
 
-**Layering rule:** `api` → `services` → (`ai` | `repositories`) → `models`. Routes stay
+**Layering rule:** `routes` → `services` → (`ai` | `repositories`) → `models`. Routes stay
 thin (validation + auth + delegation). Business logic lives in `services`; all DB queries
 live in `repositories` (services never import SQLAlchemy). `deps.py` is the single
 composition root wiring the chain (`get_db` → repo → service), so any link can be swapped
