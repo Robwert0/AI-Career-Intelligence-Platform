@@ -107,8 +107,6 @@ composition root wiring the chain (`get_db` → repo → service), so any link c
 in tests via `app.dependency_overrides`. The `ai` module is provider-agnostic at its
 boundaries so prompts/models can change without touching routes.
 
-> Full rationale: `docs/superpowers/specs/2026-07-09-repo-structure-design.md`
-
 ### Async flow (CV upload)
 `Upload → store file in S3 → enqueue job → Celery worker (parse → embed → analyze) → persist results → notify/poll from frontend.`
 Long-running AI work **never** blocks an HTTP request.

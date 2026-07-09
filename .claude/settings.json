@@ -44,5 +44,10 @@
   },
   "env": {
     "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
   }
 }
