@@ -78,25 +78,36 @@ This project is a **learning curve** — Robert wants to understand and write th
 Six services: **Frontend (Next.js)** · **Backend API (FastAPI)** · **AI Layer (Python module)**
 · **Worker (Celery)** · **Redis** · **PostgreSQL (+pgvector)**.
 
+Backend and frontend live in this **monorepo**, fully decoupled: they communicate over
+HTTP only, and each has its own Dockerfile and tooling.
+
 ```
 /backend
   /app
-    /api        # route handlers: /auth /chat /cv /jobs
-    /core       # config.py, security.py (JWT/hashing), rate_limiter.py
-    /models     # SQLAlchemy: User, CV, Embedding, Analysis, Conversation
-    /schemas    # Pydantic request/response validation
-    /services   # cv_service.py, job_service.py, user_service.py
-    /ai         # rag.py, embeddings.py, retriever.py, reranker.py, agents.py, prompts.py
-    /workers    # celery_app.py, tasks.py
+    main.py
+    deps.py       # ALL FastAPI dependencies: get_db, get_current_user, get_*_service
+    /api          # route handlers: /auth /chat /cv /jobs
+    /core         # config.py, security.py (JWT/hashing), rate_limiter.py
+    /models       # SQLAlchemy: User, CV, Embedding, Analysis, Conversation
+    /schemas      # Pydantic request/response validation
+    /services     # business logic — no SQLAlchemy imports here
+    /repositories # user_repo.py, cv_repo.py, ... — the ONLY place DB queries live
+    /ai           # rag.py, embeddings.py, retriever.py, reranker.py, agents.py, prompts.py
+    /workers      # celery_app.py, tasks.py
 /frontend
   /app          # App Router pages
   /components   # UI + chat
   /lib          # API client, auth helpers
 ```
 
-**Layering rule:** `api` → `services` → (`ai` | `models`). Routes stay thin (validation +
-auth + delegation). Business logic lives in `services`. The `ai` module is provider-agnostic
-at its boundaries so prompts/models can change without touching routes.
+**Layering rule:** `api` → `services` → (`ai` | `repositories`) → `models`. Routes stay
+thin (validation + auth + delegation). Business logic lives in `services`; all DB queries
+live in `repositories` (services never import SQLAlchemy). `deps.py` is the single
+composition root wiring the chain (`get_db` → repo → service), so any link can be swapped
+in tests via `app.dependency_overrides`. The `ai` module is provider-agnostic at its
+boundaries so prompts/models can change without touching routes.
+
+> Full rationale: `docs/superpowers/specs/2026-07-09-repo-structure-design.md`
 
 ### Async flow (CV upload)
 `Upload → store file in S3 → enqueue job → Celery worker (parse → embed → analyze) → persist results → notify/poll from frontend.`
