@@ -5,7 +5,7 @@ from app.models import User
 
 
 class UserRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def get_user_by_email(self, email: str) -> User | None:
