@@ -1,7 +1,8 @@
-from app.schemas.auth import TokenResponse, UserCreate, UserRead
+from app.schemas.auth import LoginRequest, TokenResponse, UserCreate, UserRead
 
 __all__ = [
     "UserCreate",
     "UserRead",
     "TokenResponse",
+    "LoginRequest",
 ]
