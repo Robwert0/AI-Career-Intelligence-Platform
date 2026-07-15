@@ -17,3 +17,4 @@ class Base(DeclarativeBase):
 async def get_db() -> AsyncGenerator[AsyncSession]:
     async with SessionLocal() as session:
         yield session
+    await session.commit()
