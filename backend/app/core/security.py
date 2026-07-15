@@ -35,5 +35,5 @@ def create_refresh_token(subject: str) -> str:
     return jwt.encode(claims, settings.secret_key, algorithm="HS256")
 
 
-def decode_token(token: str) -> dict[str, Any] -> str:
+def decode_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, settings.secret_key, algorithms=["HS256"])
