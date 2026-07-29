@@ -8,7 +8,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models import User
-from app.repositories.user_repo import UserRepository
+from app.repositories.user_repo import EmailAlreadyExistsError, UserRepository
 from app.schemas import UserCreate
 
 _DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
@@ -30,7 +30,14 @@ class AuthService:
         if await self._repo.get_user_by_email(data.email) is not None:
             raise EmailAlreadyRegisteredError
         hashed = await asyncio.to_thread(hash_password, data.password)
-        return await self._repo.create_user(email=data.email, hashed_password=hashed)
+        try:
+            user = await self._repo.create_user(
+                email=data.email,
+                hashed_password=hashed,
+            )
+        except EmailAlreadyExistsError:
+            raise EmailAlreadyRegisteredError from None
+        return user
 
     async def login(self, email: str, password: str) -> tuple[str, str]:
         user = await self._repo.get_user_by_email(email)

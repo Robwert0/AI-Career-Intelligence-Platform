@@ -1,7 +1,12 @@
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import User
+
+
+class EmailAlreadyExistsError(Exception):
+    pass
 
 
 class UserRepository:
@@ -17,7 +22,11 @@ class UserRepository:
             email=email,
             hashed_password=hashed_password,
         )
-        self._session.add(user)
-        await self._session.flush()
+        try:
+            async with self._session.begin_nested():
+                self._session.add(user)
+                await self._session.flush()
+        except IntegrityError:
+            raise EmailAlreadyExistsError() from None
 
         return user

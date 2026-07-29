@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from app.core.security import decode_token
+from app.repositories import UserRepository
 
 EMAIL = "robert@test.dev"
 PASSWORD = "supersecret1"
@@ -26,6 +27,22 @@ async def test_register_creates_user(client: httpx.AsyncClient) -> None:
 
 async def test_register_duplicate_email_conflicts(client: httpx.AsyncClient) -> None:
     await register(client)
+    response = await register(client)
+
+    assert response.status_code == 409
+
+
+async def test_register_conflicts_when_precheck_misses(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await register(client)
+
+    async def blind(self: UserRepository, email: str) -> None:
+        """Simulates the loser of a register race: its SELECT ran before the winner's INSERT."""
+        return None
+
+    monkeypatch.setattr(UserRepository, "get_user_by_email", blind)
+
     response = await register(client)
 
     assert response.status_code == 409
