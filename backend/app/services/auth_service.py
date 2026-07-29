@@ -1,9 +1,13 @@
 import asyncio
 import secrets
+from uuid import UUID
+
+import jwt
 
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    decode_token,
     hash_password,
     verify_password,
 )
@@ -20,6 +24,10 @@ class EmailAlreadyRegisteredError(Exception):
 
 class InvalidCredentialsError(Exception):
     """Invalid credentials error"""
+
+
+class InvalidAccessTokenError(Exception):
+    """Token verified but does not identify a usable account."""
 
 
 class AuthService:
@@ -60,3 +68,16 @@ class AuthService:
             create_access_token(str(user.id)),
             create_refresh_token(str(user.id)),
         )
+
+    async def authenticate(self, token: str) -> User:
+        try:
+            payload = decode_token(token, expected_type="access")
+            user_id = UUID(payload["sub"])
+        except jwt.InvalidTokenError, ValueError, TypeError, AttributeError:
+            raise InvalidAccessTokenError from None
+
+        user = await self._repo.get_user_by_id(user_id)
+        if user is None:
+            raise InvalidAccessTokenError
+
+        return user

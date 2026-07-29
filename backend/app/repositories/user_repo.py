@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,3 +32,6 @@ class UserRepository:
             raise EmailAlreadyExistsError() from None
 
         return user
+
+    async def get_user_by_id(self, user_id: uuid.UUID) -> User | None:
+        return await self._session.get(User, user_id)

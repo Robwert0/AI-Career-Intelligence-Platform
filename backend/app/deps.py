@@ -1,11 +1,16 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.models import User
 from app.repositories import UserRepository
 from app.services import AuthService
+from app.services.auth_service import InvalidAccessTokenError
+
+bearer_scheme = HTTPBearer()
 
 
 def get_user_repo(session: Annotated[AsyncSession, Depends(get_db)]) -> UserRepository:
@@ -14,3 +19,17 @@ def get_user_repo(session: Annotated[AsyncSession, Depends(get_db)]) -> UserRepo
 
 def get_auth_service(repo: Annotated[UserRepository, Depends(get_user_repo)]) -> AuthService:
     return AuthService(repo)
+
+
+async def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+) -> User:
+    try:
+        return await auth_service.authenticate(credentials.credentials)
+    except InvalidAccessTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
