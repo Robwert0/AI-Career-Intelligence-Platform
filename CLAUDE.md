@@ -238,7 +238,7 @@ docker-compose up --build            # full stack (phase 6+)
 
 # Backend
 cd backend && uvicorn app.main:app --reload
-ruff check . && ruff format . && mypy app
+ruff check . && ruff format . && mypy .
 pytest -q
 
 # Worker
