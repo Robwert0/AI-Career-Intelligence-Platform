@@ -1,4 +1,5 @@
 import asyncio
+import secrets
 
 from app.core.security import (
     create_access_token,
@@ -9,6 +10,8 @@ from app.core.security import (
 from app.models import User
 from app.repositories.user_repo import UserRepository
 from app.schemas import UserCreate
+
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 class EmailAlreadyRegisteredError(Exception):
@@ -32,6 +35,11 @@ class AuthService:
     async def login(self, email: str, password: str) -> tuple[str, str]:
         user = await self._repo.get_user_by_email(email)
         if user is None:
+            await asyncio.to_thread(
+                verify_password,
+                plain_password=password,
+                hashed_password=_DUMMY_HASH,
+            )
             raise InvalidCredentialsError
 
         if not await asyncio.to_thread(

@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from app.core.security import decode_token
 
@@ -104,6 +105,26 @@ async def test_validation_error_does_not_echo_password(client: httpx.AsyncClient
 
     assert response.status_code == 422
     assert secret not in response.text
+
+
+async def test_login_unknown_email_still_hashes(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compared_against: list[str] = []
+
+    def spy(plain_password: str, hashed_password: str) -> bool:
+        compared_against.append(hashed_password)
+        return False
+
+    monkeypatch.setattr("app.services.auth_service.verify_password", spy)
+
+    response = await client.post(
+        "/auth/login", json={"email": "ghost@test.dev", "password": PASSWORD}
+    )
+
+    assert response.status_code == 401
+    assert compared_against, "unknown email must still pay the bcrypt cost"
+    assert compared_against[0].startswith("$2b$"), "must compare against a real bcrypt hash"
 
 
 async def test_validation_error_still_explains_the_problem(client: httpx.AsyncClient) -> None:
