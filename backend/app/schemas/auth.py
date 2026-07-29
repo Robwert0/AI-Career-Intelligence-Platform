@@ -1,12 +1,22 @@
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+
+
+def _within_bcrypt_limit(v: str) -> str:
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("password must not exceed 72 bytes when UTF-8 encoded")
+    return v
+
+
+Password = Annotated[str, Field(min_length=8), AfterValidator(_within_bcrypt_limit)]
 
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=72)
+    password: Password
 
 
 class UserRead(BaseModel):
@@ -24,4 +34,4 @@ class TokenResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: Password

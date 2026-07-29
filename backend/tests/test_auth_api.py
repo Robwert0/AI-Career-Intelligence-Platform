@@ -65,9 +65,51 @@ async def test_login_failures_are_indistinguishable(client: httpx.AsyncClient) -
     assert wrong_password.json() == unknown_email.json()
 
 
-async def test_access_token_identifies_registered_user(client: httpx.AsyncClient) -> None:
+async def test_access_token_identifies_registered_user(
+    client: httpx.AsyncClient,
+) -> None:
     user_id = (await register(client)).json()["id"]
     access_token = (await login(client)).json()["access_token"]
 
     payload = decode_token(access_token, expected_type="access")
     assert payload["sub"] == user_id
+
+
+async def test_login_overlong_password_is_not_a_500(client: httpx.AsyncClient) -> None:
+    await register(client)
+    long_password = await login(client, password="*" * 100)
+
+    assert long_password.status_code != 500
+    assert long_password.status_code == 422
+
+
+async def test_login_multibyte_password_is_not_a_500(client: httpx.AsyncClient) -> None:
+    await register(client)
+    long_password = await login(client, password="é" * 72)
+
+    assert long_password.status_code == 422
+
+
+async def test_register_multibyte_password_is_rejected(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.post("/auth/register", json={"email": EMAIL, "password": "é" * 72})
+
+    assert response.status_code == 422
+
+
+async def test_validation_error_does_not_echo_password(client: httpx.AsyncClient) -> None:
+    secret = "é" * 72
+    response = await client.post("/auth/register", json={"email": EMAIL, "password": secret})
+
+    assert response.status_code == 422
+    assert secret not in response.text
+
+
+async def test_validation_error_still_explains_the_problem(client: httpx.AsyncClient) -> None:
+    response = await client.post("/auth/register", json={"email": EMAIL, "password": "short"})
+
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "password"]
+    assert error["msg"]
