@@ -227,3 +227,14 @@ async def test_validation_error_still_explains_the_problem(client: httpx.AsyncCl
     error = response.json()["detail"][0]
     assert error["loc"] == ["body", "password"]
     assert error["msg"]
+
+
+async def test_refresh_cookie_is_replayed_to_the_server(client: httpx.AsyncClient) -> None:
+    """A Secure cookie is only sent over https, so the fixture's scheme is load-bearing."""
+    await register(client)
+    await login(client)
+
+    request = client.build_request("POST", "/auth/refresh")
+    client.cookies.set_cookie_header(request)
+
+    assert "refresh_token" in request.headers.get("cookie", "")
