@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -37,6 +39,16 @@ def create_refresh_token(subject: str) -> str:
         "exp": now + timedelta(days=settings.refresh_token_expire_days),
     }
     return jwt.encode(claims, settings.secret_key, algorithm="HS256")
+
+
+def generate_refresh_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_refresh_token(token: str) -> str:
+    # sha256, not bcrypt: the input is already 256 bits of entropy, and a salted
+    # hash could not be indexed for the single-probe lookup /auth/refresh needs.
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def decode_token(token: str, expected_type: str) -> dict[str, Any]:

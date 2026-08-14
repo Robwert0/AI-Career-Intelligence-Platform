@@ -1,3 +1,4 @@
+import string
 from datetime import UTC, datetime
 
 import jwt
@@ -8,7 +9,9 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    generate_refresh_token,
     hash_password,
+    hash_refresh_token,
     verify_password,
 )
 
@@ -79,6 +82,36 @@ def test_access_token_rejected_as_refresh() -> None:
     token = create_access_token("user-123")
     with pytest.raises(jwt.InvalidTokenError):
         decode_token(token, expected_type="refresh")
+
+
+def test_generated_tokens_are_unique() -> None:
+    assert generate_refresh_token() != generate_refresh_token()
+
+
+def test_generated_token_is_url_safe_and_long() -> None:
+    token = generate_refresh_token()
+
+    assert len(token) >= 43
+    assert set(token) <= set(string.ascii_letters + string.digits + "-_")
+
+
+def test_hashing_is_deterministic() -> None:
+    token = generate_refresh_token()
+
+    assert hash_refresh_token(token) == hash_refresh_token(token)
+
+
+def test_hash_is_sha256_hex_and_not_the_token() -> None:
+    token = generate_refresh_token()
+    hashed = hash_refresh_token(token)
+
+    assert len(hashed) == 64
+    assert int(hashed, 16) >= 0
+    assert hashed != token
+
+
+def test_different_tokens_hash_differently() -> None:
+    assert hash_refresh_token("token-a") != hash_refresh_token("token-b")
 
 
 def test_token_missing_exp_rejected() -> None:
