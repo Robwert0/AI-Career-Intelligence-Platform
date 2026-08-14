@@ -233,7 +233,7 @@ Streaming responses (SSE/WebSockets) · AI mock interviews · CV version history
 
 ```bash
 # Infra (Docker)
-docker-compose up -d db redis        # phases 1–5: just data services
+docker compose up -d database redis  # phases 1–5: just data services
 docker-compose up --build            # full stack (phase 6+)
 
 # Backend
