@@ -34,6 +34,10 @@ class InvalidAccessTokenError(Exception):
     """Token verified but does not identify a usable account."""
 
 
+class InvalidRefreshTokenError(Exception):
+    """Refresh token missing, unknown, expired, revoked, or already spent."""
+
+
 class AuthService:
     def __init__(self, repo: UserRepository, refresh_repo: RefreshTokenRepository) -> None:
         self._repo = repo
@@ -82,6 +86,20 @@ class AuthService:
         return (
             create_access_token(str(user.id)),
             await self._issue_refresh_token(user.id, family_id=uuid4()),
+        )
+
+    async def refresh(self, raw_token: str) -> tuple[str, str]:
+        spent = await self._refresh_repo.consume(hash_refresh_token(raw_token))
+        if spent is None:
+            raise InvalidRefreshTokenError
+
+        user = await self._repo.get_user_by_id(spent.user_id)
+        if user is None:
+            raise InvalidRefreshTokenError
+
+        return (
+            create_access_token(str(user.id)),
+            await self._issue_refresh_token(user.id, family_id=spent.family_id),
         )
 
     async def authenticate(self, token: str) -> User:

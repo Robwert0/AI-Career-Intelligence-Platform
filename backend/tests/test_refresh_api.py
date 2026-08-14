@@ -60,3 +60,46 @@ async def test_two_logins_are_two_families(
 
     tokens = await all_tokens(db_session)
     assert len({token.family_id for token in tokens}) == 2
+
+
+async def test_refresh_rotates_the_token(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    await register(client)
+    old_raw = (await login(client)).cookies["refresh_token"]
+
+    response = await client.post("/auth/refresh")
+
+    assert response.status_code == 200
+    new_raw = response.cookies["refresh_token"]
+    assert new_raw != old_raw
+    assert response.json()["access_token"]
+    assert response.json()["token_type"] == "bearer"
+
+    tokens = await all_tokens(db_session)
+    assert len(tokens) == 2
+    parent = next(t for t in tokens if t.token_hash == hash_refresh_token(old_raw))
+    child = next(t for t in tokens if t.token_hash == hash_refresh_token(new_raw))
+    assert parent.used_at is not None
+    assert child.used_at is None
+    assert child.family_id == parent.family_id
+    assert child.expires_at >= parent.expires_at
+
+
+async def test_the_rotated_token_authenticates(client: httpx.AsyncClient) -> None:
+    await register(client)
+    await login(client)
+    access_token = (await client.post("/auth/refresh")).json()["access_token"]
+
+    response = await client.get("/users/me", headers={"Authorization": f"Bearer {access_token}"})
+
+    assert response.status_code == 200
+    assert response.json()["email"] == EMAIL
+
+
+async def test_the_child_token_can_itself_be_refreshed(client: httpx.AsyncClient) -> None:
+    await register(client)
+    await login(client)
+
+    assert (await client.post("/auth/refresh")).status_code == 200
+    assert (await client.post("/auth/refresh")).status_code == 200
