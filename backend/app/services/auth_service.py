@@ -112,6 +112,14 @@ class AuthService:
             await self._issue_refresh_token(user.id, family_id=spent.family_id),
         )
 
+    async def logout(self, raw_token: str | None) -> None:
+        if raw_token is None:
+            return
+
+        token = await self._refresh_repo.get_by_hash(hash_refresh_token(raw_token))
+        if token is not None:
+            await self._refresh_repo.revoke_family(token.family_id)
+
     async def authenticate(self, token: str) -> User:
         try:
             payload = decode_token(token, expected_type="access")

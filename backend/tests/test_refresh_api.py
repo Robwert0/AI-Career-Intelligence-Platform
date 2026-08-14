@@ -205,3 +205,55 @@ async def test_a_rejected_refresh_clears_the_cookie(client: httpx.AsyncClient) -
     assert response.status_code == 401
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert "Path=/auth" in response.headers["set-cookie"]
+
+
+async def test_logout_kills_the_session(client: httpx.AsyncClient) -> None:
+    await register(client)
+    await login(client)
+
+    logout = await client.post("/auth/logout")
+
+    assert logout.status_code == 204
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+
+
+async def test_refresh_after_logout_is_401(client: httpx.AsyncClient) -> None:
+    await register(client)
+    raw = (await login(client)).cookies["refresh_token"]
+    await client.post("/auth/logout")
+
+    response = await client.post("/auth/refresh", headers=presenting(raw))
+
+    assert response.status_code == 401
+
+
+async def test_logout_is_idempotent(client: httpx.AsyncClient) -> None:
+    await register(client)
+    raw = (await login(client)).cookies["refresh_token"]
+
+    assert (await client.post("/auth/logout", headers=presenting(raw))).status_code == 204
+    assert (await client.post("/auth/logout", headers=presenting(raw))).status_code == 204
+
+
+async def test_logout_without_a_cookie_is_still_204(client: httpx.AsyncClient) -> None:
+    assert (await client.post("/auth/logout")).status_code == 204
+
+
+async def test_logout_with_an_unknown_token_is_still_204(client: httpx.AsyncClient) -> None:
+    response = await client.post("/auth/logout", headers=presenting("not-a-real-token"))
+
+    assert response.status_code == 204
+
+
+async def test_logout_of_one_device_leaves_the_other_alive(client: httpx.AsyncClient) -> None:
+    await register(client)
+    phone_raw = (await login(client)).cookies["refresh_token"]
+    laptop_raw = (await login(client)).cookies["refresh_token"]
+
+    await client.post("/auth/logout", headers=presenting(phone_raw))
+
+    laptop = await client.post("/auth/refresh", headers=presenting(laptop_raw))
+    assert laptop.status_code == 200
+
+    phone = await client.post("/auth/refresh", headers=presenting(phone_raw))
+    assert phone.status_code == 401

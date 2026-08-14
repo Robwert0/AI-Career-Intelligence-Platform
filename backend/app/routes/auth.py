@@ -114,3 +114,17 @@ async def refresh(
     _set_refresh_cookie(response, new_refresh_token)
 
     return TokenResponse(access_token=access_token)
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def logout(
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    response: Response,
+    refresh_token: Annotated[str | None, Cookie()] = None,
+) -> None:
+    # 204 regardless: a status that varied would confirm which tokens exist.
+    await auth_service.logout(refresh_token)
+    _clear_refresh_cookie(response)
