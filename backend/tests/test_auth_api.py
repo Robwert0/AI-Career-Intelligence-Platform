@@ -65,11 +65,12 @@ async def test_login_sets_refresh_cookie(client: httpx.AsyncClient) -> None:
     await register(client)
     response = await login(client)
 
-    assert response.cookies.get("refresh_token")
+    assert response.cookies.get("__Host-refresh_token")
     cookie_header = response.headers["set-cookie"]
     assert "HttpOnly" in cookie_header
-    assert "SameSite=strict" in cookie_header
-    assert "Path=/auth" in cookie_header
+    assert "SameSite=lax" in cookie_header
+    assert "Path=/" in cookie_header
+    assert "Path=/auth" not in cookie_header
     assert "Secure" in cookie_header
 
 
@@ -128,7 +129,7 @@ async def test_me_with_a_garbage_token_is_401(client: httpx.AsyncClient) -> None
 
 async def test_me_rejects_an_opaque_refresh_token(client: httpx.AsyncClient) -> None:
     await register(client)
-    refresh_token = (await login(client)).cookies["refresh_token"]
+    refresh_token = (await login(client)).cookies["__Host-refresh_token"]
 
     response = await client.get("/users/me", headers={"Authorization": f"Bearer {refresh_token}"})
 
@@ -236,4 +237,4 @@ async def test_refresh_cookie_is_replayed_to_the_server(client: httpx.AsyncClien
     request = client.build_request("POST", "/auth/refresh")
     client.cookies.set_cookie_header(request)
 
-    assert "refresh_token" in request.headers.get("cookie", "")
+    assert "__Host-refresh_token" in request.headers.get("cookie", "")

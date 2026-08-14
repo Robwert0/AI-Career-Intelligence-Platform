@@ -14,8 +14,10 @@ from app.services.auth_service import (
 
 router = APIRouter()
 
-_REFRESH_COOKIE = "refresh_token"
-_COOKIE_PATH = "/auth"
+# __Host- makes the browser refuse this name with a Domain attribute or a non-root Path,
+# which is what stops a sibling subdomain planting a duplicate. The prefix requires Path=/.
+_REFRESH_COOKIE = "__Host-refresh_token"
+_COOKIE_PATH = "/"
 
 
 def _set_refresh_cookie(response: Response, raw_token: str) -> None:
@@ -24,7 +26,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
         raw_token,
         httponly=True,
         secure=True,
-        samesite="strict",
+        samesite="lax",
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
         path=_COOKIE_PATH,
     )
@@ -32,7 +34,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
 
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
-        _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite="strict"
+        _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite="lax"
     )
 
 
