@@ -1,6 +1,7 @@
 import asyncio
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 from uuid import UUID, uuid4
 
 import jwt
@@ -88,10 +89,19 @@ class AuthService:
             await self._issue_refresh_token(user.id, family_id=uuid4()),
         )
 
+    async def _reject_unusable_token(self, token_hash: str) -> NoReturn:
+        token = await self._refresh_repo.get_by_hash(token_hash)
+        # Spent but not revoked is a replay: whoever holds this is not who rotated it.
+        # Checked before expiry, so a token that is both spent and expired is still theft.
+        if token is not None and token.revoked_at is None and token.used_at is not None:
+            await self._refresh_repo.revoke_family(token.family_id)
+        raise InvalidRefreshTokenError
+
     async def refresh(self, raw_token: str) -> tuple[str, str]:
-        spent = await self._refresh_repo.consume(hash_refresh_token(raw_token))
+        token_hash = hash_refresh_token(raw_token)
+        spent = await self._refresh_repo.consume(token_hash)
         if spent is None:
-            raise InvalidRefreshTokenError
+            await self._reject_unusable_token(token_hash)
 
         user = await self._repo.get_user_by_id(spent.user_id)
         if user is None:

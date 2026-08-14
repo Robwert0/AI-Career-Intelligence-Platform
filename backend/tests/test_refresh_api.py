@@ -1,9 +1,11 @@
+from datetime import UTC, datetime, timedelta
+
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_refresh_token
-from app.models import RefreshToken
+from app.core.security import create_access_token, hash_refresh_token
+from app.models import RefreshToken, User
 
 EMAIL = "robert@test.dev"
 PASSWORD = "supersecret1"
@@ -21,6 +23,15 @@ async def all_tokens(db_session: AsyncSession) -> list[RefreshToken]:
     db_session.expire_all()
     result = await db_session.execute(select(RefreshToken))
     return list(result.scalars().all())
+
+
+def presenting(raw: str) -> dict[str, str]:
+    """Re-present a chosen token: an explicit Cookie header overrides the client's jar."""
+    return {"cookie": f"refresh_token={raw}"}
+
+
+def in_the_past() -> datetime:
+    return datetime.now(UTC) - timedelta(days=1)
 
 
 async def test_login_persists_exactly_one_token(
@@ -103,3 +114,94 @@ async def test_the_child_token_can_itself_be_refreshed(client: httpx.AsyncClient
 
     assert (await client.post("/auth/refresh")).status_code == 200
     assert (await client.post("/auth/refresh")).status_code == 200
+
+
+async def test_a_replayed_token_kills_the_whole_family(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    await register(client)
+    old_raw = (await login(client)).cookies["refresh_token"]
+    child_raw = (await client.post("/auth/refresh")).cookies["refresh_token"]
+
+    replay = await client.post("/auth/refresh", headers=presenting(old_raw))
+
+    assert replay.status_code == 401
+    tokens = await all_tokens(db_session)
+    assert len(tokens) == 2
+    assert all(t.revoked_at is not None for t in tokens)
+
+    reused_child = await client.post("/auth/refresh", headers=presenting(child_raw))
+    assert reused_child.status_code == 401
+
+
+async def test_an_expired_token_leaves_the_family_intact(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    await register(client)
+    await login(client)
+    token = (await all_tokens(db_session))[0]
+    token.expires_at = in_the_past()
+    await db_session.flush()
+
+    response = await client.post("/auth/refresh")
+
+    assert response.status_code == 401
+    assert all(t.revoked_at is None for t in await all_tokens(db_session))
+
+
+async def test_an_unknown_token_revokes_nothing(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    await register(client)
+    await login(client)
+
+    response = await client.post("/auth/refresh", headers=presenting("not-a-real-token"))
+
+    assert response.status_code == 401
+    assert all(t.revoked_at is None for t in await all_tokens(db_session))
+
+
+async def test_a_deleted_user_cannot_refresh(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """CASCADE removes the token rows, so this lands on the no-row branch, not "user gone"."""
+    await register(client)
+    await login(client)
+    await db_session.execute(delete(User))
+    await db_session.flush()
+
+    response = await client.post("/auth/refresh")
+
+    assert response.status_code == 401
+    assert await all_tokens(db_session) == []
+
+
+async def test_refresh_without_a_cookie_is_401(client: httpx.AsyncClient) -> None:
+    response = await client.post("/auth/refresh")
+
+    assert response.status_code == 401
+
+
+async def test_an_access_token_in_the_cookie_is_401(client: httpx.AsyncClient) -> None:
+    user_id = (await register(client)).json()["id"]
+
+    response = await client.post("/auth/refresh", headers=presenting(create_access_token(user_id)))
+
+    assert response.status_code == 401
+
+
+async def test_every_rejection_looks_identical(client: httpx.AsyncClient) -> None:
+    await register(client)
+    no_cookie = await client.post("/auth/refresh")
+    unknown = await client.post("/auth/refresh", headers=presenting("not-a-real-token"))
+
+    assert no_cookie.status_code == unknown.status_code == 401
+    assert no_cookie.json() == unknown.json()
+
+
+async def test_a_rejected_refresh_clears_the_cookie(client: httpx.AsyncClient) -> None:
+    response = await client.post("/auth/refresh", headers=presenting("not-a-real-token"))
+
+    assert response.status_code == 401
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert "Path=/auth" in response.headers["set-cookie"]
