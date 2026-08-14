@@ -1,17 +1,22 @@
 import asyncio
 import secrets
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
+from typing import NoReturn
+from uuid import UUID, uuid4
 
 import jwt
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
-    create_refresh_token,
     decode_token,
+    generate_refresh_token,
     hash_password,
+    hash_refresh_token,
     verify_password,
 )
 from app.models import User
+from app.repositories.refresh_token_repo import RefreshTokenRepository
 from app.repositories.user_repo import EmailAlreadyExistsError, UserRepository
 from app.schemas import UserCreate
 
@@ -30,9 +35,24 @@ class InvalidAccessTokenError(Exception):
     """Token verified but does not identify a usable account."""
 
 
+class InvalidRefreshTokenError(Exception):
+    """Refresh token missing, unknown, expired, revoked, or already spent."""
+
+
 class AuthService:
-    def __init__(self, repo: UserRepository) -> None:
+    def __init__(self, repo: UserRepository, refresh_repo: RefreshTokenRepository) -> None:
         self._repo = repo
+        self._refresh_repo = refresh_repo
+
+    async def _issue_refresh_token(self, user_id: UUID, family_id: UUID) -> str:
+        raw_token = generate_refresh_token()
+        await self._refresh_repo.create(
+            user_id=user_id,
+            family_id=family_id,
+            token_hash=hash_refresh_token(raw_token),
+            expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days),
+        )
+        return raw_token
 
     async def register(self, data: UserCreate) -> User:
         if await self._repo.get_user_by_email(data.email) is not None:
@@ -66,8 +86,37 @@ class AuthService:
 
         return (
             create_access_token(str(user.id)),
-            create_refresh_token(str(user.id)),
+            await self._issue_refresh_token(user.id, family_id=uuid4()),
         )
+
+    async def _reject_unusable_token(self, token_hash: str) -> NoReturn:
+        token = await self._refresh_repo.get_by_hash(token_hash)
+        if token is not None and token.revoked_at is None and token.used_at is not None:
+            await self._refresh_repo.revoke_family(token.family_id)
+        raise InvalidRefreshTokenError
+
+    async def refresh(self, raw_token: str) -> tuple[str, str]:
+        token_hash = hash_refresh_token(raw_token)
+        spent = await self._refresh_repo.consume(token_hash)
+        if spent is None:
+            await self._reject_unusable_token(token_hash)
+
+        user = await self._repo.get_user_by_id(spent.user_id)
+        if user is None:
+            raise InvalidRefreshTokenError
+
+        return (
+            create_access_token(str(user.id)),
+            await self._issue_refresh_token(user.id, family_id=spent.family_id),
+        )
+
+    async def logout(self, raw_token: str | None) -> None:
+        if raw_token is None:
+            return
+
+        token = await self._refresh_repo.get_by_hash(hash_refresh_token(raw_token))
+        if token is not None:
+            await self._refresh_repo.revoke_family(token.family_id)
 
     async def authenticate(self, token: str) -> User:
         try:

@@ -126,7 +126,7 @@ async def test_me_with_a_garbage_token_is_401(client: httpx.AsyncClient) -> None
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-async def test_me_rejects_a_refresh_token(client: httpx.AsyncClient) -> None:
+async def test_me_rejects_an_opaque_refresh_token(client: httpx.AsyncClient) -> None:
     await register(client)
     refresh_token = (await login(client)).cookies["refresh_token"]
 
@@ -227,3 +227,13 @@ async def test_validation_error_still_explains_the_problem(client: httpx.AsyncCl
     error = response.json()["detail"][0]
     assert error["loc"] == ["body", "password"]
     assert error["msg"]
+
+
+async def test_refresh_cookie_is_replayed_to_the_server(client: httpx.AsyncClient) -> None:
+    await register(client)
+    await login(client)
+
+    request = client.build_request("POST", "/auth/refresh")
+    client.cookies.set_cookie_header(request)
+
+    assert "refresh_token" in request.headers.get("cookie", "")
