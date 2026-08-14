@@ -26,7 +26,6 @@ async def all_tokens(db_session: AsyncSession) -> list[RefreshToken]:
 
 
 def presenting(raw: str) -> dict[str, str]:
-    """Re-present a chosen token: an explicit Cookie header overrides the client's jar."""
     return {"cookie": f"refresh_token={raw}"}
 
 
@@ -164,7 +163,6 @@ async def test_an_unknown_token_revokes_nothing(
 async def test_a_deleted_user_cannot_refresh(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """CASCADE removes the token rows, so this lands on the no-row branch, not "user gone"."""
     await register(client)
     await login(client)
     await db_session.execute(delete(User))

@@ -230,7 +230,6 @@ async def test_validation_error_still_explains_the_problem(client: httpx.AsyncCl
 
 
 async def test_refresh_cookie_is_replayed_to_the_server(client: httpx.AsyncClient) -> None:
-    """A Secure cookie is only sent over https, so the fixture's scheme is load-bearing."""
     await register(client)
     await login(client)
 

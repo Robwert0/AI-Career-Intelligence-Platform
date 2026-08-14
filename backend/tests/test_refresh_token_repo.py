@@ -145,8 +145,6 @@ async def test_revoke_family_hits_every_row_in_that_family_only(
 
     await repo.revoke_family(doomed)
 
-    # refresh, not expire_all: a bare read of an expired attribute does lazy IO,
-    # which an async session cannot do outside an await.
     for token in (parent, child, bystander):
         await db_session.refresh(token)
 

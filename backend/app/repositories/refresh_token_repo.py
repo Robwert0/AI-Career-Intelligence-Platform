@@ -56,6 +56,4 @@ class RefreshTokenRepository:
             .where(RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None))
             .values(revoked_at=func.now())
         )
-        # Commits here because the caller raises 401 next, and get_db skips its commit
-        # when a route raises — the revocation must outlive the error response.
         await self._session.commit()

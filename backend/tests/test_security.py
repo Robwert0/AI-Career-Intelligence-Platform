@@ -16,7 +16,6 @@ from app.core.security import (
 
 
 def mint_refresh_jwt() -> str:
-    """Hand-minted: nothing in production issues a refresh JWT any more."""
     now = datetime.now(UTC)
     return jwt.encode(
         {"sub": "user-123", "type": "refresh", "iat": now, "exp": now + timedelta(days=1)},

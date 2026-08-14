@@ -37,8 +37,6 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 
 def _cleared_cookie_header() -> str:
-    # A raised HTTPException discards mutations to the injected Response, so the
-    # clear has to travel as a header on the exception itself.
     response = Response()
     _clear_refresh_cookie(response)
     return response.headers["set-cookie"]
@@ -125,6 +123,5 @@ async def logout(
     response: Response,
     refresh_token: Annotated[str | None, Cookie()] = None,
 ) -> None:
-    # 204 regardless: a status that varied would confirm which tokens exist.
     await auth_service.logout(refresh_token)
     _clear_refresh_cookie(response)

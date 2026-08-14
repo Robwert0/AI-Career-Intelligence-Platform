@@ -91,8 +91,6 @@ class AuthService:
 
     async def _reject_unusable_token(self, token_hash: str) -> NoReturn:
         token = await self._refresh_repo.get_by_hash(token_hash)
-        # Spent but not revoked is a replay: whoever holds this is not who rotated it.
-        # Checked before expiry, so a token that is both spent and expired is still theft.
         if token is not None and token.revoked_at is None and token.used_at is not None:
             await self._refresh_repo.revoke_family(token.family_id)
         raise InvalidRefreshTokenError

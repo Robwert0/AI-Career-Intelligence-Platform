@@ -35,8 +35,6 @@ def generate_refresh_token() -> str:
 
 
 def hash_refresh_token(token: str) -> str:
-    # sha256, not bcrypt: the input is already 256 bits of entropy, and a salted
-    # hash could not be indexed for the single-probe lookup /auth/refresh needs.
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
