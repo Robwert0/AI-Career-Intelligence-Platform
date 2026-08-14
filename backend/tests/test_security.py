@@ -1,5 +1,5 @@
 import string
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
@@ -7,13 +7,22 @@ import pytest
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
-    create_refresh_token,
     decode_token,
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
     verify_password,
 )
+
+
+def mint_refresh_jwt() -> str:
+    """Hand-minted: nothing in production issues a refresh JWT any more."""
+    now = datetime.now(UTC)
+    return jwt.encode(
+        {"sub": "user-123", "type": "refresh", "iat": now, "exp": now + timedelta(days=1)},
+        settings.secret_key,
+        algorithm="HS256",
+    )
 
 
 def test_long_password_raise() -> None:
@@ -52,13 +61,6 @@ def test_verify_token() -> None:
     assert payload["type"] == "access"
 
 
-def test_refresh_token_type() -> None:
-    token = create_refresh_token("user-123")
-    payload = decode_token(token, expected_type="refresh")
-    assert payload["sub"] == "user-123"
-    assert payload["type"] == "refresh"
-
-
 def test_expired_token_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "access_token_expire_minutes", -1)
     token = create_access_token("user-123")
@@ -73,9 +75,8 @@ def test_tampered_token_raise() -> None:
 
 
 def test_refresh_token_rejected_as_access() -> None:
-    token = create_refresh_token("user-123")
     with pytest.raises(jwt.InvalidTokenError):
-        decode_token(token, expected_type="access")
+        decode_token(mint_refresh_jwt(), expected_type="access")
 
 
 def test_access_token_rejected_as_refresh() -> None:

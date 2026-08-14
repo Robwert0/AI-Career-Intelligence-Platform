@@ -30,17 +30,6 @@ def create_access_token(subject: str) -> str:
     return jwt.encode(claims, settings.secret_key, algorithm="HS256")
 
 
-def create_refresh_token(subject: str) -> str:
-    now = datetime.now(UTC)
-    claims = {
-        "sub": subject,
-        "type": "refresh",
-        "iat": now,
-        "exp": now + timedelta(days=settings.refresh_token_expire_days),
-    }
-    return jwt.encode(claims, settings.secret_key, algorithm="HS256")
-
-
 def generate_refresh_token() -> str:
     return secrets.token_urlsafe(32)
 

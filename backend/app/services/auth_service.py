@@ -1,17 +1,21 @@
 import asyncio
 import secrets
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import jwt
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
-    create_refresh_token,
     decode_token,
+    generate_refresh_token,
     hash_password,
+    hash_refresh_token,
     verify_password,
 )
 from app.models import User
+from app.repositories.refresh_token_repo import RefreshTokenRepository
 from app.repositories.user_repo import EmailAlreadyExistsError, UserRepository
 from app.schemas import UserCreate
 
@@ -31,8 +35,19 @@ class InvalidAccessTokenError(Exception):
 
 
 class AuthService:
-    def __init__(self, repo: UserRepository) -> None:
+    def __init__(self, repo: UserRepository, refresh_repo: RefreshTokenRepository) -> None:
         self._repo = repo
+        self._refresh_repo = refresh_repo
+
+    async def _issue_refresh_token(self, user_id: UUID, family_id: UUID) -> str:
+        raw_token = generate_refresh_token()
+        await self._refresh_repo.create(
+            user_id=user_id,
+            family_id=family_id,
+            token_hash=hash_refresh_token(raw_token),
+            expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days),
+        )
+        return raw_token
 
     async def register(self, data: UserCreate) -> User:
         if await self._repo.get_user_by_email(data.email) is not None:
@@ -66,7 +81,7 @@ class AuthService:
 
         return (
             create_access_token(str(user.id)),
-            create_refresh_token(str(user.id)),
+            await self._issue_refresh_token(user.id, family_id=uuid4()),
         )
 
     async def authenticate(self, token: str) -> User:

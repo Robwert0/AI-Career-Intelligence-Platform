@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.models import User
-from app.repositories import UserRepository
+from app.repositories import RefreshTokenRepository, UserRepository
 from app.services import AuthService
 from app.services.auth_service import InvalidAccessTokenError
 
@@ -17,8 +17,17 @@ def get_user_repo(session: Annotated[AsyncSession, Depends(get_db)]) -> UserRepo
     return UserRepository(session)
 
 
-def get_auth_service(repo: Annotated[UserRepository, Depends(get_user_repo)]) -> AuthService:
-    return AuthService(repo)
+def get_refresh_token_repo(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> RefreshTokenRepository:
+    return RefreshTokenRepository(session)
+
+
+def get_auth_service(
+    repo: Annotated[UserRepository, Depends(get_user_repo)],
+    refresh_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repo)],
+) -> AuthService:
+    return AuthService(repo, refresh_repo)
 
 
 async def get_current_user(

@@ -126,7 +126,7 @@ async def test_me_with_a_garbage_token_is_401(client: httpx.AsyncClient) -> None
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-async def test_me_rejects_a_refresh_token(client: httpx.AsyncClient) -> None:
+async def test_me_rejects_an_opaque_refresh_token(client: httpx.AsyncClient) -> None:
     await register(client)
     refresh_token = (await login(client)).cookies["refresh_token"]
 
