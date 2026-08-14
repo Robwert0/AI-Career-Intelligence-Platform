@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
 from app.core.config import settings
-from app.deps import get_auth_service
+from app.deps import get_auth_service, verify_trusted_origin
 from app.schemas import LoginRequest, TokenResponse, UserCreate, UserRead
 from app.services import AuthService
 from app.services.auth_service import (
@@ -97,6 +97,7 @@ async def login(
 @router.post(
     "/refresh",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def refresh(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
@@ -119,6 +120,7 @@ async def refresh(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def logout(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],

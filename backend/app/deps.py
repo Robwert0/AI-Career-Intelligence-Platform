@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.db import get_db
 from app.models import User
 from app.repositories import RefreshTokenRepository, UserRepository
@@ -11,6 +12,13 @@ from app.services import AuthService
 from app.services.auth_service import InvalidAccessTokenError
 
 bearer_scheme = HTTPBearer()
+
+
+def verify_trusted_origin(origin: Annotated[str | None, Header()] = None) -> None:
+    # An absent Origin passes: browsers always send it on cross-origin POSTs, so its absence
+    # cannot be forged from one, and rejecting it would break every non-browser client.
+    if origin is not None and origin not in settings.cors_allowed_origins:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def get_user_repo(session: Annotated[AsyncSession, Depends(get_db)]) -> UserRepository:
