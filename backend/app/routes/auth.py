@@ -99,7 +99,7 @@ async def login(
 async def refresh(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     response: Response,
-    refresh_token: Annotated[str | None, Cookie()] = None,
+    refresh_token: Annotated[str | None, Cookie(alias=_REFRESH_COOKIE)] = None,
 ) -> TokenResponse:
     if refresh_token is None:
         raise _unauthenticated()
@@ -121,7 +121,7 @@ async def refresh(
 async def logout(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     response: Response,
-    refresh_token: Annotated[str | None, Cookie()] = None,
+    refresh_token: Annotated[str | None, Cookie(alias=_REFRESH_COOKIE)] = None,
 ) -> None:
     await auth_service.logout(refresh_token)
     _clear_refresh_cookie(response)

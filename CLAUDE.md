@@ -220,7 +220,7 @@ explainable. The full system DoD: deployed app · secure auth · RAG chat · CV 
 12. **Deployment** — backend (Railway/Fly.io), frontend (Vercel), hosted DB + Redis
 
 **Local dev strategy:** Phases 1–5 run Postgres + Redis in Docker; FastAPI + Next.js run
-locally for fast iteration. Phase 6+ moves toward the fully containerized `docker-compose up --build`.
+locally for fast iteration. Phase 6+ moves toward the fully containerized `docker compose up --build`.
 
 ### Stretch goals
 Streaming responses (SSE/WebSockets) · AI mock interviews · CV version history · paid tiers.
@@ -234,7 +234,7 @@ Streaming responses (SSE/WebSockets) · AI mock interviews · CV version history
 ```bash
 # Infra (Docker)
 docker compose up -d database redis  # phases 1–5: just data services
-docker-compose up --build            # full stack (phase 6+)
+docker compose up --build            # full stack (phase 6+)
 
 # Backend
 cd backend && uvicorn app.main:app --reload

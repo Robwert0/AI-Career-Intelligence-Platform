@@ -35,7 +35,21 @@ class RefreshTokenRepository:
         )
         return result.scalar_one_or_none()
 
+    async def _lock_family(self, family_id: uuid.UUID) -> None:
+        # Held to end of transaction. Rotation and revocation must serialise per family:
+        # a child INSERTed by an uncommitted rotation is invisible to revoke_family's
+        # snapshot and takes no lock, so without this it survives its family's revocation.
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(str(family_id), 0)))
+        )
+
     async def consume(self, token_hash: str) -> RefreshToken | None:
+        known = await self.get_by_hash(token_hash)
+        if known is None:
+            return None
+
+        await self._lock_family(known.family_id)
+
         stmt = (
             update(RefreshToken)
             .where(
@@ -51,9 +65,12 @@ class RefreshTokenRepository:
         return result.scalar_one_or_none()
 
     async def revoke_family(self, family_id: uuid.UUID) -> None:
+        await self._lock_family(family_id)
         await self._session.execute(
             update(RefreshToken)
             .where(RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None))
             .values(revoked_at=func.now())
         )
+        # Commits here because the caller raises 401 next, and get_db skips its commit
+        # when a route raises — the revocation must outlive the error response.
         await self._session.commit()
