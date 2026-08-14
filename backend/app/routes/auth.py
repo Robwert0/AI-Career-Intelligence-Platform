@@ -56,6 +56,7 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def register(
     data: UserCreate,
@@ -74,6 +75,7 @@ async def register(
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def login(
     data: LoginRequest,

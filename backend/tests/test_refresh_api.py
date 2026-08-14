@@ -201,9 +201,14 @@ async def test_a_rejected_refresh_clears_the_cookie(client: httpx.AsyncClient) -
     response = await client.post("/auth/refresh", headers=presenting("not-a-real-token"))
 
     assert response.status_code == 401
-    assert "Max-Age=0" in response.headers["set-cookie"]
-    assert "Path=/" in response.headers["set-cookie"]
-    assert "Path=/auth" not in response.headers["set-cookie"]
+    cookie_header = response.headers["set-cookie"]
+    assert "Max-Age=0" in cookie_header
+    assert "Path=/" in cookie_header
+    assert "Path=/auth" not in cookie_header
+    # A __Host- violation here would make the cookie un-clearable, and the test client
+    # does not enforce prefixes, so the shape has to be asserted directly.
+    assert "Secure" in cookie_header
+    assert "Domain=" not in cookie_header
 
 
 async def test_logout_kills_the_session(client: httpx.AsyncClient) -> None:

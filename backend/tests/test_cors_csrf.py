@@ -118,3 +118,47 @@ async def test_logout_from_a_disallowed_origin_does_not_revoke(
 
     assert response.status_code == 403
     assert all(token.revoked_at is None for token in await all_tokens(db_session))
+
+
+async def test_login_from_a_disallowed_origin_issues_no_cookie(
+    client: httpx.AsyncClient,
+) -> None:
+    """Login-CSRF: __Host- does not stop the API itself minting a session for an attacker."""
+    await register(client)
+
+    response = await client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": PASSWORD},
+        headers={"Origin": DISALLOWED},
+    )
+
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+
+
+async def test_register_from_a_disallowed_origin_is_403(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    response = await client.post(
+        "/auth/register",
+        json={"email": EMAIL, "password": PASSWORD},
+        headers={"Origin": DISALLOWED},
+    )
+
+    assert response.status_code == 403
+    assert await all_tokens(db_session) == []
+
+
+async def test_login_from_an_allowlisted_origin_still_issues_a_cookie(
+    client: httpx.AsyncClient,
+) -> None:
+    await register(client)
+
+    response = await client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": PASSWORD},
+        headers={"Origin": ALLOWED},
+    )
+
+    assert response.status_code == 200
+    assert response.cookies.get("__Host-refresh_token")

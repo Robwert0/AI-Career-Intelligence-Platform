@@ -72,6 +72,7 @@ async def test_login_sets_refresh_cookie(client: httpx.AsyncClient) -> None:
     assert "Path=/" in cookie_header
     assert "Path=/auth" not in cookie_header
     assert "Secure" in cookie_header
+    assert "Domain=" not in cookie_header
 
 
 async def test_login_failures_are_indistinguishable(client: httpx.AsyncClient) -> None:

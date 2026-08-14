@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -25,6 +26,29 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("cors_allowed_origins", mode="after")
+    @classmethod
+    def _reject_unusable_origins(cls, origins: list[str]) -> list[str]:
+        for origin in origins:
+            # "*" is not merely illegal with credentials: Starlette reflects the requesting
+            # origin instead of refusing, so one stray "*" admits everyone with credentials.
+            if origin == "*":
+                raise ValueError("wildcard origin admits every site with credentials")
+            parsed = urlsplit(origin)
+            if (
+                origin != origin.lower()
+                or parsed.scheme not in ("http", "https")
+                or not parsed.netloc
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    f"{origin!r} must be a bare lowercase scheme://host[:port] "
+                    "with no trailing slash — a browser Origin never matches otherwise"
+                )
+        return origins
 
 
 settings = Settings()
