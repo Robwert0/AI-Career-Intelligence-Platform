@@ -1,9 +1,9 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
 from app.core.config import settings
-from app.deps import get_auth_service
+from app.deps import get_auth_service, verify_trusted_origin
 from app.schemas import LoginRequest, TokenResponse, UserCreate, UserRead
 from app.services import AuthService
 from app.services.auth_service import (
@@ -14,8 +14,17 @@ from app.services.auth_service import (
 
 router = APIRouter()
 
-_REFRESH_COOKIE = "refresh_token"
-_COOKIE_PATH = "/auth"
+# __Host- makes the browser refuse this name with a Domain attribute or a non-root Path,
+# which is what stops a sibling subdomain planting a duplicate. The prefix requires Path=/.
+_REFRESH_COOKIE = "__Host-refresh_token"
+_COOKIE_PATH = "/"
+
+
+# Strict, not Lax or None: the browser only ever talks to the frontend origin, which proxies
+# /api/* to this API, so every request carrying this cookie is same-site. Lax would buy nothing
+# (it relaxes only cross-site top-level GETs, never a fetch POST) and None would make the cookie
+# third-party, which Safari's ITP blocks outright.
+_SAMESITE: Literal["strict"] = "strict"
 
 
 def _set_refresh_cookie(response: Response, raw_token: str) -> None:
@@ -24,7 +33,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
         raw_token,
         httponly=True,
         secure=True,
-        samesite="strict",
+        samesite=_SAMESITE,
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
         path=_COOKIE_PATH,
     )
@@ -32,7 +41,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
 
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
-        _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite="strict"
+        _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite=_SAMESITE
     )
 
 
@@ -54,6 +63,7 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def register(
     data: UserCreate,
@@ -72,6 +82,7 @@ async def register(
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def login(
     data: LoginRequest,
@@ -95,6 +106,7 @@ async def login(
 @router.post(
     "/refresh",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def refresh(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
@@ -117,6 +129,7 @@ async def refresh(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_trusted_origin)],
 )
 async def logout(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],

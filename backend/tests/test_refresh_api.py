@@ -26,7 +26,7 @@ async def all_tokens(db_session: AsyncSession) -> list[RefreshToken]:
 
 
 def presenting(raw: str) -> dict[str, str]:
-    return {"cookie": f"refresh_token={raw}"}
+    return {"cookie": f"__Host-refresh_token={raw}"}
 
 
 def in_the_past() -> datetime:
@@ -44,7 +44,7 @@ async def test_login_persists_exactly_one_token(
 
 async def test_login_cookie_is_opaque_not_a_jwt(client: httpx.AsyncClient) -> None:
     await register(client)
-    raw = (await login(client)).cookies["refresh_token"]
+    raw = (await login(client)).cookies["__Host-refresh_token"]
 
     assert "." not in raw
     assert len(raw) >= 43
@@ -54,7 +54,7 @@ async def test_only_the_hash_of_the_token_is_stored(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     await register(client)
-    raw = (await login(client)).cookies["refresh_token"]
+    raw = (await login(client)).cookies["__Host-refresh_token"]
 
     token = (await all_tokens(db_session))[0]
     assert token.token_hash == hash_refresh_token(raw)
@@ -76,12 +76,12 @@ async def test_refresh_rotates_the_token(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     await register(client)
-    old_raw = (await login(client)).cookies["refresh_token"]
+    old_raw = (await login(client)).cookies["__Host-refresh_token"]
 
     response = await client.post("/auth/refresh")
 
     assert response.status_code == 200
-    new_raw = response.cookies["refresh_token"]
+    new_raw = response.cookies["__Host-refresh_token"]
     assert new_raw != old_raw
     assert response.json()["access_token"]
     assert response.json()["token_type"] == "bearer"
@@ -119,8 +119,8 @@ async def test_a_replayed_token_kills_the_whole_family(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     await register(client)
-    old_raw = (await login(client)).cookies["refresh_token"]
-    child_raw = (await client.post("/auth/refresh")).cookies["refresh_token"]
+    old_raw = (await login(client)).cookies["__Host-refresh_token"]
+    child_raw = (await client.post("/auth/refresh")).cookies["__Host-refresh_token"]
 
     replay = await client.post("/auth/refresh", headers=presenting(old_raw))
 
@@ -201,8 +201,14 @@ async def test_a_rejected_refresh_clears_the_cookie(client: httpx.AsyncClient) -
     response = await client.post("/auth/refresh", headers=presenting("not-a-real-token"))
 
     assert response.status_code == 401
-    assert "Max-Age=0" in response.headers["set-cookie"]
-    assert "Path=/auth" in response.headers["set-cookie"]
+    cookie_header = response.headers["set-cookie"]
+    assert "Max-Age=0" in cookie_header
+    assert "Path=/" in cookie_header
+    assert "Path=/auth" not in cookie_header
+    # A __Host- violation here would make the cookie un-clearable, and the test client
+    # does not enforce prefixes, so the shape has to be asserted directly.
+    assert "Secure" in cookie_header
+    assert "Domain=" not in cookie_header
 
 
 async def test_logout_kills_the_session(client: httpx.AsyncClient) -> None:
@@ -217,7 +223,7 @@ async def test_logout_kills_the_session(client: httpx.AsyncClient) -> None:
 
 async def test_refresh_after_logout_is_401(client: httpx.AsyncClient) -> None:
     await register(client)
-    raw = (await login(client)).cookies["refresh_token"]
+    raw = (await login(client)).cookies["__Host-refresh_token"]
     await client.post("/auth/logout")
 
     response = await client.post("/auth/refresh", headers=presenting(raw))
@@ -227,7 +233,7 @@ async def test_refresh_after_logout_is_401(client: httpx.AsyncClient) -> None:
 
 async def test_logout_is_idempotent(client: httpx.AsyncClient) -> None:
     await register(client)
-    raw = (await login(client)).cookies["refresh_token"]
+    raw = (await login(client)).cookies["__Host-refresh_token"]
 
     assert (await client.post("/auth/logout", headers=presenting(raw))).status_code == 204
     assert (await client.post("/auth/logout", headers=presenting(raw))).status_code == 204
@@ -245,8 +251,8 @@ async def test_logout_with_an_unknown_token_is_still_204(client: httpx.AsyncClie
 
 async def test_logout_of_one_device_leaves_the_other_alive(client: httpx.AsyncClient) -> None:
     await register(client)
-    phone_raw = (await login(client)).cookies["refresh_token"]
-    laptop_raw = (await login(client)).cookies["refresh_token"]
+    phone_raw = (await login(client)).cookies["__Host-refresh_token"]
+    laptop_raw = (await login(client)).cookies["__Host-refresh_token"]
 
     await client.post("/auth/logout", headers=presenting(phone_raw))
 

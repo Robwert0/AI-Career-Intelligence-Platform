@@ -1,12 +1,21 @@
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
 from app.routes.users import router as users_router
 
 app = FastAPI(title="AI Career Intelligence Platform")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 app.include_router(health_router, prefix="/health")
 app.include_router(auth_router, prefix="/auth")
 app.include_router(users_router, prefix="/users")
