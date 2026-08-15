@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     @field_validator("cors_allowed_origins", mode="after")
     @classmethod
     def _reject_unusable_origins(cls, origins: list[str]) -> list[str]:
+        if not origins:
+            raise ValueError("at least one origin is required; no browser could reach the API")
         for origin in origins:
             # "*" is not merely illegal with credentials: Starlette reflects the requesting
             # origin instead of refusing, so one stray "*" admits everyone with credentials.

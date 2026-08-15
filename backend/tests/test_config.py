@@ -53,6 +53,20 @@ def test_cors_origins_tolerates_a_trailing_comma(monkeypatch: pytest.MonkeyPatch
     assert Settings().cors_allowed_origins == ["https://a.example.com"]
 
 
+def test_cors_origins_reject_an_empty_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "")
+
+    with pytest.raises(ValidationError, match="cors_allowed_origins"):
+        Settings()
+
+
+def test_cors_origins_reject_a_value_of_only_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", " , , ")
+
+    with pytest.raises(ValidationError, match="cors_allowed_origins"):
+        Settings()
+
+
 def test_cors_origins_reject_a_wildcard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "*")
 
