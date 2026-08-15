@@ -1,15 +1,23 @@
+import re
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_refresh_token
+from app.main import app
 from app.models import RefreshToken
 
 ALLOWED = settings.cors_allowed_origins[0]
 DISALLOWED = "https://blog.attacker.example"
 EMAIL = "csrf@test.dev"
 PASSWORD = "supersecret1"
+
+# Spelled out rather than imported from app.deps on purpose: this is the spec the guard must meet.
+# Importing the real set would make the sweep below shrink in lockstep with a mistaken widening of
+# it — adding "POST" to the app's exemptions would silently stop testing every POST route.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 async def register(client: httpx.AsyncClient) -> httpx.Response:
@@ -188,3 +196,41 @@ async def test_login_from_an_allowlisted_origin_still_issues_a_cookie(
 
     assert response.status_code == 200
     assert response.cookies.get("__Host-refresh_token")
+
+
+_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE", "TRACE"})
+
+
+def _state_changing_routes() -> list[tuple[str, str]]:
+    # app.routes is not a flat list of endpoints — FastAPI nests each included router behind a
+    # private wrapper — so the OpenAPI schema is the stable public way to enumerate every path.
+    # A route registered with include_in_schema=False would not appear here.
+    targets: list[tuple[str, str]] = []
+    for path, operations in app.openapi()["paths"].items():
+        url = re.sub(r"\{[^}]+\}", "1", path)
+        targets.extend(
+            (verb, url)
+            for verb in (method.upper() for method in operations)
+            if verb in _HTTP_METHODS and verb not in SAFE_METHODS
+        )
+    return targets
+
+
+async def test_every_state_changing_route_rejects_a_hostile_origin(
+    client: httpx.AsyncClient,
+) -> None:
+    targets = _state_changing_routes()
+
+    # Without this the loop passes vacuously if the filter ever stops matching anything.
+    assert targets
+
+    for method, path in targets:
+        response = await client.request(method, path, headers={"Origin": DISALLOWED})
+
+        assert response.status_code == 403, f"{method} {path} is not origin-guarded"
+
+
+async def test_a_safe_method_is_exempt_from_the_origin_guard(client: httpx.AsyncClient) -> None:
+    response = await client.get("/health", headers={"Origin": DISALLOWED})
+
+    assert response.status_code == 200

@@ -14,7 +14,14 @@ from app.services.auth_service import InvalidAccessTokenError
 bearer_scheme = HTTPBearer()
 
 
+# CSRF is a property of state change, so safe methods are exempt. OPTIONS especially: it is the
+# preflight, and CORSMiddleware answers it before routing, so a 403 here would break every browser.
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
 def verify_trusted_origin(request: Request, origin: Annotated[str | None, Header()] = None) -> None:
+    if request.method in _SAFE_METHODS:
+        return
     # An absent Origin passes: modern browsers send it on every cross-site POST, so its absence
     # cannot be forged from one, and rejecting it would break every non-browser client.
     if origin is None:
