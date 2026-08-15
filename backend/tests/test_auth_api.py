@@ -68,7 +68,7 @@ async def test_login_sets_refresh_cookie(client: httpx.AsyncClient) -> None:
     assert response.cookies.get("__Host-refresh_token")
     cookie_header = response.headers["set-cookie"]
     assert "HttpOnly" in cookie_header
-    assert "SameSite=lax" in cookie_header
+    assert "SameSite=strict" in cookie_header
     assert "Path=/" in cookie_header
     assert "Path=/auth" not in cookie_header
     assert "Secure" in cookie_header

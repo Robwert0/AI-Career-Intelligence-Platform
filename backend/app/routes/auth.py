@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
@@ -20,13 +20,20 @@ _REFRESH_COOKIE = "__Host-refresh_token"
 _COOKIE_PATH = "/"
 
 
+# Strict, not Lax or None: the browser only ever talks to the frontend origin, which proxies
+# /api/* to this API, so every request carrying this cookie is same-site. Lax would buy nothing
+# (it relaxes only cross-site top-level GETs, never a fetch POST) and None would make the cookie
+# third-party, which Safari's ITP blocks outright.
+_SAMESITE: Literal["strict"] = "strict"
+
+
 def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     response.set_cookie(
         _REFRESH_COOKIE,
         raw_token,
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite=_SAMESITE,
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
         path=_COOKIE_PATH,
     )
@@ -34,7 +41,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
 
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
-        _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite="lax"
+        _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite=_SAMESITE
     )
 
 
