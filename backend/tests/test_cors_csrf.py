@@ -136,6 +136,32 @@ async def test_login_from_a_disallowed_origin_issues_no_cookie(
     assert "set-cookie" not in response.headers
 
 
+async def test_login_from_the_apis_own_origin_is_allowed(client: httpx.AsyncClient) -> None:
+    """Swagger at /docs POSTs same-origin, and the CORS allowlist never contains our own origin."""
+    await register(client)
+    same_origin = str(client.base_url)
+
+    assert same_origin not in settings.cors_allowed_origins
+
+    response = await client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": PASSWORD},
+        headers={"Origin": same_origin},
+    )
+
+    assert response.status_code == 200
+    assert response.cookies.get("__Host-refresh_token")
+
+
+async def test_refresh_from_the_apis_own_origin_is_allowed(client: httpx.AsyncClient) -> None:
+    await register(client)
+    await login(client)
+
+    response = await client.post("/auth/refresh", headers={"Origin": str(client.base_url)})
+
+    assert response.status_code == 200
+
+
 async def test_register_from_a_disallowed_origin_is_403(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
