@@ -67,3 +67,15 @@ jobs:
 
       - name: Run test
         run: pytest -q
+
+      # Proves the ORM models and the migration chain have not silently diverged. pytest cannot
+      # catch this: conftest builds its database from migrations, so a model-only change is
+      # invisible until something queries the missing column at runtime.
+      - name: Check model/migration parity
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/postgres
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: ci-secret-not-real-000000000000000000
+        run: |
+          alembic upgrade head
+          alembic check

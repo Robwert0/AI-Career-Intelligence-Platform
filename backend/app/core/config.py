@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     secret_key: Annotated[str, Field(min_length=32)]
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    embedding_model: str = "bge-small-en-v1.5"
+    embedding_dim: int = 384
     # NoDecode: without it the env source JSON-decodes this and raises before the validator runs.
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
