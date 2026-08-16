@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
 from app.core.config import settings
-from app.deps import get_auth_service, verify_trusted_origin
+from app.deps import get_auth_service
 from app.schemas import LoginRequest, TokenResponse, UserCreate, UserRead
 from app.services import AuthService
 from app.services.auth_service import (
@@ -63,7 +63,6 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
-    dependencies=[Depends(verify_trusted_origin)],
 )
 async def register(
     data: UserCreate,
@@ -82,7 +81,6 @@ async def register(
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(verify_trusted_origin)],
 )
 async def login(
     data: LoginRequest,
@@ -106,7 +104,6 @@ async def login(
 @router.post(
     "/refresh",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(verify_trusted_origin)],
 )
 async def refresh(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
@@ -129,7 +126,6 @@ async def refresh(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(verify_trusted_origin)],
 )
 async def logout(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],

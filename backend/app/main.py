@@ -1,14 +1,17 @@
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.deps import verify_trusted_origin
 from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
 from app.routes.users import router as users_router
 
-app = FastAPI(title="AI Career Intelligence Platform")
+app = FastAPI(
+    title="AI Career Intelligence Platform", dependencies=[Depends(verify_trusted_origin)]
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
