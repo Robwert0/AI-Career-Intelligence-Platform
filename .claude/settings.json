@@ -38,6 +38,7 @@
       "Read(./**/.env)",
       "Read(./**/*.pem)",
       "Read(./**/secrets/**)",
+      "Bash(git push:*)",
       "Bash(rm -rf:*)"
     ]
   },
