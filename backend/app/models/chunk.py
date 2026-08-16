@@ -17,8 +17,7 @@ from sqlalchemy.orm import (
 )
 
 from app.core.db import Base
-
-SECTIONS = ("experience", "projects", "skills")
+from app.core.sections import SECTIONS
 
 
 class Chunk(Base):
@@ -29,10 +28,6 @@ class Chunk(Base):
             "section IN ({})".format(", ".join(f"'{section}'" for section in SECTIONS)),
             name="ck_chunks_section",
         ),
-        # A failed embedding call returns all zeros, which inserts cleanly and then makes every
-        # cosine distance NaN — Postgres sorts NaN last, so the chunk is silently unretrievable.
-        # vector_norm, not l2_norm: the latter is overloaded across vector/halfvec/sparsevec and
-        # Postgres cannot resolve it inside a CHECK.
         CheckConstraint("vector_norm(embedding) > 0", name="ck_chunks_embedding_nonzero"),
         Index(
             "ix_chunks_embedding_hnsw",

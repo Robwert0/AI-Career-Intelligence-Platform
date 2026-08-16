@@ -8,8 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.sections import SECTIONS
 from app.models import Chunk
-from app.models.chunk import SECTIONS
 
 MODEL = "bge-small-en-v1.5"
 
