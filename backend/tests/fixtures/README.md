@@ -11,6 +11,11 @@ against real output — they exist to fail, not to pass.
 | `c_twocolumn.pdf` | two-column layout | **fails**: grouping by vertical position merges columns, so `EXPERIENCE` + `SKILLS` become one line and body text interleaves |
 | `d_nobold.pdf` | ALL-CAPS headings that are larger but **not bold** | **fails**: finds zero headings, since bold is required |
 
+| `f_oversized.md` | the chunker's FIT step — no PDF involved | `experience` is 657 tokens over 14 paragraphs (none above 73), so greedy **paragraph packing** must split it. `projects` is 605 tokens in a **single 604-token paragraph**, so paragraph packing cannot help and the **sentence-level fallback** must run. The other four sections fit in one chunk each, which proves FIT fires only when needed. |
+
+Every other fixture has all sections under the 510-token budget, so without `f_oversized.md`
+the entire FIT step would be unreachable code that no test could distinguish from correct.
+
 `c_` and `d_` produce *no usable headings*. That is a legitimate outcome, not a bug to fix in the
 parser — it is why the chunker must fall back to splitting on token budget. A CV that parses into
 one heading-less blob still has to become usable chunks.
