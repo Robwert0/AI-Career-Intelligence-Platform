@@ -45,3 +45,6 @@ pgdata/
 # Synthetic fixtures live in backend/tests/fixtures/ instead.
 testdata/*
 !testdata/README.md
+
+# Local scratch scripts
+scratch_*.py
