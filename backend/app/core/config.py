@@ -17,9 +17,8 @@ class Settings(BaseSettings):
     secret_key: Annotated[str, Field(min_length=32)]
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
-    embedding_model: str = "bge-small-en-v1.5"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
-    # NoDecode: without it the env source JSON-decodes this and raises before the validator runs.
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     @field_validator("cors_allowed_origins", mode="before")
@@ -35,8 +34,6 @@ class Settings(BaseSettings):
         if not origins:
             raise ValueError("at least one origin is required; no browser could reach the API")
         for origin in origins:
-            # "*" is not merely illegal with credentials: Starlette reflects the requesting
-            # origin instead of refusing, so one stray "*" admits everyone with credentials.
             if origin == "*":
                 raise ValueError("wildcard origin admits every site with credentials")
             parsed = urlsplit(origin)
