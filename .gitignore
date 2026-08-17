@@ -40,3 +40,8 @@ docs/
 # Docker / data
 *.log
 pgdata/
+
+# Real CVs used for local parser validation — third-party personal data, never committed.
+# Synthetic fixtures live in backend/tests/fixtures/ instead.
+testdata/*
+!testdata/README.md
