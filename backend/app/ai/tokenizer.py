@@ -7,7 +7,9 @@ from app.core.config import settings
 
 @functools.lru_cache
 def get_tokenizer() -> PreTrainedTokenizerBase:
-    return AutoTokenizer.from_pretrained(settings.embedding_model)
+    return AutoTokenizer.from_pretrained(
+        settings.embedding_model, revision=settings.embedding_model_revision
+    )
 
 
 def count_tokens(text: str) -> int:

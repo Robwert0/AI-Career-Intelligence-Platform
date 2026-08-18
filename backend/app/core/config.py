@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_model_revision: str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
     embedding_dim: int = 384
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
