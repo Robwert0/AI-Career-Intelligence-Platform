@@ -41,7 +41,7 @@ class BgeEmbedder:
         return f"{settings.embedding_model}@{settings.embedding_model_revision}"
 
     @property
-    def dimensions(self) -> int | None:
+    def dimensions(self) -> int:
         return self._dimensions
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
