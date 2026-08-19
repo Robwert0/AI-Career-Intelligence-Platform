@@ -74,6 +74,8 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: hf-${{ hashFiles('backend/app/core/config.py') }}
+          restore-keys: |
+            hf-
 
       - name: Run test
         run: pytest -q

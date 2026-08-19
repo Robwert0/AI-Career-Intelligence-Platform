@@ -26,21 +26,30 @@ def get_model() -> SentenceTransformer:
 
 
 class BgeEmbedder:
-    def __init__(self, model: SentenceTransformer | None = None) -> None:
-        self.model = get_model() if model is None else model
+    def __init__(self) -> None:
+        self.model = get_model()
+        dimensions = self.model.get_embedding_dimension()
+        if dimensions is None or dimensions != settings.embedding_dim:
+            raise ValueError(
+                f"{self.model_name} reports {dimensions} dimensions, not the configured "
+                f"{settings.embedding_dim}; every insert into chunks.embedding would be rejected"
+            )
+        self._dimensions = dimensions
 
     @property
     def model_name(self) -> str:
-        return settings.embedding_model
+        return f"{settings.embedding_model}@{settings.embedding_model_revision}"
 
     @property
-    def dimensions(self) -> int:
-        return settings.embedding_dim
+    def dimensions(self) -> int | None:
+        return self._dimensions
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        vectors: list[list[float]] = self.model.encode(texts).tolist()
+        vectors: list[list[float]] = self.model.encode(texts, normalize_embeddings=True).tolist()
         return vectors
 
     def embed_query(self, text: str) -> list[float]:
-        vectors: list[float] = self.model.encode(inputs=text, prompt=BGE_QUERY_PREFIX).tolist()
-        return vectors
+        vector: list[float] = self.model.encode(
+            inputs=text, prompt=BGE_QUERY_PREFIX, normalize_embeddings=True
+        ).tolist()
+        return vector

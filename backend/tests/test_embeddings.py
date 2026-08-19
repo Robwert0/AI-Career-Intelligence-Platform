@@ -69,7 +69,9 @@ def test_embed_query_returns_a_flat_vector_not_a_batch(
     embedder_name: str, bge: BgeEmbedder
 ) -> None:
     embedder: Embedder = FakeEmbedder() if embedder_name == "fake" else bge
-    assert all(isinstance(value, float) for value in embedder.embed_query("alpha"))
+    vector = embedder.embed_query("alpha")
+    assert len(vector) == settings.embedding_dim
+    assert all(isinstance(value, float) for value in vector)
 
 
 def test_the_query_prefix_is_applied(bge: BgeEmbedder) -> None:
@@ -77,8 +79,14 @@ def test_the_query_prefix_is_applied(bge: BgeEmbedder) -> None:
     assert bge.embed_query(text) != bge.embed_documents([text])[0]
 
 
-def test_the_model_name_matches_the_column_the_ingestion_stamps(bge: BgeEmbedder) -> None:
-    assert bge.model_name == settings.embedding_model
+@pytest.mark.parametrize("embedder_name", ["fake", "bge"])
+def test_embedding_no_documents_returns_no_vectors(embedder_name: str, bge: BgeEmbedder) -> None:
+    embedder: Embedder = FakeEmbedder() if embedder_name == "fake" else bge
+    assert embedder.embed_documents([]) == []
+
+
+def test_the_model_name_records_the_pinned_revision(bge: BgeEmbedder) -> None:
+    assert bge.model_name == f"{settings.embedding_model}@{settings.embedding_model_revision}"
 
 
 def test_the_real_embedder_ranks_by_meaning_not_keywords(
