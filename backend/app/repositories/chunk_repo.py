@@ -11,8 +11,14 @@ TEXT_SEARCH_CONFIG = "english"
 
 
 def _any_word_tsquery(query: str) -> ColumnElement[Any]:
+    # Quote every lexeme: tsvector_to_array strips quoting, and url/host lexemes keep & : * ! ( )
+    # inside them, so a bare join turns user punctuation into tsquery operators or fails to parse.
     lexemes = func.tsvector_to_array(func.to_tsvector(TEXT_SEARCH_CONFIG, query))
-    return cast(func.array_to_string(lexemes, " | "), TSQUERY)
+    lexeme = func.unnest(lexemes).column_valued("lexeme")
+    ored = select(
+        func.array_to_string(func.array_agg(func.quote_literal(lexeme)), " | ")
+    ).scalar_subquery()
+    return cast(ored, TSQUERY)
 
 
 class ChunkRepository:

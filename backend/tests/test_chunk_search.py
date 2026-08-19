@@ -84,3 +84,26 @@ async def test_text_search_accepts_raw_punctuation_from_a_user(seeded: ChunkRepo
 
 async def test_text_search_can_narrow_to_one_section(seeded: ChunkRepository) -> None:
     assert await seeded.search_by_text("Kubernetes", limit=4, section="education") == []
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "our api runs at example.com:8080",
+        "see ftp://x.com:21/readme",
+        "ping x@y.com:99",
+        "db.internal:5432/app",
+        "docs at http://a.com/p!q",
+        "docs at http://a.com/p(q)",
+        "see http://a.com/p?x=1&y=2",
+        "http://x.com/a:*",
+    ],
+)
+async def test_punctuation_inside_a_url_lexeme_stays_literal(
+    seeded: ChunkRepository, query: str
+) -> None:
+    assert await seeded.search_by_text(query, limit=4) == []
+
+
+async def test_a_query_of_only_stopwords_is_not_an_error(seeded: ChunkRepository) -> None:
+    assert await seeded.search_by_text("the and or of", limit=4) == []
