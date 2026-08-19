@@ -2,18 +2,30 @@ import io
 from collections import Counter, defaultdict
 
 import pdfplumber
+from pdfplumber.utils.exceptions import PdfminerException
 
 from app.core.sections import HEADING_ALIASES
 
 
+class UnreadablePdfError(Exception):
+    """Bytes could not be opened as a PDF at all — corrupt, truncated, or not a PDF."""
+
+
 def pdf_to_markdown(pdf_bytes: bytes) -> str:
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+    try:
+        opened = pdfplumber.open(io.BytesIO(pdf_bytes))
+    except PdfminerException as exc:
+        raise UnreadablePdfError(str(exc)) from exc
+
+    with opened as pdf:
         pdf_chars = [
             c
             for page in pdf.pages
             for c in page.chars
             if "(cid:" not in c["text"] and c["fontname"] not in ("Symbol", "ZapfDingbats")
         ]
+        if not pdf_chars:
+            return ""
 
         lines = defaultdict(list)
         lines_out = []

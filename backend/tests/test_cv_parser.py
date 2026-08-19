@@ -27,6 +27,32 @@ def headings(markdown: str) -> list[str]:
     return [section.split("\n")[0] for section in markdown.split("\n## ")[1:]]
 
 
+def blank_pdf() -> bytes:
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref_at = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref_at,
+    )
+    return bytes(out)
+
+
+def test_a_pdf_with_no_extractable_text_yields_empty_markdown() -> None:
+    assert pdf_to_markdown(blank_pdf()) == ""
+
+
 @pytest.mark.parametrize(("name", "count"), sorted(EXPECTED_SECTIONS.items()))
 def test_each_fixture_yields_its_expected_section_count(name: str, count: int) -> None:
     assert len(headings(parse(name))) == count
