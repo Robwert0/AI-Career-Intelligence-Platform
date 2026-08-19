@@ -48,9 +48,9 @@ async def test_reingesting_the_same_document_replaces_rather_than_duplicates(
 
 async def test_ingest_leaves_other_documents_untouched(db_session: AsyncSession) -> None:
     other = uuid.uuid4()
-    await service(db_session).ingest(CV_PDF, other)
+    written = await service(db_session).ingest(CV_PDF, other)
     await service(db_session).ingest(CV_PDF, DOCUMENT_ID)
-    assert await stored(db_session, other) != []
+    assert [row.chunk_index for row in await stored(db_session, other)] == list(range(written))
 
 
 async def test_every_row_is_stamped_with_the_embedder_that_produced_it(

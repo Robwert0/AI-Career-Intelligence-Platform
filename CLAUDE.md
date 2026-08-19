@@ -241,6 +241,9 @@ cd backend && uvicorn app.main:app --reload
 ruff check . && ruff format . && mypy .
 pytest -q
 
+# Ingest a CV into the chunks table (phase 4; run from backend/, needs DATABASE_URL)
+cd backend && python scripts/ingest_cv.py path/to/cv.pdf
+
 # Worker
 celery -A app.workers.celery_app worker --loglevel=info
 

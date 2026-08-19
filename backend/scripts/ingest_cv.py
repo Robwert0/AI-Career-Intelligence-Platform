@@ -8,6 +8,7 @@ from pathlib import Path
 from app.ai.embeddings import BgeEmbedder
 from app.core.db import SessionLocal
 from app.repositories import ChunkRepository
+from app.services.cv_parser import UnreadablePdfError
 from app.services.ingestion_service import EmptyDocumentError, IngestionService
 
 CV_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "cv.ai-career-intelligence")
@@ -27,7 +28,14 @@ async def ingest(pdf_bytes: bytes, document_id: uuid.UUID) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Ingest a CV PDF into the chunks table.")
+    parser = argparse.ArgumentParser(
+        description="Ingest a CV PDF into the chunks table.",
+        epilog=(
+            "Run from the backend/ directory with DATABASE_URL set. Re-ingesting the same "
+            "file replaces that document's chunks rather than duplicating them. "
+            "Exit codes: 0 ok, 1 no extractable text, 2 bad path, 3 unreadable PDF."
+        ),
+    )
     parser.add_argument("pdf", type=Path, help="path to the CV PDF")
     pdf_path: Path = parser.parse_args().pdf
 
@@ -42,6 +50,9 @@ def main() -> int:
     except EmptyDocumentError:
         print(f"no extractable text in {pdf_path}", file=sys.stderr)
         return 1
+    except UnreadablePdfError as exc:
+        print(f"could not read {pdf_path} as a PDF: {exc}", file=sys.stderr)
+        return 3
 
     print(f"{pdf_path.name}: {written} chunks -> document {document_id}")
     return 0

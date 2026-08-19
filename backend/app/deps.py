@@ -23,8 +23,12 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 def verify_trusted_origin(request: Request, origin: Annotated[str | None, Header()] = None) -> None:
     if request.method in _SAFE_METHODS:
         return
+    # An absent Origin passes: modern browsers send it on every cross-site POST, so its absence
+    # cannot be forged from one, and rejecting it would break every non-browser client.
     if origin is None:
         return
+    # The CORS allowlist deliberately excludes this API's own origin, but same-origin POSTs
+    # (Swagger at /docs) still carry an Origin header and must not be rejected as cross-site.
     if origin == f"{request.url.scheme}://{request.url.netloc}":
         return
     if origin not in settings.cors_allowed_origins:

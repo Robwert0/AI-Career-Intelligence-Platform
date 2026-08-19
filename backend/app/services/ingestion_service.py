@@ -1,11 +1,15 @@
 import asyncio
 import uuid
 
-from app.ai.chunking import chunk_cv
+from app.ai.chunking import TextChunk, chunk_cv
 from app.ai.embeddings import Embedder
 from app.models import Chunk
 from app.repositories import ChunkRepository
 from app.services.cv_parser import pdf_to_markdown
+
+
+def _parse(pdf_bytes: bytes) -> list[TextChunk]:
+    return chunk_cv(pdf_to_markdown(pdf_bytes))
 
 
 class EmptyDocumentError(Exception):
@@ -18,8 +22,7 @@ class IngestionService:
         self._embedder = embedder
 
     async def ingest(self, pdf_bytes: bytes, document_id: uuid.UUID) -> int:
-        pdf_markdown = pdf_to_markdown(pdf_bytes)
-        text_chunks = chunk_cv(pdf_markdown)
+        text_chunks = await asyncio.to_thread(_parse, pdf_bytes)
         if not text_chunks:
             raise EmptyDocumentError(f"no chunks parsed from document {document_id}")
 
