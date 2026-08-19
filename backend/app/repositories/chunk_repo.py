@@ -1,9 +1,24 @@
 import uuid
+from typing import Any
 
-from sqlalchemy import delete
+from sqlalchemy import ColumnElement, cast, delete, func, select
+from sqlalchemy.dialects.postgresql import TSQUERY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk
+
+TEXT_SEARCH_CONFIG = "english"
+
+
+def _any_word_tsquery(query: str) -> ColumnElement[Any]:
+    # Quote every lexeme: tsvector_to_array strips quoting, and url/host lexemes keep & : * ! ( )
+    # inside them, so a bare join turns user punctuation into tsquery operators or fails to parse.
+    lexemes = func.tsvector_to_array(func.to_tsvector(TEXT_SEARCH_CONFIG, query))
+    lexeme = func.unnest(lexemes).column_valued("lexeme")
+    ored = select(
+        func.array_to_string(func.array_agg(func.quote_literal(lexeme)), " | ")
+    ).scalar_subquery()
+    return cast(ored, TSQUERY)
 
 
 class ChunkRepository:
@@ -16,3 +31,32 @@ class ChunkRepository:
         await self._session.flush()
 
         return len(chunks)
+
+    async def search_by_vector(
+        self, embedding: list[float], limit: int, section: str | None = None
+    ) -> list[Chunk]:
+        distance = Chunk.embedding.cosine_distance(embedding)
+        stmt = select(Chunk).order_by(distance).limit(limit)
+
+        if section is not None:
+            stmt = stmt.where(Chunk.section == section)
+
+        result = await self._session.execute(stmt)
+
+        return list(result.scalars())
+
+    async def search_by_text(
+        self, text: str, limit: int, section: str | None = None
+    ) -> list[Chunk]:
+        tsquery = _any_word_tsquery(text)
+        rank = func.ts_rank(Chunk.search_vector, tsquery).desc()
+
+        stmt = (
+            select(Chunk).where(Chunk.search_vector.op("@@")(tsquery)).order_by(rank).limit(limit)
+        )
+        if section is not None:
+            stmt = stmt.where(Chunk.section == section)
+
+        result = await self._session.execute(stmt)
+
+        return list(result.scalars())
