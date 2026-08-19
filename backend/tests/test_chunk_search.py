@@ -47,9 +47,43 @@ async def test_vector_search_puts_the_exact_match_first(seeded: ChunkRepository)
 
 
 async def test_vector_search_orders_by_ascending_distance(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_vector(vector_for(SEED[0][1]), limit=4)
-    assert hits[0].content == SEED[0][1]
-    assert hits[-1].content != SEED[0][1]
+    probe = vector_for(SEED[2][1])
+    embedder = FakeEmbedder()
+
+    def distance(content: str) -> float:
+        vector = embedder.embed_query(content)
+        return 1.0 - sum(a * b for a, b in zip(vector, probe, strict=True))
+
+    expected = [content for _, content in sorted(SEED, key=lambda row: distance(row[1]))]
+    hits = await seeded.search_by_vector(probe, limit=4)
+    assert [hit.content for hit in hits] == expected
+
+
+async def test_vector_search_can_narrow_to_one_document(
+    seeded: ChunkRepository, db_session: AsyncSession
+) -> None:
+    other = uuid.uuid4()
+    embedder = FakeEmbedder()
+    await seeded.replace_document_chunks(
+        other,
+        [
+            Chunk(
+                document_id=other,
+                chunk_index=0,
+                content="Unrelated document about gardening.",
+                section="other",
+                embedding=embedder.embed_documents(["Unrelated document about gardening."])[0],
+                embedding_model=embedder.model_name,
+            )
+        ],
+    )
+    hits = await seeded.search_by_vector(vector_for("anything"), limit=10, document_id=other)
+    assert [hit.document_id for hit in hits] == [other]
+
+
+async def test_text_search_can_narrow_to_one_document(seeded: ChunkRepository) -> None:
+    assert await seeded.search_by_text("Terraform", limit=4, document_id=uuid.uuid4()) == []
+    assert await seeded.search_by_text("Terraform", limit=4, document_id=DOCUMENT_ID) != []
 
 
 async def test_vector_search_respects_the_limit(seeded: ChunkRepository) -> None:

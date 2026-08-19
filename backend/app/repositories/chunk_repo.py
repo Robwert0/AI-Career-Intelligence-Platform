@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ColumnElement, cast, delete, func, select
+from sqlalchemy import ColumnElement, cast, delete, func, select, text
 from sqlalchemy.dialects.postgresql import TSQUERY
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,8 +11,6 @@ TEXT_SEARCH_CONFIG = "english"
 
 
 def _any_word_tsquery(query: str) -> ColumnElement[Any]:
-    # Quote every lexeme: tsvector_to_array strips quoting, and url/host lexemes keep & : * ! ( )
-    # inside them, so a bare join turns user punctuation into tsquery operators or fails to parse.
     lexemes = func.tsvector_to_array(func.to_tsvector(TEXT_SEARCH_CONFIG, query))
     lexeme = func.unnest(lexemes).column_valued("lexeme")
     ored = select(
@@ -33,22 +31,35 @@ class ChunkRepository:
         return len(chunks)
 
     async def search_by_vector(
-        self, embedding: list[float], limit: int, section: str | None = None
+        self,
+        embedding: list[float],
+        limit: int,
+        section: str | None = None,
+        document_id: uuid.UUID | None = None,
     ) -> list[Chunk]:
+        if section is not None or document_id is not None:
+            await self._session.execute(text("SET LOCAL hnsw.iterative_scan = 'relaxed_order'"))
+
         distance = Chunk.embedding.cosine_distance(embedding)
         stmt = select(Chunk).order_by(distance).limit(limit)
 
         if section is not None:
             stmt = stmt.where(Chunk.section == section)
+        if document_id is not None:
+            stmt = stmt.where(Chunk.document_id == document_id)
 
         result = await self._session.execute(stmt)
 
         return list(result.scalars())
 
     async def search_by_text(
-        self, text: str, limit: int, section: str | None = None
+        self,
+        query: str,
+        limit: int,
+        section: str | None = None,
+        document_id: uuid.UUID | None = None,
     ) -> list[Chunk]:
-        tsquery = _any_word_tsquery(text)
+        tsquery = _any_word_tsquery(query)
         rank = func.ts_rank(Chunk.search_vector, tsquery).desc()
 
         stmt = (
@@ -56,6 +67,8 @@ class ChunkRepository:
         )
         if section is not None:
             stmt = stmt.where(Chunk.section == section)
+        if document_id is not None:
+            stmt = stmt.where(Chunk.document_id == document_id)
 
         result = await self._session.execute(stmt)
 
