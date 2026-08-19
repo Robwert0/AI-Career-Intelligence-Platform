@@ -5,7 +5,8 @@ import pytest
 from fakes import FakeEmbedder
 
 from app.ai.chunking import chunk_cv
-from app.ai.embeddings import BgeEmbedder, Embedder
+from app.ai.embeddings import BGE_QUERY_PREFIX, BgeEmbedder, Embedder, QueryTooLongError
+from app.ai.tokenizer import count_tokens, token_budget
 from app.core.config import settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -100,3 +101,22 @@ def test_the_real_embedder_ranks_by_meaning_not_keywords(
         return sum(a * b for a, b in zip(vectors[section], query, strict=True))
 
     assert similarity("education") > similarity("experience") + 0.05
+
+
+def query_that_only_fits_without_the_prefix() -> str:
+    words = 1
+    while count_tokens(BGE_QUERY_PREFIX + "kubernetes " * words) <= token_budget():
+        words += 1
+    return "kubernetes " * words
+
+
+def test_a_query_is_measured_with_the_prefix_that_gets_encoded_with_it(bge: BgeEmbedder) -> None:
+    query = query_that_only_fits_without_the_prefix()
+    assert count_tokens(query) <= token_budget()
+    assert count_tokens(BGE_QUERY_PREFIX + query) > token_budget()
+    with pytest.raises(QueryTooLongError):
+        bge.embed_query(query)
+
+
+def test_a_query_within_the_budget_still_embeds(bge: BgeEmbedder) -> None:
+    assert len(bge.embed_query("does this person know kubernetes?")) == settings.embedding_dim

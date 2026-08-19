@@ -75,13 +75,13 @@ def get_embedder() -> Embedder:
 
 def get_ingestion_service(
     chunk_repo: Annotated[ChunkRepository, Depends(get_chunk_repo)],
-    embedder: Annotated[BgeEmbedder, Depends(get_embedder)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> IngestionService:
     return IngestionService(chunk_repo, embedder)
 
 
 def get_retriever(
     chunk_repo: Annotated[ChunkRepository, Depends(get_chunk_repo)],
-    embedder: Annotated[BgeEmbedder, Depends(get_embedder)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> Retriever:
     return Retriever(chunk_repo, embedder)

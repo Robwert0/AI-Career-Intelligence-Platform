@@ -3,9 +3,14 @@ from typing import Protocol
 
 from sentence_transformers import SentenceTransformer
 
+from app.ai.tokenizer import count_tokens, token_budget
 from app.core.config import settings
 
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+class QueryTooLongError(Exception):
+    """Query does not fit the model's input window and would be truncated in silence."""
 
 
 class Embedder(Protocol):
@@ -49,6 +54,11 @@ class BgeEmbedder:
         return vectors
 
     def embed_query(self, text: str) -> list[float]:
+        tokens = count_tokens(BGE_QUERY_PREFIX + text)
+        if tokens > token_budget():
+            raise QueryTooLongError(
+                f"query is {tokens} tokens with the retrieval prefix, limit is {token_budget()}"
+            )
         vector: list[float] = self.model.encode(
             inputs=text, prompt=BGE_QUERY_PREFIX, normalize_embeddings=True
         ).tolist()

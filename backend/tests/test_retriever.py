@@ -4,14 +4,15 @@ import pytest
 from fakes import FakeEmbedder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.embeddings import QueryTooLongError
 from app.ai.retriever import (
+    MAX_LIMIT,
+    MAX_QUERY_CHARS,
     RANK_WINDOW_MULTIPLIER,
     EmptyQueryError,
-    QueryTooLongError,
     Retriever,
     reciprocal_rank_fusion,
 )
-from app.ai.tokenizer import token_budget
 from app.models import Chunk
 from app.repositories import ChunkRepository
 
@@ -74,16 +75,24 @@ class RecordingRepository(ChunkRepository):
         self.limits: list[int] = []
 
     async def search_by_vector(
-        self, embedding: list[float], limit: int, section: str | None = None
+        self,
+        embedding: list[float],
+        limit: int,
+        section: str | None = None,
+        document_id: uuid.UUID | None = None,
     ) -> list[Chunk]:
         self.limits.append(limit)
-        return await super().search_by_vector(embedding, limit, section)
+        return await super().search_by_vector(embedding, limit, section, document_id)
 
     async def search_by_text(
-        self, text: str, limit: int, section: str | None = None
+        self,
+        query: str,
+        limit: int,
+        section: str | None = None,
+        document_id: uuid.UUID | None = None,
     ) -> list[Chunk]:
         self.limits.append(limit)
-        return await super().search_by_text(text, limit, section)
+        return await super().search_by_text(query, limit, section, document_id)
 
 
 @pytest.fixture
@@ -116,33 +125,66 @@ async def test_a_query_with_no_searchable_text_is_rejected(
     retriever: Retriever, query: str
 ) -> None:
     with pytest.raises(EmptyQueryError):
-        await retriever.retrieve(query)
+        await retriever.retrieve(query, document_id=None)
 
 
-async def test_a_query_past_the_token_budget_is_rejected_rather_than_truncated(
+async def test_a_query_past_the_character_cap_is_rejected_before_anything_scans_it(
     retriever: Retriever,
 ) -> None:
     with pytest.raises(QueryTooLongError):
-        await retriever.retrieve("kubernetes " * (token_budget() + 1))
+        await retriever.retrieve("k" * (MAX_QUERY_CHARS + 1), document_id=None)
+
+
+@pytest.mark.parametrize("limit", [0, -1, MAX_LIMIT + 1])
+async def test_an_out_of_range_limit_is_rejected(retriever: Retriever, limit: int) -> None:
+    with pytest.raises(ValueError):
+        await retriever.retrieve("kubernetes", document_id=None, limit=limit)
+
+
+async def test_retrieve_can_narrow_to_one_document(
+    retriever: Retriever, recording_repo: RecordingRepository
+) -> None:
+    other = uuid.uuid4()
+    assert await retriever.retrieve("kubernetes", document_id=other) == []
+    assert await retriever.retrieve("kubernetes", document_id=DOCUMENT_ID) != []
+
+
+def test_fusion_rejects_a_chunk_that_was_never_persisted() -> None:
+    transient = Chunk(
+        document_id=DOCUMENT_ID,
+        chunk_index=0,
+        content="x",
+        section="skills",
+        embedding=[0.0],
+        embedding_model="fake",
+    )
+    with pytest.raises(ValueError):
+        reciprocal_rank_fusion([[transient]])
+
+
+@pytest.mark.parametrize(("k", "limit"), [(0, 5), (-1, 5), (60, 0), (60, -1)])
+def test_fusion_rejects_out_of_range_parameters(k: int, limit: int) -> None:
+    with pytest.raises(ValueError):
+        reciprocal_rank_fusion([[chunk("a")]], k=k, limit=limit)
 
 
 async def test_each_leg_is_searched_wider_than_the_final_limit(
     retriever: Retriever, recording_repo: RecordingRepository
 ) -> None:
-    await retriever.retrieve("kubernetes", limit=2)
+    await retriever.retrieve("kubernetes", document_id=None, limit=2)
     assert recording_repo.limits == [2 * RANK_WINDOW_MULTIPLIER] * 2
 
 
 async def test_retrieve_returns_no_more_than_the_limit(retriever: Retriever) -> None:
-    assert len(await retriever.retrieve("engineer kubernetes", limit=2)) <= 2
+    assert len(await retriever.retrieve("engineer kubernetes", document_id=None, limit=2)) <= 2
 
 
 async def test_retrieve_still_answers_when_the_text_leg_finds_nothing(
     retriever: Retriever,
 ) -> None:
-    assert await retriever.retrieve("zzzznonexistenttoken") != []
+    assert await retriever.retrieve("zzzznonexistenttoken", document_id=None) != []
 
 
 async def test_retrieve_can_narrow_to_one_section(retriever: Retriever) -> None:
-    hits = await retriever.retrieve("engineer kubernetes", section="skills")
+    hits = await retriever.retrieve("engineer kubernetes", document_id=None, section="skills")
     assert [hit.section for hit in hits] == ["skills"]
