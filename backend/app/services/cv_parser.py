@@ -14,6 +14,8 @@ def pdf_to_markdown(pdf_bytes: bytes) -> str:
             for c in page.chars
             if "(cid:" not in c["text"] and c["fontname"] not in ("Symbol", "ZapfDingbats")
         ]
+        if not pdf_chars:
+            return ""
 
         lines = defaultdict(list)
         lines_out = []

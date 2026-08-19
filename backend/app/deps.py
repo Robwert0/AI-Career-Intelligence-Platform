@@ -4,11 +4,12 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.embeddings import BgeEmbedder, Embedder
 from app.core.config import settings
 from app.core.db import get_db
 from app.models import User
-from app.repositories import RefreshTokenRepository, UserRepository
-from app.services import AuthService
+from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
+from app.services import AuthService, IngestionService
 from app.services.auth_service import InvalidAccessTokenError
 
 bearer_scheme = HTTPBearer()
@@ -22,12 +23,8 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 def verify_trusted_origin(request: Request, origin: Annotated[str | None, Header()] = None) -> None:
     if request.method in _SAFE_METHODS:
         return
-    # An absent Origin passes: modern browsers send it on every cross-site POST, so its absence
-    # cannot be forged from one, and rejecting it would break every non-browser client.
     if origin is None:
         return
-    # The CORS allowlist deliberately excludes this API's own origin, but same-origin POSTs
-    # (Swagger at /docs) still carry an Origin header and must not be rejected as cross-site.
     if origin == f"{request.url.scheme}://{request.url.netloc}":
         return
     if origin not in settings.cors_allowed_origins:
@@ -63,3 +60,20 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+
+
+def get_chunk_repo(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ChunkRepository:
+    return ChunkRepository(session)
+
+
+def get_embedder() -> Embedder:
+    return BgeEmbedder()
+
+
+def get_ingestion_service(
+    chunk_repo: Annotated[ChunkRepository, Depends(get_chunk_repo)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+) -> IngestionService:
+    return IngestionService(chunk_repo, embedder)
