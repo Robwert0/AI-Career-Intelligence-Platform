@@ -9,7 +9,6 @@ from app.ai.generation import (
     SamplingSettings,
     Usage,
 )
-
 from app.core.config import settings
 
 
