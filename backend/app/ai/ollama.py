@@ -106,25 +106,39 @@ class OllamaGenerator:
             raise GeneratorUnavailableError(
                 f"{self.model_name} failed with {response.status_code}: {response.text}"
             )
+        if response.is_redirect:
+            raise GeneratorUnavailableError(
+                f"{self.model_name} redirected to "
+                f"{response.headers.get('location', 'an unknown location')}; "
+                f"the configured base url is not a generation endpoint"
+            )
         if response.is_error:
             raise GenerationRequestError(
                 f"{self.model_name} rejected the request "
                 f"with {response.status_code}: {response.text}"
             )
 
-        body = response.json()
-        message = body["message"]
+        try:
+            body = response.json()
+            message = body["message"]
+            text = message["content"]
+            logprobs = _logprobs(body.get("logprobs"))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise GeneratorUnavailableError(
+                f"{self.model_name} answered {response.status_code} with an unusable body: {exc!r}"
+            ) from exc
 
         return GenerationResult(
-            text=message["content"],
+            text=text,
             finish_reason=_finish_reason(body.get("done_reason")),
             model=self.model_name,
+            # Ollama is Go: `omitempty` drops a count of 0, so absent means zero, not missing.
             usage=Usage(
-                body["prompt_eval_count"],
-                body["eval_count"],
+                body.get("prompt_eval_count", 0),
+                body.get("eval_count", 0),
             ),
             latency_ms=latency_ms,
             sampling=sampling,
             thinking=message.get("thinking"),
-            logprobs=_logprobs(body.get("logprobs")),
+            logprobs=logprobs,
         )

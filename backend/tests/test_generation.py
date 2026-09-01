@@ -16,6 +16,7 @@ from app.ai.generation import (
     Role,
     SamplingSettings,
     TokenLogprob,
+    Usage,
 )
 from app.ai.ollama import OllamaGenerator
 
@@ -59,6 +60,8 @@ def stub(
     *,
     status: int = 200,
     raises: Exception | None = None,
+    text: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> tuple[OllamaGenerator, list[httpx.Request]]:
     seen: list[httpx.Request] = []
 
@@ -66,6 +69,10 @@ def stub(
         seen.append(request)
         if raises is not None:
             raise raises
+        if text is not None:
+            return httpx.Response(status, text=text, headers=headers)
+        if headers is not None and body is None:
+            return httpx.Response(status, headers=headers)
         return httpx.Response(status, json=body if body is not None else ollama_body())
 
     client = httpx.AsyncClient(
@@ -265,6 +272,33 @@ async def test_a_rejected_request_is_not_reported_as_a_transient_outage() -> Non
     generator, _ = stub({"error": "model 'does-not-exist' not found"}, status=404)
     with pytest.raises(GenerationRequestError, match="does-not-exist"):
         await generator.generate(MESSAGES)
+
+
+async def test_a_body_that_is_not_json_is_not_mistaken_for_an_answer() -> None:
+    generator, _ = stub(status=200, text="<html>gateway</html>")
+    with pytest.raises(GeneratorUnavailableError):
+        await generator.generate(MESSAGES)
+
+
+async def test_a_success_without_the_answer_is_reported_as_unavailable() -> None:
+    generator, _ = stub({"error": "boom"})
+    with pytest.raises(GeneratorUnavailableError):
+        await generator.generate(MESSAGES)
+
+
+async def test_a_redirect_is_reported_as_unavailable_rather_than_parsed() -> None:
+    generator, _ = stub(status=302, headers={"location": "https://sso.example/login"})
+    with pytest.raises(GeneratorUnavailableError, match="sso.example"):
+        await generator.generate(MESSAGES)
+
+
+async def test_token_counts_the_provider_omits_are_read_as_zero() -> None:
+    body = ollama_body()
+    del body["prompt_eval_count"]
+    del body["eval_count"]
+    generator, _ = stub(body)
+    result = await generator.generate(MESSAGES)
+    assert result.usage == Usage(0, 0)
 
 
 async def test_generating_without_messages_is_rejected_before_any_call() -> None:
