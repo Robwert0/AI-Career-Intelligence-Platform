@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     embedding_model_revision: str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
     embedding_dim: int = 384
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    generation_model: str = "qwen3:8b"
+    generation_timeout_seconds: int = 180
+    generation_connect_timeout_seconds: int = 5
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
