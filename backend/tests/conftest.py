@@ -35,10 +35,12 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 import httpx
 import pytest
 import pytest_asyncio
+from fakes import AllowAllLimiter
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.db import get_db
+from app.deps import get_limiter
 from app.main import app
 
 DB_NAME = urlsplit(TEST_DATABASE_URL.replace("+asyncpg", "")).path.lstrip("/")
@@ -92,13 +94,21 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
         await outer.rollback()
 
 
+@pytest.fixture
+def allow_all_limiter() -> AllowAllLimiter:
+    return AllowAllLimiter()
+
+
 @pytest_asyncio.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
+async def client(
+    db_session: AsyncSession, allow_all_limiter: AllowAllLimiter
+) -> AsyncGenerator[httpx.AsyncClient]:
     async def override_get_db() -> AsyncGenerator[AsyncSession]:
         yield db_session
         await db_session.commit()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_limiter] = lambda: allow_all_limiter
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="https://test") as c:
         yield c

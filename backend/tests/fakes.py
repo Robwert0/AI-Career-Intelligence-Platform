@@ -2,6 +2,8 @@ import hashlib
 import math
 import random
 
+from redis.exceptions import RedisError
+
 from app.ai.generation import (
     FinishReason,
     GenerationResult,
@@ -10,6 +12,7 @@ from app.ai.generation import (
     Usage,
 )
 from app.core.config import settings
+from app.core.rate_limiter import Decision, Policy
 
 
 class FakeEmbedder:
@@ -69,3 +72,17 @@ class FakeGenerator:
             latency_ms=0,
             sampling=settings_used,
         )
+
+
+class AllowAllLimiter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        self.calls.append((policy.name, identity))
+        return Decision(allowed=True, remaining=float(policy.capacity), retry_after_seconds=0.0)
+
+
+class UnavailableLimiter:
+    async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        raise RedisError("redis is down")

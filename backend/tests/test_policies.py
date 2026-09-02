@@ -1,7 +1,10 @@
+import inspect
+
 import pytest
 
 from app.core import policies
 from app.core.rate_limiter import Policy, Scope
+from app.deps import rate_limit
 
 
 def _declared_policies() -> list[Policy]:
@@ -39,3 +42,13 @@ def test_register_is_the_strictest_sustained_limit() -> None:
 def test_login_keeps_its_declared_budget() -> None:
     assert policies.LOGIN.capacity == 5
     assert policies.LOGIN.refill_per_second == 1 / 60
+
+
+def test_an_ip_policy_does_not_depend_on_authentication() -> None:
+    parameters = inspect.signature(rate_limit(policies.LOGIN)).parameters
+    assert "user" not in parameters
+
+
+def test_a_user_policy_depends_on_the_current_user() -> None:
+    parameters = inspect.signature(rate_limit(policies.ME_USER)).parameters
+    assert "user" in parameters
