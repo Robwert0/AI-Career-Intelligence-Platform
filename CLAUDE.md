@@ -238,6 +238,9 @@ docker compose up --build            # full stack (phase 6+)
 
 # Backend
 cd backend && uvicorn app.main:app --reload
+# Behind a proxy (Phase 12): the rate limiter keys on request.client.host, which is only the
+# real client if uvicorn rewrites it. These are uvicorn flags, not Settings fields.
+uvicorn app.main:app --proxy-headers --forwarded-allow-ips="<trusted proxy ip>"
 ruff check . && ruff format . && mypy .
 pytest -q
 
