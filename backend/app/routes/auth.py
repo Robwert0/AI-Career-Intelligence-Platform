@@ -130,6 +130,7 @@ async def refresh(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit(policies.LOGOUT))],
 )
 async def logout(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],

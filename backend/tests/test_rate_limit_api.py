@@ -2,6 +2,7 @@ import uuid
 
 import httpx
 from fakes import AllowAllLimiter, UnavailableLimiter
+from fastapi.routing import APIRoute
 
 from app.deps import get_limiter
 from app.main import app
@@ -61,6 +62,32 @@ async def test_users_me_fires_both_an_ip_policy_and_a_user_policy(
     assert set(fired) == {"me_ip", "me_user"}
     assert fired["me_ip"].count(".") == 3
     assert uuid.UUID(fired["me_user"])
+
+
+async def test_logout_is_limited_per_ip(limited_client: httpx.AsyncClient) -> None:
+    statuses = [(await limited_client.post("/auth/logout")).status_code for _ in range(11)]
+    assert statuses == [204] * 10 + [429]
+
+
+def test_every_route_that_does_work_carries_a_rate_limit() -> None:
+    # A route can only ship unlimited by being added here, in a reviewable diff.
+    exempt = {("GET", "/health")}
+    unlimited = []
+    for included in app.routes:
+        router = getattr(included, "original_router", None)
+        context = getattr(included, "include_context", None)
+        if router is None or context is None:
+            continue
+        for route in router.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            path = f"{context.prefix}{route.path}"
+            attached = {getattr(d.dependency, "__name__", "") for d in route.dependencies}
+            limited = attached & {"by_ip", "by_user"}
+            for method in route.methods or set():
+                if not limited and (method, path) not in exempt:
+                    unlimited.append((method, path))
+    assert unlimited == []
 
 
 async def test_health_is_never_limited(limited_client: httpx.AsyncClient) -> None:
