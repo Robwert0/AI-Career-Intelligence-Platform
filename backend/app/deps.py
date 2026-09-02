@@ -8,6 +8,7 @@ from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.rate_limiter import Limiter
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
 from app.services import AuthService, IngestionService
@@ -85,3 +86,8 @@ def get_retriever(
     embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> Retriever:
     return Retriever(chunk_repo, embedder)
+
+
+def get_limiter(request: Request) -> Limiter:
+    limiter: Limiter = request.app.state.limiter
+    return limiter

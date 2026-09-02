@@ -1,16 +1,32 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.rate_limiter import TokenBucketLimiter
+from app.core.redis import create_redis
 from app.deps import verify_trusted_origin
 from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
 from app.routes.users import router as users_router
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.redis = create_redis()
+    app.state.limiter = TokenBucketLimiter(app.state.redis)
+    yield
+    await app.state.redis.aclose()
+
+
 app = FastAPI(
-    title="AI Career Intelligence Platform", dependencies=[Depends(verify_trusted_origin)]
+    title="AI Career Intelligence Platform",
+    dependencies=[Depends(verify_trusted_origin)],
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
