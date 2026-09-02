@@ -132,7 +132,6 @@ class OllamaGenerator:
             text=text,
             finish_reason=_finish_reason(body.get("done_reason")),
             model=self.model_name,
-            # Ollama is Go: `omitempty` drops a count of 0, so absent means zero, not missing.
             usage=Usage(
                 body.get("prompt_eval_count", 0),
                 body.get("eval_count", 0),

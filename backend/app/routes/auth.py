@@ -2,8 +2,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
+from app.core import policies
 from app.core.config import settings
-from app.deps import get_auth_service
+from app.deps import get_auth_service, rate_limit
 from app.schemas import LoginRequest, TokenResponse, UserCreate, UserRead
 from app.services import AuthService
 from app.services.auth_service import (
@@ -63,6 +64,7 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
+    dependencies=[Depends(rate_limit(policies.REGISTER))],
 )
 async def register(
     data: UserCreate,
@@ -81,6 +83,7 @@ async def register(
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limit(policies.LOGIN))],
 )
 async def login(
     data: LoginRequest,
@@ -104,6 +107,7 @@ async def login(
 @router.post(
     "/refresh",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limit(policies.REFRESH))],
 )
 async def refresh(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
@@ -126,6 +130,7 @@ async def refresh(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit(policies.LOGOUT))],
 )
 async def logout(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],

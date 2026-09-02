@@ -1,13 +1,18 @@
+import math
+import time
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.rate_limiter import Limiter, Policy, Scope
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
 from app.services import AuthService, IngestionService
@@ -85,3 +90,42 @@ def get_retriever(
     embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> Retriever:
     return Retriever(chunk_repo, embedder)
+
+
+def get_limiter(request: Request) -> Limiter:
+    limiter: Limiter = request.app.state.limiter
+    return limiter
+
+
+def _client_ip(request: Request) -> str:
+    if request.client is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable")
+    return request.client.host
+
+
+async def _enforce(policy: Policy, identity: str, limiter: Limiter) -> None:
+    try:
+        decision = await limiter.check(policy, identity, now=time.time())
+    except RedisError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable") from None
+    if not decision.allowed:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many requests",
+            headers={"Retry-After": str(math.ceil(decision.retry_after_seconds))},
+        )
+
+
+def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
+    # Two closures, not one: FastAPI resolves dependencies from the signature, so an IP-scoped
+    # policy must not carry the auth dependency or /auth/login would require a login.
+    async def by_ip(request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]) -> None:
+        await _enforce(policy, _client_ip(request), limiter)
+
+    async def by_user(
+        user: Annotated[User, Depends(get_current_user)],
+        limiter: Annotated[Limiter, Depends(get_limiter)],
+    ) -> None:
+        await _enforce(policy, str(user.id), limiter)
+
+    return by_ip if policy.scope is Scope.IP else by_user
