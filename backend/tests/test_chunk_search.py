@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from fakes import FakeEmbedder
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk
@@ -43,7 +44,7 @@ def vector_for(content: str) -> list[float]:
 
 async def test_vector_search_puts_the_exact_match_first(seeded: ChunkRepository) -> None:
     hits = await seeded.search_by_vector(vector_for(SEED[2][1]), limit=4)
-    assert hits[0].content == SEED[2][1]
+    assert hits[0][0].content == SEED[2][1]
 
 
 async def test_vector_search_orders_by_ascending_distance(seeded: ChunkRepository) -> None:
@@ -56,7 +57,7 @@ async def test_vector_search_orders_by_ascending_distance(seeded: ChunkRepositor
 
     expected = [content for _, content in sorted(SEED, key=lambda row: distance(row[1]))]
     hits = await seeded.search_by_vector(probe, limit=4)
-    assert [hit.content for hit in hits] == expected
+    assert [chunk.content for chunk, _ in hits] == expected
 
 
 async def test_vector_search_can_narrow_to_one_document(
@@ -78,7 +79,7 @@ async def test_vector_search_can_narrow_to_one_document(
         ],
     )
     hits = await seeded.search_by_vector(vector_for("anything"), limit=10, document_id=other)
-    assert [hit.document_id for hit in hits] == [other]
+    assert [chunk.document_id for chunk, _ in hits] == [other]
 
 
 async def test_text_search_can_narrow_to_one_document(seeded: ChunkRepository) -> None:
@@ -92,7 +93,7 @@ async def test_vector_search_respects_the_limit(seeded: ChunkRepository) -> None
 
 async def test_vector_search_can_narrow_to_one_section(seeded: ChunkRepository) -> None:
     hits = await seeded.search_by_vector(vector_for("anything"), limit=4, section="skills")
-    assert [hit.section for hit in hits] == ["skills"]
+    assert [chunk.section for chunk, _ in hits] == ["skills"]
 
 
 async def test_text_search_matches_a_stemmed_word(seeded: ChunkRepository) -> None:
@@ -141,3 +142,50 @@ async def test_punctuation_inside_a_url_lexeme_stays_literal(
 
 async def test_a_query_of_only_stopwords_is_not_an_error(seeded: ChunkRepository) -> None:
     assert await seeded.search_by_text("the and or of", limit=4) == []
+
+
+async def test_vector_search_returns_the_cosine_distance(seeded: ChunkRepository) -> None:
+    target = SEED[2][1]
+
+    hits = await seeded.search_by_vector(vector_for(target), limit=4)
+
+    chunk, distance = hits[0]
+    assert chunk.content == target
+    assert distance == pytest.approx(0.0, abs=1e-6)
+
+
+async def test_vector_search_distances_ascend(seeded: ChunkRepository) -> None:
+    hits = await seeded.search_by_vector(vector_for("anything"), limit=4)
+
+    distances = [distance for _, distance in hits]
+    assert distances == sorted(distances)
+
+
+async def test_vector_search_still_fills_the_limit_after_index_churn(
+    seeded: ChunkRepository, db_session: AsyncSession
+) -> None:
+    embedder = FakeEmbedder()
+    for round_number in range(20):
+        churn = uuid.uuid4()
+        contents = [f"churn {round_number} row {index}" for index in range(10)]
+        await seeded.replace_document_chunks(
+            churn,
+            [
+                Chunk(
+                    document_id=churn,
+                    chunk_index=index,
+                    content=content,
+                    section="other",
+                    embedding=vector,
+                    embedding_model=embedder.model_name,
+                )
+                for index, (content, vector) in enumerate(
+                    zip(contents, embedder.embed_documents(contents), strict=True)
+                )
+            ],
+        )
+        await db_session.execute(delete(Chunk).where(Chunk.document_id == churn))
+
+    hits = await seeded.search_by_vector(vector_for("anything"), limit=4)
+
+    assert len(hits) == 4

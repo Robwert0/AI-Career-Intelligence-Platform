@@ -56,12 +56,13 @@ class OllamaGenerator:
         self,
         client: httpx.AsyncClient | None = None,
         model: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> None:
         self._model = model or settings.generation_model
         self._client = client or httpx.AsyncClient(
             base_url=settings.ollama_base_url,
             timeout=httpx.Timeout(
-                settings.generation_timeout_seconds,
+                timeout_seconds or settings.generation_timeout_seconds,
                 connect=settings.generation_connect_timeout_seconds,
             ),
         )

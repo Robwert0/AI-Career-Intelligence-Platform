@@ -8,6 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret-not-real-" + "x" * 32)
+os.environ.setdefault("CV_DOCUMENT_ID", "44444444-4444-4444-4444-444444444444")
 
 
 def _base_database_url() -> str:

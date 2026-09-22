@@ -32,7 +32,8 @@ def build_app() -> FastAPI:
     async def probe_retrieve(
         retriever: Annotated[Retriever, Depends(get_retriever)],
     ) -> dict[str, int]:
-        return {"hits": len(await retriever.retrieve("kubernetes", document_id=None, limit=2))}
+        result = await retriever.retrieve("kubernetes", document_id=None, limit=2)
+        return {"hits": len(result.chunks)}
 
     return api
 
