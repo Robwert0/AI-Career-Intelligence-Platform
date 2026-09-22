@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { bootstrap, login, logout, register } from '@/lib/auth'
+import { bootstrap, login, logout, register, setAccessToken } from '@/lib/auth'
 import type { ApiResult } from '@/lib/http'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
@@ -12,14 +12,16 @@ type AuthValue = {
   signUp: (email: string, password: string) => Promise<ApiResult<unknown>>
   signOut: () => Promise<ApiResult<void>>
   sessionExpired: () => void
-  logoutIncomplete: boolean
+  exitReason: ExitReason
 }
+
+export type ExitReason = 'clean' | 'incomplete' | 'expired'
 
 const AuthContext = createContext<AuthValue | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
-  const [logoutIncomplete, setLogoutIncomplete] = useState(false)
+  const [exitReason, setExitReason] = useState<ExitReason>('clean')
 
   useEffect(() => {
     bootstrap()
@@ -29,7 +31,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const result = await login(email, password)
-    if (result.ok) setStatus('authenticated')
+    if (result.ok) {
+      setExitReason('clean')
+      setStatus('authenticated')
+    }
     return result
   }, [])
 
@@ -37,17 +42,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     const result = await logout()
-    setLogoutIncomplete(!result.ok)
+    setExitReason(result.ok ? 'clean' : 'incomplete')
     setStatus('anonymous')
     return result
   }, [])
 
-  const sessionExpired = useCallback(() => setStatus('anonymous'), [])
+  const sessionExpired = useCallback(() => {
+    setAccessToken(null)
+    setExitReason('expired')
+    setStatus('anonymous')
+  }, [])
 
   return (
-    <AuthContext.Provider
-      value={{ status, signIn, signUp, signOut, sessionExpired, logoutIncomplete }}
-    >
+    <AuthContext.Provider value={{ status, signIn, signUp, signOut, sessionExpired, exitReason }}>
       {children}
     </AuthContext.Provider>
   )

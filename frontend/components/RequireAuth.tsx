@@ -2,16 +2,22 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
-import { useAuth } from '@/components/AuthProvider'
+import { useAuth, type ExitReason } from '@/components/AuthProvider'
+
+const EXIT_DESTINATION: Record<ExitReason, string> = {
+  clean: '/login',
+  incomplete: '/login?logout=incomplete',
+  expired: '/login?session=expired',
+}
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { status, logoutIncomplete } = useAuth()
+  const { status, exitReason } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
     if (status !== 'anonymous') return
-    router.replace(logoutIncomplete ? '/login?logout=incomplete' : '/login')
-  }, [status, logoutIncomplete, router])
+    router.replace(EXIT_DESTINATION[exitReason])
+  }, [status, exitReason, router])
 
   if (status !== 'authenticated') {
     return (

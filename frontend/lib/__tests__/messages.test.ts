@@ -52,6 +52,12 @@ describe('authErrorMessage', () => {
     )
   })
 
+  it('renders a long register cooldown in minutes, not seconds', () => {
+    expect(authErrorMessage(failure(429, 'Too many requests', 1200))).toBe(
+      'Too many attempts. Try again in 20 minutes.',
+    )
+  })
+
   it('reports a network failure plainly', () => {
     expect(authErrorMessage(failure(0, 'Could not reach the server'))).toBe(
       'Could not reach the server.',

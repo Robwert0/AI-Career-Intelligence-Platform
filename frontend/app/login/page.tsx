@@ -12,6 +12,7 @@ function LoginForm() {
   const params = useSearchParams()
   const justRegistered = params.get('registered') === '1'
   const logoutIncomplete = params.get('logout') === 'incomplete'
+  const sessionExpired = params.get('session') === 'expired'
 
   return (
     <>
@@ -23,6 +24,12 @@ function LoginForm() {
           <p className="text-sm text-muted">Ask questions about the CV.</p>
         )}
       </div>
+
+      {sessionExpired ? (
+        <p role="alert" className="border border-line px-3 py-2 font-mono text-xs text-muted">
+          Your session ended. Sign in again to continue.
+        </p>
+      ) : null}
 
       {logoutIncomplete ? (
         <p role="alert" className="border border-danger px-3 py-2 font-mono text-xs text-danger">
