@@ -11,6 +11,7 @@ from app.ai.retriever import (
     RANK_WINDOW_MULTIPLIER,
     EmptyQueryError,
     Retriever,
+    RetrievalResult,
     reciprocal_rank_fusion,
 )
 from app.models import Chunk
@@ -145,8 +146,8 @@ async def test_retrieve_can_narrow_to_one_document(
     retriever: Retriever, recording_repo: RecordingRepository
 ) -> None:
     other = uuid.uuid4()
-    assert await retriever.retrieve("kubernetes", document_id=other) == []
-    assert await retriever.retrieve("kubernetes", document_id=DOCUMENT_ID) != []
+    assert (await retriever.retrieve("kubernetes", document_id=other)).chunks == []
+    assert (await retriever.retrieve("kubernetes", document_id=DOCUMENT_ID)).chunks != []
 
 
 def test_fusion_rejects_a_chunk_that_was_never_persisted() -> None:
@@ -176,15 +177,54 @@ async def test_each_leg_is_searched_wider_than_the_final_limit(
 
 
 async def test_retrieve_returns_no_more_than_the_limit(retriever: Retriever) -> None:
-    assert len(await retriever.retrieve("engineer kubernetes", document_id=None, limit=2)) <= 2
+    result = await retriever.retrieve("engineer kubernetes", document_id=None, limit=2)
+    assert len(result.chunks) <= 2
 
 
 async def test_retrieve_still_answers_when_the_text_leg_finds_nothing(
     retriever: Retriever,
 ) -> None:
-    assert await retriever.retrieve("zzzznonexistenttoken", document_id=None) != []
+    assert (await retriever.retrieve("zzzznonexistenttoken", document_id=None)).chunks != []
 
 
 async def test_retrieve_can_narrow_to_one_section(retriever: Retriever) -> None:
-    hits = await retriever.retrieve("engineer kubernetes", document_id=None, section="skills")
-    assert [hit.section for hit in hits] == ["skills"]
+    result = await retriever.retrieve("engineer kubernetes", document_id=None, section="skills")
+    assert [hit.section for hit in result.chunks] == ["skills"]
+
+
+async def test_best_similarity_comes_from_the_nearest_vector_hit(
+    retriever: Retriever, recording_repo: RecordingRepository
+) -> None:
+    target = SEED[1][1]
+    hits = await recording_repo.search_by_vector(FakeEmbedder().embed_query(target), limit=1)
+
+    result = await retriever.retrieve(target, document_id=None)
+
+    assert result.best_similarity == pytest.approx(1.0 - hits[0][1], abs=1e-6)
+
+
+async def test_best_similarity_is_minus_one_when_the_vector_arm_is_empty(
+    retriever: Retriever,
+) -> None:
+    result = await retriever.retrieve("kubernetes", document_id=uuid.uuid4())
+
+    assert result.best_similarity == -1.0
+
+
+async def test_text_hit_count_is_zero_when_no_lexeme_matches(retriever: Retriever) -> None:
+    result = await retriever.retrieve("zzzznonexistenttoken", document_id=None)
+
+    assert result.text_hit_count == 0
+
+
+async def test_text_hit_count_counts_the_full_text_rows(retriever: Retriever) -> None:
+    result = await retriever.retrieve("kubernetes", document_id=None)
+
+    assert result.text_hit_count == 1
+
+
+def test_the_retrieval_result_is_immutable() -> None:
+    result = RetrievalResult(chunks=[], best_similarity=0.5, text_hit_count=0)
+
+    with pytest.raises(AttributeError):
+        result.best_similarity = 0.9  # type: ignore[misc]
