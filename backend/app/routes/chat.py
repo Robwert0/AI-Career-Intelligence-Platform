@@ -2,7 +2,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.ai.generation import GeneratorUnavailableError
+from app.ai.embeddings import QueryTooLongError
+from app.ai.generation import GenerationRequestError, GeneratorUnavailableError
 from app.ai.rag import RagPipeline
 from app.core import policies
 from app.core.config import settings
@@ -28,6 +29,16 @@ async def chat(
 ) -> ChatResponse:
     try:
         answer = await pipeline.answer(payload.message)
+    except QueryTooLongError:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Question is too long",
+        ) from None
+    except GenerationRequestError:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+        ) from None
     except GeneratorUnavailableError:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,

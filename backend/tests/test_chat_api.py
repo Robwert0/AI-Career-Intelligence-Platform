@@ -3,9 +3,16 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
-from fakes import AllowAllLimiter, FakeEmbedder, FakeGenerator, UnavailableGenerator
+from fakes import (
+    AllowAllLimiter,
+    FakeEmbedder,
+    FakeGenerator,
+    RejectingGenerator,
+    UnavailableGenerator,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.embeddings import QueryTooLongError
 from app.ai.prompts import CANARY
 from app.ai.rag import BLOCKED_TEXT
 from app.core.config import settings
@@ -178,3 +185,32 @@ async def test_a_prompt_extraction_attempt_is_refused_before_the_model_sees_it(
 
     assert response.json()["refused"] is True
     assert generator.calls == []
+
+
+class TooLongEmbedder(FakeEmbedder):
+    def embed_query(self, text: str) -> list[float]:
+        raise QueryTooLongError("query is 1999 tokens, limit is 510")
+
+
+async def test_a_message_over_the_token_budget_is_a_422_not_a_500(
+    chat_client: ChatFixture,
+) -> None:
+    client, generator, headers = chat_client
+    app.dependency_overrides[get_embedder] = lambda: TooLongEmbedder()
+
+    response = await client.post("/chat", json={"message": "~!@#$%^&*()" * 181}, headers=headers)
+
+    assert response.status_code == 422
+    assert generator.calls == []
+
+
+async def test_a_rejected_generation_request_does_not_escape_as_an_unhandled_error(
+    chat_client: ChatFixture,
+) -> None:
+    client, _, headers = chat_client
+    app.dependency_overrides[get_generator] = lambda: RejectingGenerator()
+
+    response = await client.post("/chat", json={"message": "Kubernetes"}, headers=headers)
+
+    assert response.status_code == 500
+    assert "Kubernetes" not in response.text

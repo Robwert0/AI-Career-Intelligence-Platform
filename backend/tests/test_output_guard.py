@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 
 from app.ai.generation import FinishReason, GenerationResult, SamplingSettings, Usage
@@ -77,3 +79,24 @@ def test_an_answer_quoting_ordinary_cv_language_passes() -> None:
     )
 
     assert validate_output(generated(answer)).ok
+
+
+@pytest.mark.parametrize(
+    "disguise",
+    [
+        lambda canary: canary.upper(),
+        lambda canary: " ".join(canary),
+        lambda canary: canary.replace("-", " - "),
+        lambda canary: canary.replace("-", "-\n"),
+        lambda canary: "**" + canary + "**",
+    ],
+)
+def test_a_disguised_canary_is_still_caught(disguise: Callable[[str], str]) -> None:
+    verdict = validate_output(generated(f"The value is {disguise(CANARY)}."))
+
+    assert not verdict.ok
+    assert verdict.failed_check == "canary"
+
+
+def test_an_answer_that_merely_shares_letters_is_not_flagged() -> None:
+    assert validate_output(generated("He referenced Go and Rust in his last role.")).ok
