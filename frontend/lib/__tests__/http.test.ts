@@ -73,6 +73,19 @@ describe('request', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('does not report success when a 200 body is unreadable', async () => {
+    const garbled = new Response('not json at all', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(garbled))
+
+    const result = await request('/users/me')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.detail).toBe('The server sent an unreadable response')
+  })
+
   it('reports a network failure as status 0', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network down')))
 

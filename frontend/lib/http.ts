@@ -2,6 +2,8 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; detail: string; retryAfter?: number }
 
+const UNPARSEABLE = Symbol('unparseable')
+
 type ValidationItem = { msg?: string }
 
 function detailFrom(body: unknown, status: number): string {
@@ -35,15 +37,21 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     return { ok: false, status: 0, detail: 'Could not reach the server' }
   }
 
-  const body = response.status === 204 ? null : await response.json().catch(() => null)
+  if (response.status === 204) return { ok: true, data: undefined as T }
+
+  const body = await response.json().catch(() => UNPARSEABLE)
 
   if (!response.ok) {
     return {
       ok: false,
       status: response.status,
-      detail: detailFrom(body, response.status),
+      detail: detailFrom(body === UNPARSEABLE ? null : body, response.status),
       retryAfter: retryAfterFrom(response),
     }
+  }
+
+  if (body === UNPARSEABLE) {
+    return { ok: false, status: response.status, detail: 'The server sent an unreadable response' }
   }
 
   return { ok: true, data: body as T }
