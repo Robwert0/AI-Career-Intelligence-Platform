@@ -6,7 +6,9 @@ from redis.exceptions import RedisError
 
 from app.ai.generation import (
     FinishReason,
+    GenerationRequestError,
     GenerationResult,
+    GeneratorUnavailableError,
     Message,
     SamplingSettings,
     Usage,
@@ -38,6 +40,14 @@ class FakeEmbedder:
         return self._vector(text)
 
 
+class NearEmbedder(FakeEmbedder):
+    """Every vector is identical, so cosine similarity is 1.0 and the refusal gate always passes."""
+
+    def _vector(self, text: str) -> list[float]:
+        length = math.sqrt(self.dimensions)
+        return [1.0 / length] * self.dimensions
+
+
 class FakeGenerator:
     def __init__(
         self,
@@ -47,6 +57,7 @@ class FakeGenerator:
         self._text = text
         self._finish_reason = finish_reason
         self.calls: list[list[Message]] = []
+        self.sampling: list[SamplingSettings] = []
 
     @property
     def model_name(self) -> str:
@@ -61,6 +72,7 @@ class FakeGenerator:
     ) -> GenerationResult:
         self.calls.append(messages)
         settings_used = sampling or SamplingSettings()
+        self.sampling.append(settings_used)
         return GenerationResult(
             text=self._text,
             finish_reason=self._finish_reason,
@@ -72,6 +84,36 @@ class FakeGenerator:
             latency_ms=0,
             sampling=settings_used,
         )
+
+
+class UnavailableGenerator:
+    @property
+    def model_name(self) -> str:
+        return "unavailable-generator"
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+    ) -> GenerationResult:
+        raise GeneratorUnavailableError("the fake provider is down")
+
+
+class RejectingGenerator:
+    @property
+    def model_name(self) -> str:
+        return "rejecting-generator"
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+    ) -> GenerationResult:
+        raise GenerationRequestError("the fake provider rejected the request")
 
 
 class AllowAllLimiter:

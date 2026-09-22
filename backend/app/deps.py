@@ -1,17 +1,21 @@
+import asyncio
 import math
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.exceptions import RedisError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.embeddings import BgeEmbedder, Embedder
+from app.ai.generation import Generator
+from app.ai.rag import RagPipeline, RetrieverScope
 from app.ai.retriever import Retriever
 from app.core.config import settings
-from app.core.db import get_db
+from app.core.db import SessionLocal, get_db
 from app.core.rate_limiter import Limiter, Policy, Scope
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
@@ -90,6 +94,40 @@ def get_retriever(
     embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> Retriever:
     return Retriever(chunk_repo, embedder)
+
+
+def get_generator(request: Request) -> Generator:
+    generator: Generator = request.app.state.generator
+    return generator
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    return SessionLocal
+
+
+def get_retriever_scope(
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+) -> RetrieverScope:
+    @asynccontextmanager
+    async def scope() -> AsyncIterator[Retriever]:
+        async with session_factory() as session:
+            yield Retriever(ChunkRepository(session), embedder)
+
+    return scope
+
+
+def get_generation_slots(request: Request) -> asyncio.Semaphore:
+    slots: asyncio.Semaphore = request.app.state.generation_slots
+    return slots
+
+
+def get_rag_pipeline(
+    retriever_scope: Annotated[RetrieverScope, Depends(get_retriever_scope)],
+    generator: Annotated[Generator, Depends(get_generator)],
+    slots: Annotated[asyncio.Semaphore, Depends(get_generation_slots)],
+) -> RagPipeline:
+    return RagPipeline(retriever_scope, generator, slots)
 
 
 def get_limiter(request: Request) -> Limiter:

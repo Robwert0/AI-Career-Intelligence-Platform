@@ -97,6 +97,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/postgres
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: ci-secret-not-real-000000000000000000
+          CV_DOCUMENT_ID: 44444444-4444-4444-4444-444444444444
         run: |
           alembic upgrade head
           alembic check

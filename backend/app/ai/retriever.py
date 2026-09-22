@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from dataclasses import dataclass
 
 from app.ai.embeddings import Embedder, QueryTooLongError
 from app.models import Chunk
@@ -35,6 +36,13 @@ def reciprocal_rank_fusion(rankings: list[list[Chunk]], k: int = 60, limit: int 
     return [seen[chunk_id] for chunk_id, _ in ordered_scores[:limit]]
 
 
+@dataclass(frozen=True, slots=True)
+class RetrievalResult:
+    chunks: list[Chunk]
+    best_similarity: float
+    text_hit_count: int
+
+
 class Retriever:
     def __init__(self, repo: ChunkRepository, embedder: Embedder) -> None:
         self._repo = repo
@@ -47,7 +55,7 @@ class Retriever:
         document_id: uuid.UUID | None,
         limit: int = 5,
         section: str | None = None,
-    ) -> list[Chunk]:
+    ) -> RetrievalResult:
         if not 1 <= limit <= MAX_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_LIMIT}, got {limit}")
         if not query.strip():
@@ -57,7 +65,12 @@ class Retriever:
 
         window = limit * RANK_WINDOW_MULTIPLIER
         vector = await asyncio.to_thread(self._embedder.embed_query, query)
-        vector_result = await self._repo.search_by_vector(vector, window, section, document_id)
+        vector_hits = await self._repo.search_by_vector(vector, window, section, document_id)
         text_result = await self._repo.search_by_text(query, window, section, document_id)
+        vector_result = [chunk for chunk, _ in vector_hits]
 
-        return reciprocal_rank_fusion([vector_result, text_result], limit=limit)
+        return RetrievalResult(
+            chunks=reciprocal_rank_fusion([vector_result, text_result], limit=limit),
+            best_similarity=1.0 - vector_hits[0][1] if vector_hits else -1.0,
+            text_hit_count=len(text_result),
+        )

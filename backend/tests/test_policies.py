@@ -52,3 +52,14 @@ def test_an_ip_policy_does_not_depend_on_authentication() -> None:
 def test_a_user_policy_depends_on_the_current_user() -> None:
     parameters = inspect.signature(rate_limit(policies.ME_USER)).parameters
     assert "user" in parameters
+
+
+def test_chat_policies_match_the_documented_budget() -> None:
+    assert policies.CHAT_USER.capacity == 20
+    assert policies.CHAT_USER.refill_per_second == pytest.approx(20 / 60)
+    assert policies.CHAT_USER.scope is Scope.USER
+    assert policies.CHAT_IP.scope is Scope.IP
+
+
+def test_chat_is_limited_more_tightly_per_user_than_per_ip() -> None:
+    assert policies.CHAT_USER.capacity < policies.CHAT_IP.capacity
