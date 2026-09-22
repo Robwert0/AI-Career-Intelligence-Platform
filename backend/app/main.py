@@ -12,6 +12,7 @@ from app.core.rate_limiter import TokenBucketLimiter
 from app.core.redis import create_redis
 from app.deps import verify_trusted_origin
 from app.routes.auth import router as auth_router
+from app.routes.chat import router as chat_router
 from app.routes.health import router as health_router
 from app.routes.users import router as users_router
 
@@ -40,6 +41,7 @@ app.add_middleware(
 )
 app.include_router(health_router, prefix="/health")
 app.include_router(auth_router, prefix="/auth")
+app.include_router(chat_router, prefix="/chat")
 app.include_router(users_router, prefix="/users")
 
 _REFLECTED_KEYS = frozenset({"input", "ctx"})
