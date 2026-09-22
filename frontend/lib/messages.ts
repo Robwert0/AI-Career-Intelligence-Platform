@@ -1,11 +1,11 @@
+import { formatWait } from './duration'
 import type { ApiResult } from './http'
 
 type Failure = Extract<ApiResult<unknown>, { ok: false }>
 
 function waitPhrase(retryAfter?: number): string {
   if (retryAfter === undefined) return 'Try again shortly.'
-  const unit = retryAfter === 1 ? 'second' : 'seconds'
-  return `Try again in ${retryAfter} ${unit}.`
+  return `Try again in ${formatWait(retryAfter)}.`
 }
 
 export function authErrorMessage(failure: Failure): string {
