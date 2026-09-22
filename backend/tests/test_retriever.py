@@ -10,8 +10,8 @@ from app.ai.retriever import (
     MAX_QUERY_CHARS,
     RANK_WINDOW_MULTIPLIER,
     EmptyQueryError,
-    Retriever,
     RetrievalResult,
+    Retriever,
     reciprocal_rank_fusion,
 )
 from app.models import Chunk
