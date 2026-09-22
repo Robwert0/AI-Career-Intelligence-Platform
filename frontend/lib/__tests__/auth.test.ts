@@ -119,3 +119,92 @@ describe('login and logout', () => {
     expect(getAccessToken()).toBeNull()
   })
 })
+
+describe('transient failures do not sign the user out', () => {
+  it.each([
+    ['a 429', 429, { detail: 'Too many requests' }],
+    ['a 503', 503, { detail: 'Service unavailable' }],
+  ])('keeps the token through %s', async (_label, status, body) => {
+    setAccessToken('live')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(status, body)),
+    )
+
+    const token = await refreshAccessToken()
+
+    expect(token).toBeNull()
+    expect(getAccessToken()).toBe('live')
+  })
+
+  it('keeps the token through a network failure', async () => {
+    setAccessToken('live')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network down')))
+
+    await refreshAccessToken()
+
+    expect(getAccessToken()).toBe('live')
+  })
+
+  it('still clears the token on a 401', async () => {
+    setAccessToken('live')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(401, { detail: 'Not authenticated' })),
+    )
+
+    await refreshAccessToken()
+
+    expect(getAccessToken()).toBeNull()
+  })
+})
+
+describe('malformed token responses', () => {
+  it.each([
+    ['an empty object', {}],
+    ['a null body', null],
+    ['a non-string token', { access_token: 12345 }],
+    ['an empty token', { access_token: '' }],
+  ])('treats %s as anonymous instead of throwing', async (_label, body) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(200, body)),
+    )
+
+    await expect(refreshAccessToken()).resolves.toBeNull()
+    expect(getAccessToken()).toBeNull()
+  })
+
+  it('does not report a bootstrap success without a real token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(200, {})),
+    )
+
+    expect(await bootstrap()).toBe(false)
+  })
+})
+
+describe('logout racing an in-flight refresh', () => {
+  it('does not resurrect a token after signing out', async () => {
+    setAccessToken('stale')
+    let releaseRefresh: (value: Response) => void = () => {}
+    const pending = new Promise<Response>((resolve) => {
+      releaseRefresh = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/auth/refresh')) return pending
+        return respond(204, null)
+      }),
+    )
+
+    const refreshing = refreshAccessToken()
+    await logout()
+    releaseRefresh(respond(200, { access_token: 'resurrected' }))
+    await refreshing
+
+    expect(getAccessToken()).toBeNull()
+  })
+})

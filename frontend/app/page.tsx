@@ -1,8 +1,8 @@
 'use client'
 
-import { useAuth } from '@/components/AuthProvider'
+import { useAuth, type AuthStatus } from '@/components/AuthProvider'
 
-const STATUS_LABEL: Record<string, string> = {
+const STATUS_LABEL: Record<AuthStatus, string> = {
   loading: 'checking session',
   authenticated: 'signed in',
   anonymous: 'not signed in',

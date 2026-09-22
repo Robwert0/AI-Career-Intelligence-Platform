@@ -19,7 +19,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
 
   useEffect(() => {
-    bootstrap().then((authenticated) => setStatus(authenticated ? 'authenticated' : 'anonymous'))
+    bootstrap()
+      .then((authenticated) => setStatus(authenticated ? 'authenticated' : 'anonymous'))
+      .catch(() => setStatus('anonymous'))
   }, [])
 
   const signIn = useCallback(async (email: string, password: string) => {
