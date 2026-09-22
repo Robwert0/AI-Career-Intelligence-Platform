@@ -8,7 +8,7 @@ import pytest
 from fakes import FakeGenerator, UnavailableGenerator
 
 from app.ai.generation import FinishReason, GeneratorUnavailableError, Role
-from app.ai.prompts import CANARY, REFUSAL_TEXT
+from app.ai.prompts import CANARY, INCOMPLETE_TEXT, REFUSAL_TEXT
 from app.ai.rag import GenerationCapacityError, RagPipeline, RetrieverScope
 from app.ai.retriever import EmptyQueryError, RetrievalResult
 from app.core.config import settings
@@ -242,7 +242,7 @@ async def test_a_leaked_canary_is_replaced_before_it_leaves_the_pipeline() -> No
     assert answer.sources == []
 
 
-async def test_a_blocked_answer_is_indistinguishable_from_a_gate_refusal() -> None:
+async def test_a_blocked_answer_has_the_same_body_as_a_gate_refusal() -> None:
     blocked = await pipeline(hit(), FakeGenerator(text=f"leak {CANARY}")).answer("probe")
     refused = await pipeline(miss(), FakeGenerator()).answer("favourite pasta recipe?")
 
@@ -267,20 +267,43 @@ async def test_the_block_is_still_distinguishable_in_the_log(
     assert "canary" in caplog.text
 
 
-async def test_a_truncated_answer_is_replaced() -> None:
+async def test_a_truncated_answer_does_not_claim_the_cv_lacks_the_information() -> None:
     generator = FakeGenerator(text="He worked", finish_reason=FinishReason.LENGTH)
 
-    answer = await pipeline(hit(), generator).answer("what framework?")
+    answer = await pipeline(hit(), generator).answer("walk me through his career history")
 
-    assert answer.text == REFUSAL_TEXT
+    assert answer.text == INCOMPLETE_TEXT
+    assert answer.text != REFUSAL_TEXT
+    assert answer.refused is True
 
 
-async def test_an_empty_answer_is_replaced() -> None:
+async def test_an_empty_answer_is_reported_as_incomplete_not_as_a_refusal() -> None:
     generator = FakeGenerator(text="   ")
 
     answer = await pipeline(hit(), generator).answer("what framework?")
 
-    assert answer.text == REFUSAL_TEXT
+    assert answer.text == INCOMPLETE_TEXT
+    assert answer.refused is True
+
+
+async def test_an_ordinary_fault_is_not_collapsed_into_the_leak_response() -> None:
+    truncated = await pipeline(
+        hit(), FakeGenerator(text="He worked", finish_reason=FinishReason.LENGTH)
+    ).answer("q")
+    leaked = await pipeline(hit(), FakeGenerator(text=f"leak {CANARY}")).answer("q")
+
+    assert truncated.text != leaked.text
+
+
+async def test_the_leak_log_records_a_hash_not_the_leaked_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("ERROR"):
+        await pipeline(hit(), FakeGenerator(text=f"leak {CANARY}")).answer("probe", user_id="u-1")
+
+    assert CANARY not in caplog.text
+    assert "text_sha256=" in caplog.text
+    assert "user=u-1" in caplog.text
 
 
 async def test_generator_unavailability_propagates() -> None:

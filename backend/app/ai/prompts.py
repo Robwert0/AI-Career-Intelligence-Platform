@@ -11,7 +11,7 @@ QUESTION_TAG = "question"
 _SPECIAL_TOKEN = re.compile(r"<[|｜]([^|｜>]*)[|｜]>")
 _SENTENCE_MARKERS = re.compile(r"</?s>", re.IGNORECASE)
 _INSTRUCTION_MARKERS = re.compile(r"\[/?INST\]", re.IGNORECASE)
-_TURN_MARKERS = re.compile(r"<(?:start|end)_of_turn>", re.IGNORECASE)
+_TURN_MARKERS = re.compile(r"<(?:start|end)_of_turn>|</?<?SYS>?>|<(?:bos|eos)>", re.IGNORECASE)
 _OWN_TAGS = re.compile(
     rf"</?(?:{CV_EXTRACTS_TAG}|{EXTRACT_TAG}|{QUESTION_TAG})\b[^>]*>",
     re.IGNORECASE,
@@ -33,6 +33,10 @@ def escape_untrusted(text: str) -> str:
 CANARY = f"ref-{secrets.token_hex(8)}"
 
 REFUSAL_TEXT = "The CV provided does not contain the information needed to answer that question."
+
+INCOMPLETE_TEXT = (
+    "I could not produce a complete answer to that question. Try asking something narrower."
+)
 
 INDEXED_PROMPT = (
     "You answer questions about one candidate, using only the CV extracts supplied to you.\n"
