@@ -28,7 +28,9 @@ describe('authedRequest', () => {
   })
 
   it('sends no authorization header when anonymous', async () => {
-    const fetchMock = vi.fn(async () => respond(200, { id: '1', email: 'a@b.dev', created_at: 'now' }))
+    const fetchMock = vi.fn(async () =>
+      respond(200, { id: '1', email: 'a@b.dev', created_at: 'now' }),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     await me()

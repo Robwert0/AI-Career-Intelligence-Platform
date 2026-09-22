@@ -1,6 +1,5 @@
 export type ApiResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; status: number; detail: string; retryAfter?: number }
+  { ok: true; data: T } | { ok: false; status: number; detail: string; retryAfter?: number }
 
 const UNPARSEABLE = Symbol('unparseable')
 
