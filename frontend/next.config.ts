@@ -2,9 +2,10 @@ import type { NextConfig } from 'next'
 
 const backendOrigin = process.env.BACKEND_ORIGIN ?? 'http://localhost:8000'
 
-if (process.env.NODE_ENV === 'production' && !process.env.BACKEND_ORIGIN) {
-  throw new Error('BACKEND_ORIGIN must be set in production')
-}
+// Guard the serving phase only. Rewrites are evaluated per request, never baked in at build
+// time, so a build without BACKEND_ORIGIN is fine while serving without it would silently proxy
+// to loopback inside the container.
+const PHASE_PRODUCTION_SERVER = 'phase-production-server'
 
 const PROXIED_PREFIXES = ['auth', 'users', 'chat']
 
@@ -37,19 +38,26 @@ const SECURITY_HEADERS = [
   },
 ]
 
-const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      ...PROXIED_PREFIXES.map((prefix) => ({
-        source: `/api/${prefix}/:path*`,
-        destination: `${backendOrigin}/${prefix}/:path*`,
-      })),
-      { source: '/api/chat', destination: `${backendOrigin}/chat` },
-    ]
-  },
-  async headers() {
-    return [{ source: '/:path*', headers: SECURITY_HEADERS }]
-  },
+function buildConfig(): NextConfig {
+  return {
+    async rewrites() {
+      return [
+        ...PROXIED_PREFIXES.map((prefix) => ({
+          source: `/api/${prefix}/:path*`,
+          destination: `${backendOrigin}/${prefix}/:path*`,
+        })),
+        { source: '/api/chat', destination: `${backendOrigin}/chat` },
+      ]
+    },
+    async headers() {
+      return [{ source: '/:path*', headers: SECURITY_HEADERS }]
+    },
+  }
 }
 
-export default nextConfig
+export default function nextConfig(phase: string): NextConfig {
+  if (phase === PHASE_PRODUCTION_SERVER && !process.env.BACKEND_ORIGIN) {
+    throw new Error('BACKEND_ORIGIN must be set when serving in production')
+  }
+  return buildConfig()
+}
