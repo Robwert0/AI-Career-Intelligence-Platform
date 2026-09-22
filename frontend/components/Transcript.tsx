@@ -5,7 +5,7 @@ function TurnBody({ turn }: { turn: Turn }) {
   switch (turn.kind) {
     case 'question':
       return (
-        <p className="font-mono text-sm">
+        <p className="font-mono text-sm break-words">
           <span className="text-accent">&gt; </span>
           {turn.text}
         </p>
@@ -13,14 +13,14 @@ function TurnBody({ turn }: { turn: Turn }) {
     case 'answer':
       return (
         <div>
-          <p className="max-w-prose leading-relaxed">{turn.text}</p>
+          <p className="max-w-prose leading-relaxed break-words">{turn.text}</p>
           <SourcesPanel sources={turn.sources} />
         </div>
       )
     case 'refusal':
-      return <p className="max-w-prose text-muted italic">{turn.text}</p>
+      return <p className="max-w-prose break-words text-muted italic">{turn.text}</p>
     case 'error':
-      return <p className="font-mono text-sm text-danger">{turn.text}</p>
+      return <p className="font-mono text-sm break-words text-danger">{turn.text}</p>
   }
 }
 

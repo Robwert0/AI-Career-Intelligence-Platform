@@ -14,7 +14,7 @@ export function SourcesPanel({ sources }: { sources: Source[] }) {
         {sources.map((source, index) => (
           <li key={`${source.section}-${index}`} className="px-3 py-2">
             <span className="font-mono text-xs text-accent">[{source.section}]</span>
-            <p className="mt-1 text-sm text-muted">{source.content}</p>
+            <p className="mt-1 text-sm break-words text-muted">{source.content}</p>
           </li>
         ))}
       </ul>
