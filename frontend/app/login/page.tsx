@@ -9,7 +9,9 @@ import { CredentialsForm } from '@/components/CredentialsForm'
 function LoginForm() {
   const { signIn } = useAuth()
   const router = useRouter()
-  const justRegistered = useSearchParams().get('registered') === '1'
+  const params = useSearchParams()
+  const justRegistered = params.get('registered') === '1'
+  const logoutIncomplete = params.get('logout') === 'incomplete'
 
   return (
     <>
@@ -22,11 +24,18 @@ function LoginForm() {
         )}
       </div>
 
+      {logoutIncomplete ? (
+        <p role="alert" className="border border-danger px-3 py-2 font-mono text-xs text-danger">
+          Signed out on this device, but the session could not be ended on the server. Sign in and
+          out again once the connection is back.
+        </p>
+      ) : null}
+
       <CredentialsForm
         submitLabel="sign in"
         autoCompletePassword="current-password"
         onSubmit={signIn}
-        onSuccess={() => router.push('/chat')}
+        onSuccess={() => router.replace('/chat')}
       />
 
       <p className="font-mono text-xs text-muted">

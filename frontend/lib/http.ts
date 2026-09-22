@@ -3,6 +3,10 @@ export type ApiResult<T> =
 
 const UNPARSEABLE = Symbol('unparseable')
 
+// Without a deadline a stalled connection never settles, which would leave the app pinned on its
+// loading state forever rather than reporting a reachability failure.
+const REQUEST_TIMEOUT_MS = 10_000
+
 type ValidationItem = { msg?: string }
 
 function detailFrom(body: unknown, status: number): string {
@@ -29,6 +33,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   try {
     response = await fetch(`/api${path}`, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', ...init.headers },
     })

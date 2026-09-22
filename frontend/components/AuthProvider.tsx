@@ -10,13 +10,16 @@ type AuthValue = {
   status: AuthStatus
   signIn: (email: string, password: string) => Promise<ApiResult<unknown>>
   signUp: (email: string, password: string) => Promise<ApiResult<unknown>>
-  signOut: () => Promise<void>
+  signOut: () => Promise<ApiResult<void>>
+  sessionExpired: () => void
+  logoutIncomplete: boolean
 }
 
 const AuthContext = createContext<AuthValue | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
+  const [logoutIncomplete, setLogoutIncomplete] = useState(false)
 
   useEffect(() => {
     bootstrap()
@@ -33,12 +36,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = useCallback((email: string, password: string) => register(email, password), [])
 
   const signOut = useCallback(async () => {
-    await logout()
+    const result = await logout()
+    setLogoutIncomplete(!result.ok)
     setStatus('anonymous')
+    return result
   }, [])
 
+  const sessionExpired = useCallback(() => setStatus('anonymous'), [])
+
   return (
-    <AuthContext.Provider value={{ status, signIn, signUp, signOut }}>
+    <AuthContext.Provider
+      value={{ status, signIn, signUp, signOut, sessionExpired, logoutIncomplete }}
+    >
       {children}
     </AuthContext.Provider>
   )

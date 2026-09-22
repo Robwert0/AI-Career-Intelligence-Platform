@@ -110,6 +110,29 @@ describe('login and logout', () => {
     expect(getAccessToken()).toBeNull()
   })
 
+  it('reports a failed logout instead of swallowing it', async () => {
+    setAccessToken('live')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(503, { detail: 'Service unavailable' })),
+    )
+
+    const result = await logout()
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(503)
+  })
+
+  it('reports a successful logout', async () => {
+    setAccessToken('live')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 })),
+    )
+
+    expect((await logout()).ok).toBe(true)
+  })
+
   it('clears the token even if the logout call fails', async () => {
     setAccessToken('live')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network down')))
