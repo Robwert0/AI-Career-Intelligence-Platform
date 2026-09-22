@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import statistics
-import sys
 
 from app.ai.embeddings import BgeEmbedder
 from app.ai.retriever import Retriever
