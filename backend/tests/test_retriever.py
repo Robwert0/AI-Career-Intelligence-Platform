@@ -80,7 +80,7 @@ class RecordingRepository(ChunkRepository):
         limit: int,
         section: str | None = None,
         document_id: uuid.UUID | None = None,
-    ) -> list[Chunk]:
+    ) -> list[tuple[Chunk, float]]:
         self.limits.append(limit)
         return await super().search_by_vector(embedding, limit, section, document_id)
 

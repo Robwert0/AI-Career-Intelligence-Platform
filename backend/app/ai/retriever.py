@@ -57,7 +57,8 @@ class Retriever:
 
         window = limit * RANK_WINDOW_MULTIPLIER
         vector = await asyncio.to_thread(self._embedder.embed_query, query)
-        vector_result = await self._repo.search_by_vector(vector, window, section, document_id)
+        vector_hits = await self._repo.search_by_vector(vector, window, section, document_id)
         text_result = await self._repo.search_by_text(query, window, section, document_id)
+        vector_result = [chunk for chunk, _ in vector_hits]
 
         return reciprocal_rank_fusion([vector_result, text_result], limit=limit)

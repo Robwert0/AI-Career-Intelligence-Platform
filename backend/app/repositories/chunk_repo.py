@@ -36,12 +36,12 @@ class ChunkRepository:
         limit: int,
         section: str | None = None,
         document_id: uuid.UUID | None = None,
-    ) -> list[Chunk]:
+    ) -> list[tuple[Chunk, float]]:
         if section is not None or document_id is not None:
             await self._session.execute(text("SET LOCAL hnsw.iterative_scan = 'relaxed_order'"))
 
         distance = Chunk.embedding.cosine_distance(embedding)
-        stmt = select(Chunk).order_by(distance).limit(limit)
+        stmt = select(Chunk, distance).order_by(distance).limit(limit)
 
         if section is not None:
             stmt = stmt.where(Chunk.section == section)
@@ -50,7 +50,7 @@ class ChunkRepository:
 
         result = await self._session.execute(stmt)
 
-        return list(result.scalars())
+        return [(chunk, float(distance)) for chunk, distance in result.all()]
 
     async def search_by_text(
         self,
