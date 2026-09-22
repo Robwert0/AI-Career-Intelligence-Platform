@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -7,16 +8,18 @@ from dataclasses import dataclass
 from app.ai.generation import GenerationResult, Generator, Message, SamplingSettings
 from app.ai.input_guard import detect_injection_phrases
 from app.ai.output_guard import validate_output
-from app.ai.prompts import REFUSAL_TEXT, build_messages
+from app.ai.prompts import INCOMPLETE_TEXT, REFUSAL_TEXT, build_messages
 from app.ai.retriever import EmptyQueryError, Retriever
 from app.core.config import settings
 from app.models import Chunk
 
 logger = logging.getLogger(__name__)
 
-BLOCKED_TEXT = "I could not produce a reliable answer to that question."
-
 RetrieverScope = Callable[[], AbstractAsyncContextManager[Retriever]]
+
+# canary and ngram mean a suspected prompt leak, so the response must be indistinguishable from a
+# refusal. empty and truncated are ordinary faults and get an honest message instead.
+LEAK_CHECKS = frozenset({"canary", "ngram"})
 
 
 class GenerationCapacityError(Exception):
@@ -41,10 +44,14 @@ class RagPipeline:
         self._generator = generator
         self._slots = slots
 
-    async def answer(self, question: str) -> Answer:
+    async def answer(self, question: str, *, user_id: str | None = None) -> Answer:
         flagged = detect_injection_phrases(question)
         if flagged:
-            logger.warning("chat injection phrasing detected: %s", ",".join(flagged))
+            logger.warning(
+                "chat injection phrasing detected user=%s patterns=%s",
+                user_id,
+                ",".join(flagged),
+            )
 
         try:
             async with self._retriever_scope() as retriever:
@@ -67,14 +74,25 @@ class RagPipeline:
         generated = await self._generate(build_messages(question, result.chunks))
 
         verdict = validate_output(generated)
-        if not verdict.ok:
+        if verdict.failed_check in LEAK_CHECKS:
             logger.error(
-                "chat output rejected check=%s model=%s text=%r",
+                "chat output rejected user=%s check=%s model=%s text_sha256=%s len=%d",
+                user_id,
                 verdict.failed_check,
                 generated.model,
-                generated.text[:200],
+                hashlib.sha256(generated.text.encode()).hexdigest()[:16],
+                len(generated.text),
             )
-            return Answer(text=BLOCKED_TEXT, refused=False, sources=[])
+            return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
+
+        if not verdict.ok:
+            logger.warning(
+                "chat answer incomplete user=%s check=%s model=%s",
+                user_id,
+                verdict.failed_check,
+                generated.model,
+            )
+            return Answer(text=INCOMPLETE_TEXT, refused=True, sources=[])
 
         logger.info(
             "chat answered model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",

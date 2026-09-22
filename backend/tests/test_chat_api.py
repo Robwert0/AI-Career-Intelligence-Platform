@@ -16,8 +16,8 @@ from fakes import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.embeddings import QueryTooLongError
-from app.ai.prompts import CANARY
-from app.ai.rag import BLOCKED_TEXT
+from app.ai.prompts import CANARY, REFUSAL_TEXT
+from app.ai.rag import RagPipeline
 from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import get_db
@@ -154,6 +154,26 @@ async def test_an_unavailable_generator_returns_503(chat_client: ChatFixture) ->
     assert int(response.headers["Retry-After"]) >= 1
 
 
+async def test_the_route_passes_the_user_to_the_pipeline(chat_client: ChatFixture) -> None:
+    client, _, headers = chat_client
+    seen: list[str | None] = []
+
+    original = RagPipeline.answer
+
+    async def recording(self, question, *, user_id=None):  # type: ignore[no-untyped-def]
+        seen.append(user_id)
+        return await original(self, question, user_id=user_id)
+
+    RagPipeline.answer = recording  # type: ignore[method-assign]
+    try:
+        await client.post("/chat", json={"message": "Kubernetes"}, headers=headers)
+    finally:
+        RagPipeline.answer = original  # type: ignore[method-assign]
+
+    assert len(seen) == 1
+    assert seen[0] is not None
+
+
 @pytest.mark.generator(FakeGenerator(text=f"my reference is {CANARY}"))
 async def test_a_leaking_answer_never_reaches_the_client(chat_client: ChatFixture) -> None:
     client, _, headers = chat_client
@@ -162,7 +182,8 @@ async def test_a_leaking_answer_never_reaches_the_client(chat_client: ChatFixtur
 
     assert response.status_code == 200
     assert CANARY not in response.text
-    assert response.json()["answer"] == BLOCKED_TEXT
+    assert response.json()["answer"] == REFUSAL_TEXT
+    assert response.json()["refused"] is True
     assert response.json()["sources"] == []
 
 

@@ -28,7 +28,7 @@ async def chat(
     pipeline: Annotated[RagPipeline, Depends(get_rag_pipeline)],
 ) -> ChatResponse:
     try:
-        answer = await pipeline.answer(payload.message)
+        answer = await pipeline.answer(payload.message, user_id=str(current_user.id))
     except QueryTooLongError:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
