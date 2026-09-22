@@ -86,6 +86,24 @@ describe('request', () => {
     if (!result.ok) expect(result.detail).toBe('The server sent an unreadable response')
   })
 
+  it('sends an abort signal so a stalled request cannot hang forever', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond(200, {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await request('/users/me')
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('reports a timeout as an unreachable server', async () => {
+    const aborted = Object.assign(new Error('The operation was aborted'), { name: 'TimeoutError' })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(aborted))
+
+    const result = await request('/users/me')
+
+    expect(result).toMatchObject({ ok: false, status: 0, detail: 'Could not reach the server' })
+  })
+
   it('reports a network failure as status 0', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network down')))
 

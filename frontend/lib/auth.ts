@@ -64,10 +64,11 @@ export function register(email: string, password: string): Promise<ApiResult<unk
   })
 }
 
-export async function logout(): Promise<void> {
+export async function logout(): Promise<ApiResult<void>> {
   logoutEpoch += 1
-  await request<void>('/auth/logout', { method: 'POST' })
+  const result = await request<void>('/auth/logout', { method: 'POST' })
   accessToken = null
+  return result
 }
 
 export async function bootstrap(): Promise<boolean> {
