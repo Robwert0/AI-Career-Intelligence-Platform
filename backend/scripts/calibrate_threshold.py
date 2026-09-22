@@ -9,28 +9,28 @@ from app.core.db import SessionLocal
 from app.repositories import ChunkRepository
 
 SHOULD_ANSWER = [
-    "What backend frameworks has he used?",
-    "How much Python experience does he have?",
-    "What databases does he know?",
-    "Where did he study?",
-    "What cloud platforms has he worked with?",
-    "Has he led a team?",
-    "What testing tools does he use?",
-    "What is his most recent role?",
-    "Does he have container experience?",
-    "What programming languages does he write?",
+    "What is his current role?",
+    "Which message broker has he worked with?",
+    "What databases has he used in production?",
+    "Where did he do his bachelor's degree?",
+    "What is he studying now?",
+    "Has he done any internships?",
+    "What did he build with OpenCV?",
+    "Does he have experience with FastAPI?",
+    "What does he use for monitoring and alerting?",
+    "What is the Jarvis project?",
 ]
 
 SHOULD_REFUSE = [
     "What did he do at Google?",
-    "What is his salary expectation?",
-    "How many years of Haskell does he have?",
+    "How many years of Rust does he have?",
+    "What Kubernetes experience does he have?",
     "What did he study at Oxford?",
-    "Which Kubernetes certification does he hold?",
-    "What did he publish at NeurIPS?",
-    "What is his AWS certification number?",
-    "Which patents does he hold?",
-    "What is his favourite pasta recipe?",
+    "Which AWS certifications does he hold?",
+    "How many engineers has he managed?",
+    "What papers has he published?",
+    "What is his salary expectation?",
+    "What is his GPA?",
     "Who is the president of France?",
 ]
 
