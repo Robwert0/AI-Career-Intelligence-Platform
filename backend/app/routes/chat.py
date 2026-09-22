@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.ai.embeddings import QueryTooLongError
 from app.ai.generation import GenerationRequestError, GeneratorUnavailableError
-from app.ai.rag import RagPipeline
+from app.ai.rag import GenerationCapacityError, RagPipeline
 from app.core import policies
 from app.core.config import settings
 from app.deps import get_current_user, get_rag_pipeline, rate_limit
@@ -38,6 +38,12 @@ async def chat(
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             "Internal Server Error",
+        ) from None
+    except GenerationCapacityError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Service unavailable",
+            headers={"Retry-After": str(settings.chat_timeout_seconds)},
         ) from None
     except GeneratorUnavailableError:
         raise HTTPException(

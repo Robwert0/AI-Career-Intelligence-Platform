@@ -1,11 +1,15 @@
+import asyncio
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import cast
 
 import pytest
 from fakes import FakeGenerator, UnavailableGenerator
 
 from app.ai.generation import FinishReason, GeneratorUnavailableError, Role
 from app.ai.prompts import CANARY, REFUSAL_TEXT
-from app.ai.rag import BLOCKED_TEXT, RagPipeline
+from app.ai.rag import BLOCKED_TEXT, GenerationCapacityError, RagPipeline, RetrieverScope
 from app.ai.retriever import EmptyQueryError, RetrievalResult
 from app.core.config import settings
 from app.models import Chunk
@@ -31,6 +35,8 @@ class StubRetriever:
         self._result = result
         self.queries: list[str] = []
         self.document_ids: list[uuid.UUID | None] = []
+        self.entered = 0
+        self.exited = 0
 
     async def retrieve(
         self,
@@ -55,8 +61,28 @@ def miss() -> RetrievalResult:
     return RetrievalResult(chunks=[chunk()], best_similarity=BELOW, text_hit_count=0)
 
 
-def pipeline(result: RetrievalResult | None, generator: object) -> RagPipeline:
-    return RagPipeline(StubRetriever(result), generator)  # type: ignore[arg-type]
+def scope_over(retriever: StubRetriever) -> RetrieverScope:
+    @asynccontextmanager
+    async def scope() -> AsyncIterator[StubRetriever]:
+        retriever.entered += 1
+        try:
+            yield retriever
+        finally:
+            retriever.exited += 1
+
+    return cast(RetrieverScope, scope)
+
+
+def pipeline(
+    result: RetrievalResult | None,
+    generator: object,
+    slots: asyncio.Semaphore | None = None,
+) -> RagPipeline:
+    return RagPipeline(
+        scope_over(StubRetriever(result)),
+        generator,  # type: ignore[arg-type]
+        slots or asyncio.Semaphore(4),
+    )
 
 
 async def test_a_grounded_question_is_answered_from_the_chunks() -> None:
@@ -80,14 +106,14 @@ async def test_the_gate_refuses_without_ever_calling_the_generator() -> None:
     assert generator.calls == []
 
 
-async def test_a_full_text_hit_prevents_refusal_despite_low_similarity() -> None:
+async def test_a_full_text_hit_no_longer_rescues_a_low_similarity_question() -> None:
     generator = FakeGenerator()
     result = RetrievalResult(chunks=[chunk()], best_similarity=BELOW, text_hit_count=3)
 
-    answer = await pipeline(result, generator).answer("Terraform?")
+    answer = await pipeline(result, generator).answer("tell me a joke about terraform")
 
-    assert answer.refused is False
-    assert len(generator.calls) == 1
+    assert answer.refused is True
+    assert generator.calls == []
 
 
 async def test_high_similarity_alone_prevents_refusal() -> None:
@@ -124,9 +150,78 @@ async def test_the_generator_receives_the_three_isolated_channels() -> None:
 async def test_retrieval_is_scoped_to_the_configured_document() -> None:
     retriever = StubRetriever(hit())
 
-    await RagPipeline(retriever, FakeGenerator()).answer("what framework?")  # type: ignore[arg-type]
+    await RagPipeline(
+        scope_over(retriever),
+        FakeGenerator(),
+        asyncio.Semaphore(4),
+    ).answer("what framework?")
 
     assert retriever.document_ids == [settings.cv_document_id]
+
+
+async def test_the_retriever_scope_closes_before_the_generator_is_called() -> None:
+    retriever = StubRetriever(hit())
+    witness: list[tuple[int, int]] = []
+
+    class WatchingGenerator(FakeGenerator):
+        async def generate(self, messages, *, sampling=None, top_logprobs=None):  # type: ignore[no-untyped-def]
+            witness.append((retriever.entered, retriever.exited))
+            return await super().generate(messages, sampling=sampling)
+
+    await RagPipeline(
+        scope_over(retriever),
+        WatchingGenerator(),
+        asyncio.Semaphore(4),
+    ).answer("what framework?")
+
+    assert witness == [(1, 1)]
+
+
+async def test_concurrent_generations_are_capped_by_the_semaphore() -> None:
+    slots = asyncio.Semaphore(2)
+    in_flight = 0
+    peak = 0
+    release = asyncio.Event()
+
+    class BlockingGenerator(FakeGenerator):
+        async def generate(self, messages, *, sampling=None, top_logprobs=None):  # type: ignore[no-untyped-def]
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await release.wait()
+            in_flight -= 1
+            return await super().generate(messages, sampling=sampling)
+
+    tasks = [
+        asyncio.create_task(pipeline(hit(), BlockingGenerator(), slots).answer("what framework?"))
+        for _ in range(6)
+    ]
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(*tasks)
+
+    assert peak <= 2
+
+
+async def test_a_request_that_never_gets_a_slot_raises_capacity_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "chat_queue_timeout_seconds", 0.01)
+    exhausted = asyncio.Semaphore(1)
+    await exhausted.acquire()
+
+    with pytest.raises(GenerationCapacityError):
+        await pipeline(hit(), FakeGenerator(), exhausted).answer("what framework?")
+
+
+async def test_a_slot_is_released_even_when_generation_fails() -> None:
+    slots = asyncio.Semaphore(1)
+
+    with pytest.raises(GeneratorUnavailableError):
+        await pipeline(hit(), UnavailableGenerator(), slots).answer("what framework?")
+
+    assert slots.locked() is False
 
 
 async def test_generation_uses_the_configured_sampling() -> None:

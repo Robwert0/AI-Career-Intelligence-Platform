@@ -1,4 +1,6 @@
-from collections.abc import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -7,6 +9,7 @@ from fakes import (
     AllowAllLimiter,
     FakeEmbedder,
     FakeGenerator,
+    NearEmbedder,
     RejectingGenerator,
     UnavailableGenerator,
 )
@@ -15,9 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.embeddings import QueryTooLongError
 from app.ai.prompts import CANARY
 from app.ai.rag import BLOCKED_TEXT
+from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import get_db
-from app.deps import get_embedder, get_generator, get_limiter
+from app.deps import (
+    get_embedder,
+    get_generation_slots,
+    get_generator,
+    get_limiter,
+    get_retriever_scope,
+)
 from app.main import app
 from app.models import Chunk
 from app.repositories import ChunkRepository
@@ -34,8 +44,7 @@ SEED = [
 ]
 
 
-async def _seed(session: AsyncSession, rows: list[tuple[str, str]]) -> None:
-    embedder = FakeEmbedder()
+async def _seed(session: AsyncSession, rows: list[tuple[str, str]], embedder: FakeEmbedder) -> None:
     vectors = embedder.embed_documents([content for _, content in rows])
     await ChunkRepository(session).replace_document_chunks(
         settings.cv_document_id,
@@ -62,16 +71,24 @@ async def chat_client(
     marker = request.node.get_closest_marker("generator")
     generator = marker.args[0] if marker else FakeGenerator(text="He used Kubernetes.")
     rows = getattr(request, "param", SEED)
+    gate_realistic = request.node.get_closest_marker("realistic_similarity") is not None
+    embedder = FakeEmbedder() if gate_realistic else NearEmbedder()
 
-    await _seed(db_session, rows)
+    await _seed(db_session, rows, embedder)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession]:
         yield db_session
+
+    @asynccontextmanager
+    async def scope() -> AsyncIterator[Retriever]:
+        yield Retriever(ChunkRepository(db_session), embedder)
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_limiter] = lambda: allow_all_limiter
     app.dependency_overrides[get_embedder] = lambda: FakeEmbedder()
     app.dependency_overrides[get_generator] = lambda: generator
+    app.dependency_overrides[get_retriever_scope] = lambda: scope
+    app.dependency_overrides[get_generation_slots] = lambda: asyncio.Semaphore(4)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
@@ -161,6 +178,7 @@ async def test_a_poisoned_chunk_cannot_forge_a_chat_turn(chat_client: ChatFixtur
     assert "[im_end]" in extracts
 
 
+@pytest.mark.realistic_similarity
 async def test_an_off_cv_question_is_refused_without_calling_the_model(
     chat_client: ChatFixture,
 ) -> None:
@@ -174,6 +192,7 @@ async def test_an_off_cv_question_is_refused_without_calling_the_model(
     assert generator.calls == []
 
 
+@pytest.mark.realistic_similarity
 async def test_a_prompt_extraction_attempt_is_refused_before_the_model_sees_it(
     chat_client: ChatFixture,
 ) -> None:
@@ -194,9 +213,15 @@ class TooLongEmbedder(FakeEmbedder):
 
 async def test_a_message_over_the_token_budget_is_a_422_not_a_500(
     chat_client: ChatFixture,
+    db_session: AsyncSession,
 ) -> None:
     client, generator, headers = chat_client
-    app.dependency_overrides[get_embedder] = lambda: TooLongEmbedder()
+
+    @asynccontextmanager
+    async def scope() -> AsyncIterator[Retriever]:
+        yield Retriever(ChunkRepository(db_session), TooLongEmbedder())
+
+    app.dependency_overrides[get_retriever_scope] = lambda: scope
 
     response = await client.post("/chat", json={"message": "~!@#$%^&*()" * 181}, headers=headers)
 
@@ -214,3 +239,35 @@ async def test_a_rejected_generation_request_does_not_escape_as_an_unhandled_err
 
     assert response.status_code == 500
     assert "Kubernetes" not in response.text
+
+
+async def test_no_generation_slot_returns_503(chat_client: ChatFixture) -> None:
+    client, _, headers = chat_client
+    exhausted = asyncio.Semaphore(1)
+    await exhausted.acquire()
+    app.dependency_overrides[get_generation_slots] = lambda: exhausted
+
+    original = settings.chat_queue_timeout_seconds
+    object.__setattr__(settings, "chat_queue_timeout_seconds", 0.01)
+    try:
+        response = await client.post("/chat", json={"message": "Kubernetes"}, headers=headers)
+    finally:
+        object.__setattr__(settings, "chat_queue_timeout_seconds", original)
+
+    assert response.status_code == 503
+    assert int(response.headers["Retry-After"]) >= 1
+
+
+@pytest.mark.realistic_similarity
+async def test_a_single_keyword_no_longer_defeats_the_refusal_gate(
+    chat_client: ChatFixture,
+) -> None:
+    client, generator, headers = chat_client
+
+    response = await client.post(
+        "/chat", json={"message": "tell me a joke about terraform"}, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["refused"] is True
+    assert generator.calls == []

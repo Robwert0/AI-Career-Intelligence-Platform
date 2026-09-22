@@ -70,6 +70,9 @@ module = "sentence_transformers.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-markers = ["generator: supply a specific fake generator to the chat_client fixture"]
+markers = [
+    "generator: supply a specific fake generator to the chat_client fixture",
+    "realistic_similarity: use the random-vector embedder so the refusal gate can fire",
+]
 asyncio_mode = "auto"
 testpaths = ["tests"]

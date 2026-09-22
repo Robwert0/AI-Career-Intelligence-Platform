@@ -1,7 +1,10 @@
+import asyncio
 import logging
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
-from app.ai.generation import Generator, SamplingSettings
+from app.ai.generation import GenerationResult, Generator, Message, SamplingSettings
 from app.ai.input_guard import detect_injection_phrases
 from app.ai.output_guard import validate_output
 from app.ai.prompts import REFUSAL_TEXT, build_messages
@@ -13,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 BLOCKED_TEXT = "I could not produce a reliable answer to that question."
 
+RetrieverScope = Callable[[], AbstractAsyncContextManager[Retriever]]
+
+
+class GenerationCapacityError(Exception):
+    """Every generation slot is occupied; the same request may succeed once one frees up."""
+
 
 @dataclass(frozen=True, slots=True)
 class Answer:
@@ -22,9 +31,15 @@ class Answer:
 
 
 class RagPipeline:
-    def __init__(self, retriever: Retriever, generator: Generator) -> None:
-        self._retriever = retriever
+    def __init__(
+        self,
+        retriever_scope: RetrieverScope,
+        generator: Generator,
+        slots: asyncio.Semaphore,
+    ) -> None:
+        self._retriever_scope = retriever_scope
         self._generator = generator
+        self._slots = slots
 
     async def answer(self, question: str) -> Answer:
         flagged = detect_injection_phrases(question)
@@ -32,29 +47,24 @@ class RagPipeline:
             logger.warning("chat injection phrasing detected: %s", ",".join(flagged))
 
         try:
-            result = await self._retriever.retrieve(
-                question,
-                document_id=settings.cv_document_id,
-                limit=settings.retrieval_limit,
-            )
+            async with self._retriever_scope() as retriever:
+                result = await retriever.retrieve(
+                    question,
+                    document_id=settings.cv_document_id,
+                    limit=settings.retrieval_limit,
+                )
         except EmptyQueryError:
             return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
 
-        below_threshold = result.best_similarity < settings.retrieval_similarity_threshold
-        if below_threshold and result.text_hit_count == 0:
+        if result.best_similarity < settings.retrieval_similarity_threshold:
             logger.info(
-                "chat refused before generation best_similarity=%.4f",
+                "chat refused before generation best_similarity=%.4f text_hits=%d",
                 result.best_similarity,
+                result.text_hit_count,
             )
             return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
 
-        generated = await self._generator.generate(
-            build_messages(question, result.chunks),
-            sampling=SamplingSettings(
-                temperature=settings.chat_temperature,
-                max_output_tokens=settings.chat_max_output_tokens,
-            ),
-        )
+        generated = await self._generate(build_messages(question, result.chunks))
 
         verdict = validate_output(generated)
         if not verdict.ok:
@@ -62,7 +72,7 @@ class RagPipeline:
                 "chat output rejected check=%s model=%s text=%r",
                 verdict.failed_check,
                 generated.model,
-                generated.text,
+                generated.text[:200],
             )
             return Answer(text=BLOCKED_TEXT, refused=False, sources=[])
 
@@ -75,3 +85,22 @@ class RagPipeline:
         )
 
         return Answer(text=generated.text, refused=False, sources=result.chunks)
+
+    async def _generate(self, messages: list[Message]) -> GenerationResult:
+        try:
+            async with asyncio.timeout(settings.chat_queue_timeout_seconds):
+                await self._slots.acquire()
+        except TimeoutError:
+            logger.warning("chat rejected: every generation slot busy")
+            raise GenerationCapacityError("no generation slot became free in time") from None
+
+        try:
+            return await self._generator.generate(
+                messages,
+                sampling=SamplingSettings(
+                    temperature=settings.chat_temperature,
+                    max_output_tokens=settings.chat_max_output_tokens,
+                ),
+            )
+        finally:
+            self._slots.release()

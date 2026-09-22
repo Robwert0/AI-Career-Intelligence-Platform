@@ -40,6 +40,14 @@ class FakeEmbedder:
         return self._vector(text)
 
 
+class NearEmbedder(FakeEmbedder):
+    """Every vector is identical, so cosine similarity is 1.0 and the refusal gate always passes."""
+
+    def _vector(self, text: str) -> list[float]:
+        length = math.sqrt(self.dimensions)
+        return [1.0 / length] * self.dimensions
+
+
 class FakeGenerator:
     def __init__(
         self,

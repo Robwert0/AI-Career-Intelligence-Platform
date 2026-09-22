@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
     app.state.generator = OllamaGenerator(timeout_seconds=settings.chat_timeout_seconds)
+    app.state.generation_slots = asyncio.Semaphore(settings.chat_max_concurrent_generations)
     yield
     await app.state.generator.aclose()
     await app.state.redis.aclose()
