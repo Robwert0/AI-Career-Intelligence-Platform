@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useAuth, type AuthStatus } from '@/components/AuthProvider'
 
 const STATUS_LABEL: Record<AuthStatus, string> = {
@@ -41,9 +42,22 @@ export default function Home() {
         ))}
       </dl>
 
-      <p className="font-mono text-xs text-muted">
-        <span className="text-accent">&gt;</span> session: {status}
-      </p>
+      <div className="flex items-center gap-4 font-mono text-sm">
+        {status === 'authenticated' ? (
+          <Link href="/chat" className="border border-fg px-3 py-2">
+            open chat
+          </Link>
+        ) : (
+          <>
+            <Link href="/login" className="border border-fg px-3 py-2">
+              sign in
+            </Link>
+            <Link href="/register" className="text-muted underline underline-offset-4">
+              create an account
+            </Link>
+          </>
+        )}
+      </div>
     </main>
   )
 }
