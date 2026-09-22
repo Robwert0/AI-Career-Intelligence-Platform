@@ -14,8 +14,6 @@ from app.models import Chunk
 
 logger = logging.getLogger(__name__)
 
-BLOCKED_TEXT = "I could not produce a reliable answer to that question."
-
 RetrieverScope = Callable[[], AbstractAsyncContextManager[Retriever]]
 
 
@@ -74,7 +72,7 @@ class RagPipeline:
                 generated.model,
                 generated.text[:200],
             )
-            return Answer(text=BLOCKED_TEXT, refused=False, sources=[])
+            return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
 
         logger.info(
             "chat answered model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",

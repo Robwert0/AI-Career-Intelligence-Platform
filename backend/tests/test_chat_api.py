@@ -16,8 +16,7 @@ from fakes import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.embeddings import QueryTooLongError
-from app.ai.prompts import CANARY
-from app.ai.rag import BLOCKED_TEXT
+from app.ai.prompts import CANARY, REFUSAL_TEXT
 from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import get_db
@@ -162,7 +161,8 @@ async def test_a_leaking_answer_never_reaches_the_client(chat_client: ChatFixtur
 
     assert response.status_code == 200
     assert CANARY not in response.text
-    assert response.json()["answer"] == BLOCKED_TEXT
+    assert response.json()["answer"] == REFUSAL_TEXT
+    assert response.json()["refused"] is True
     assert response.json()["sources"] == []
 
 
