@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
 from app.core.rate_limiter import TokenBucketLimiter
 from app.core.redis import create_redis
@@ -19,7 +20,9 @@ from app.routes.users import router as users_router
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
+    app.state.generator = OllamaGenerator(timeout_seconds=settings.chat_timeout_seconds)
     yield
+    await app.state.generator.aclose()
     await app.state.redis.aclose()
 
 

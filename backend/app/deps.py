@@ -9,6 +9,8 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.embeddings import BgeEmbedder, Embedder
+from app.ai.generation import Generator
+from app.ai.rag import RagPipeline
 from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import get_db
@@ -90,6 +92,18 @@ def get_retriever(
     embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> Retriever:
     return Retriever(chunk_repo, embedder)
+
+
+def get_generator(request: Request) -> Generator:
+    generator: Generator = request.app.state.generator
+    return generator
+
+
+def get_rag_pipeline(
+    retriever: Annotated[Retriever, Depends(get_retriever)],
+    generator: Annotated[Generator, Depends(get_generator)],
+) -> RagPipeline:
+    return RagPipeline(retriever, generator)
 
 
 def get_limiter(request: Request) -> Limiter:
