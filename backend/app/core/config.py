@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     generation_connect_timeout_seconds: int = 5
     cv_document_id: uuid.UUID
     retrieval_limit: int = Field(default=5, ge=1, le=20)
-    retrieval_similarity_threshold: float = Field(default=0.45, ge=-1.0, le=1.0)
+    retrieval_similarity_threshold: float = Field(default=0.48, ge=-1.0, le=1.0)
     chat_timeout_seconds: int = Field(default=30, ge=1)
     chat_max_output_tokens: int = Field(default=512, ge=1)
     chat_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
