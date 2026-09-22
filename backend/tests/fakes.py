@@ -7,6 +7,7 @@ from redis.exceptions import RedisError
 from app.ai.generation import (
     FinishReason,
     GenerationResult,
+    GeneratorUnavailableError,
     Message,
     SamplingSettings,
     Usage,
@@ -47,6 +48,7 @@ class FakeGenerator:
         self._text = text
         self._finish_reason = finish_reason
         self.calls: list[list[Message]] = []
+        self.sampling: list[SamplingSettings] = []
 
     @property
     def model_name(self) -> str:
@@ -61,6 +63,7 @@ class FakeGenerator:
     ) -> GenerationResult:
         self.calls.append(messages)
         settings_used = sampling or SamplingSettings()
+        self.sampling.append(settings_used)
         return GenerationResult(
             text=self._text,
             finish_reason=self._finish_reason,
@@ -72,6 +75,21 @@ class FakeGenerator:
             latency_ms=0,
             sampling=settings_used,
         )
+
+
+class UnavailableGenerator:
+    @property
+    def model_name(self) -> str:
+        return "unavailable-generator"
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+    ) -> GenerationResult:
+        raise GeneratorUnavailableError("the fake provider is down")
 
 
 class AllowAllLimiter:
