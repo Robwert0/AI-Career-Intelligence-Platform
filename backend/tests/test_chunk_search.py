@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from fakes import FakeEmbedder
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk
@@ -158,3 +159,33 @@ async def test_vector_search_distances_ascend(seeded: ChunkRepository) -> None:
 
     distances = [distance for _, distance in hits]
     assert distances == sorted(distances)
+
+
+async def test_vector_search_still_fills_the_limit_after_index_churn(
+    seeded: ChunkRepository, db_session: AsyncSession
+) -> None:
+    embedder = FakeEmbedder()
+    for round_number in range(20):
+        churn = uuid.uuid4()
+        contents = [f"churn {round_number} row {index}" for index in range(10)]
+        await seeded.replace_document_chunks(
+            churn,
+            [
+                Chunk(
+                    document_id=churn,
+                    chunk_index=index,
+                    content=content,
+                    section="other",
+                    embedding=vector,
+                    embedding_model=embedder.model_name,
+                )
+                for index, (content, vector) in enumerate(
+                    zip(contents, embedder.embed_documents(contents), strict=True)
+                )
+            ],
+        )
+        await db_session.execute(delete(Chunk).where(Chunk.document_id == churn))
+
+    hits = await seeded.search_by_vector(vector_for("anything"), limit=4)
+
+    assert len(hits) == 4

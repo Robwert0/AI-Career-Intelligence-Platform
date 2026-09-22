@@ -37,8 +37,7 @@ class ChunkRepository:
         section: str | None = None,
         document_id: uuid.UUID | None = None,
     ) -> list[tuple[Chunk, float]]:
-        if section is not None or document_id is not None:
-            await self._session.execute(text("SET LOCAL hnsw.iterative_scan = 'relaxed_order'"))
+        await self._session.execute(text("SET LOCAL hnsw.iterative_scan = 'relaxed_order'"))
 
         distance = Chunk.embedding.cosine_distance(embedding)
         stmt = select(Chunk, distance).order_by(distance).limit(limit)
