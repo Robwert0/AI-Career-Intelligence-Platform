@@ -1,6 +1,6 @@
 import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT_DIR / ".env", extra="ignore")
 
     env: str = "development"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     database_url: str
     redis_url: str
     secret_key: Annotated[str, Field(min_length=32)]
@@ -41,6 +42,16 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("ollama_base_url")
+    @classmethod
+    def _reject_url_credentials(cls, url: str) -> str:
+        parsed = urlsplit(url)
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError(
+                "must not carry credentials, a query or a fragment: httpx logs request URLs"
+            )
+        return url
 
     @field_validator("cors_allowed_origins", mode="after")
     @classmethod

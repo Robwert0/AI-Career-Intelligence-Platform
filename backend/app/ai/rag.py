@@ -65,7 +65,8 @@ class RagPipeline:
 
         if result.best_similarity < settings.retrieval_similarity_threshold:
             logger.info(
-                "chat refused before generation best_similarity=%.4f text_hits=%d",
+                "chat refused before generation user=%s best_similarity=%.4f text_hits=%d",
+                user_id,
                 result.best_similarity,
                 result.text_hit_count,
             )
@@ -95,7 +96,8 @@ class RagPipeline:
             return Answer(text=INCOMPLETE_TEXT, refused=True, sources=[])
 
         logger.info(
-            "chat answered model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",
+            "chat answered user=%s model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",
+            user_id,
             generated.model,
             generated.usage.prompt_tokens,
             generated.usage.completion_tokens,

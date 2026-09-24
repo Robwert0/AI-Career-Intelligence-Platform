@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
+from app.core.log_config import configure_logging
 from app.core.rate_limiter import TokenBucketLimiter
 from app.core.redis import create_redis
 from app.deps import verify_trusted_origin
@@ -20,6 +21,7 @@ from app.routes.users import router as users_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    configure_logging(settings.log_level)
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
     app.state.generator = OllamaGenerator(timeout_seconds=settings.chat_timeout_seconds)
