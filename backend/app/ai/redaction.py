@@ -2,8 +2,10 @@ import re
 
 PHONE_PLACEHOLDER = "[phone redacted]"
 
-# Nine digits is shorter than any international or national mobile number and longer than any
-# year range ("2021-2025" is eight). Separators exclude newlines so adjacent lines never merge.
+# Nine digits covers Romanian and most European numbers while sparing year ranges ("2021-2025" is
+# eight); 8-digit national numbers (Nordics, Singapore, Hong Kong) slip through. Only ASCII
+# separators are matched and newlines are excluded so adjacent lines never merge. Tuned for the
+# owner's CV: uploaded CVs (p5) need phonenumbers-grade matching instead.
 _MIN_PHONE_DIGITS = 9
 _NUMBER_RUN = re.compile(r"(?<![\w/])\(?\+?\d[\d \t().-]*\d(?!\w)")
 
