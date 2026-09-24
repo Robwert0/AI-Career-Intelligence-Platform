@@ -3,13 +3,16 @@ import uuid
 
 from app.ai.chunking import TextChunk, chunk_cv
 from app.ai.embeddings import Embedder
+from app.ai.redaction import redact_phone_numbers
 from app.models import Chunk
 from app.repositories import ChunkRepository
 from app.services.cv_parser import pdf_to_markdown
 
 
 def _parse(pdf_bytes: bytes) -> list[TextChunk]:
-    return chunk_cv(pdf_to_markdown(pdf_bytes))
+    # Chunks are shown verbatim as answer sources to any signed-in user, so contact numbers
+    # must not survive ingestion.
+    return chunk_cv(redact_phone_numbers(pdf_to_markdown(pdf_bytes)))
 
 
 class EmptyDocumentError(Exception):

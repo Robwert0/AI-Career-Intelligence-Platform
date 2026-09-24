@@ -48,3 +48,6 @@ testdata/*
 
 # Local scratch scripts
 scratch_*.py
+
+# Personal documents (the real CV PDF) — local only, the repo is public
+files/
