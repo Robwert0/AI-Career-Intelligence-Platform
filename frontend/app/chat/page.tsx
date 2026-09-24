@@ -1,29 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import { useAuth } from '@/components/AuthProvider'
 import { Composer } from '@/components/Composer'
 import { RequireAuth } from '@/components/RequireAuth'
 import { SessionBar } from '@/components/SessionBar'
 import { Transcript } from '@/components/Transcript'
-import { chat } from '@/lib/api'
-import { questionTurn, replyTurn, type Turn } from '@/lib/turns'
+import { useConversation } from '@/lib/useConversation'
 
 function Conversation() {
-  const { sessionExpired } = useAuth()
-  const [turns, setTurns] = useState<Turn[]>([])
-  const [pending, setPending] = useState(false)
-
-  async function ask(message: string) {
-    setTurns((current) => [...current, questionTurn(message)])
-    setPending(true)
-
-    const result = await chat(message)
-
-    setPending(false)
-    setTurns((current) => [...current, replyTurn(result)])
-    if (!result.ok && result.status === 401) sessionExpired()
-  }
+  const { turns, pending, ask } = useConversation()
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8">
