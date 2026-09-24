@@ -96,7 +96,8 @@ class RagPipeline:
             return Answer(text=INCOMPLETE_TEXT, refused=True, sources=[])
 
         logger.info(
-            "chat answered model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",
+            "chat answered user=%s model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",
+            user_id,
             generated.model,
             generated.usage.prompt_tokens,
             generated.usage.completion_tokens,

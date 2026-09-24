@@ -47,6 +47,17 @@ from app.core.redis import create_redis
 from app.deps import get_limiter
 from app.main import app
 
+
+@pytest.fixture(autouse=True)
+def logging_config_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    # The real configure_logging replaces root's handlers, stripping caplog's handler, so a
+    # negative log assertion in a lifespan-driven test would pass vacuously. test_log_config
+    # exercises the real function directly.
+    calls: list[str] = []
+    monkeypatch.setattr("app.main.configure_logging", calls.append)
+    return calls
+
+
 DB_NAME = urlsplit(TEST_DATABASE_URL.replace("+asyncpg", "")).path.lstrip("/")
 
 

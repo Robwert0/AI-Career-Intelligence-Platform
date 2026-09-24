@@ -1,11 +1,12 @@
 import logging
+import re
 from collections.abc import Iterator
 
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings, settings
-from app.core.log_config import configure_logging
+from app.core.log_config import QUIET_LOGGERS, configure_logging
 from app.main import app, lifespan
 
 
@@ -13,24 +14,25 @@ from app.main import app, lifespan
 def restore_root_logger() -> Iterator[None]:
     root = logging.getLogger()
     handlers, level = root.handlers[:], root.level
+    quiet_levels = {name: logging.getLogger(name).level for name in QUIET_LOGGERS}
     yield
     root.handlers[:] = handlers
     root.setLevel(level)
+    for name, quiet_level in quiet_levels.items():
+        logging.getLogger(name).setLevel(quiet_level)
 
 
-def _format(level: int, name: str, message: str) -> str:
-    [handler] = logging.getLogger().handlers
-    assert handler.formatter is not None
-    record = logging.LogRecord(name, level, __file__, 1, message, None, None)
-    return handler.formatter.format(record)
-
-
-def test_info_lines_reach_a_handler_instead_of_being_dropped() -> None:
+def test_an_info_line_is_written_to_stderr_with_timestamp_level_and_name(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     configure_logging("INFO")
 
-    root = logging.getLogger()
-    assert root.level == logging.INFO
-    assert len(root.handlers) == 1
+    logging.getLogger("app.ai.rag").info("chat answered user=u-1")
+
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} INFO app\.ai\.rag chat answered user=u-1\n",
+        capfd.readouterr().err,
+    )
 
 
 def test_loggers_created_before_configuration_stay_enabled() -> None:
@@ -42,19 +44,25 @@ def test_loggers_created_before_configuration_stay_enabled() -> None:
     assert early.isEnabledFor(logging.INFO)
 
 
-def test_records_carry_a_timestamp_level_and_logger_name() -> None:
-    configure_logging("INFO")
-
-    line = _format(logging.ERROR, "app.ai.rag", "chat output rejected user=u-1")
-
-    assert line.split(" ", 2)[0].count("-") == 2
-    assert " ERROR app.ai.rag chat output rejected user=u-1" in line
-
-
 def test_the_configured_level_filters_lower_records() -> None:
     configure_logging("WARNING")
 
     assert not logging.getLogger("app.ai.rag").isEnabledFor(logging.INFO)
+
+
+@pytest.mark.parametrize("name", ["httpx", "httpcore", "sqlalchemy.engine"])
+def test_loggers_that_leak_urls_or_parameters_stay_at_warning(name: str) -> None:
+    configure_logging("DEBUG")
+
+    assert not logging.getLogger(name).isEnabledFor(logging.INFO)
+
+
+def test_an_httpx_request_url_never_reaches_the_log(capfd: pytest.CaptureFixture[str]) -> None:
+    configure_logging("INFO")
+
+    logging.getLogger("httpx").info("HTTP Request: GET http://127.0.0.1/api?key=SECRET")
+
+    assert "SECRET" not in capfd.readouterr().err
 
 
 def test_log_level_rejects_an_unknown_name(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,9 +72,8 @@ def test_log_level_rejects_an_unknown_name(monkeypatch: pytest.MonkeyPatch) -> N
         Settings()
 
 
-async def test_the_lifespan_configures_logging_from_settings() -> None:
-    logging.getLogger().handlers.clear()
-
+async def test_the_lifespan_configures_logging_from_settings(
+    logging_config_calls: list[str],
+) -> None:
     async with lifespan(app):
-        assert logging.getLogger().level == logging.getLevelNamesMapping()[settings.log_level]
-        assert len(logging.getLogger().handlers) == 1
+        assert logging_config_calls == [settings.log_level]

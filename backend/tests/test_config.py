@@ -147,3 +147,27 @@ def test_the_similarity_threshold_stays_inside_the_cosine_range(
 
     with pytest.raises(ValidationError, match="retrieval_similarity_threshold"):
         Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:pass@ollama.example.com",
+        "https://token@ollama.example.com",
+        "http://127.0.0.1:11434?key=secret",
+        "http://127.0.0.1:11434#frag",
+    ],
+)
+def test_ollama_url_rejects_parts_httpx_would_log(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("OLLAMA_BASE_URL", url)
+
+    with pytest.raises(ValidationError, match="ollama_base_url"):
+        Settings()
+
+
+def test_ollama_url_accepts_a_plain_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    assert Settings().ollama_base_url == "http://127.0.0.1:11434"

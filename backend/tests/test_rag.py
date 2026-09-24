@@ -306,6 +306,23 @@ async def test_the_leak_log_records_a_hash_not_the_leaked_text(
     assert "user=u-1" in caplog.text
 
 
+async def test_a_gate_refusal_is_logged_with_the_user(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("INFO"):
+        await pipeline(miss(), FakeGenerator()).answer("favourite pasta recipe?", user_id="u-1")
+
+    assert "chat refused before generation user=u-1" in caplog.text
+
+
+async def test_an_answer_is_logged_with_the_user_and_token_counts(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("INFO"):
+        await pipeline(hit(), FakeGenerator(text="He used FastAPI.")).answer("q", user_id="u-1")
+
+    assert "chat answered user=u-1" in caplog.text
+    assert "prompt_tokens=" in caplog.text
+
+
 async def test_generator_unavailability_propagates() -> None:
     with pytest.raises(GeneratorUnavailableError):
         await pipeline(hit(), UnavailableGenerator()).answer("what framework?")

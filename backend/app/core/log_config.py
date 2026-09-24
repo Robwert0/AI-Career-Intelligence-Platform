@@ -1,6 +1,7 @@
 import logging.config
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+QUIET_LOGGERS = ("httpx", "httpcore", "sqlalchemy.engine")
 
 
 def configure_logging(level: str) -> None:
@@ -15,5 +16,8 @@ def configure_logging(level: str) -> None:
                 "stderr": {"class": "logging.StreamHandler", "formatter": "default"},
             },
             "root": {"level": level, "handlers": ["stderr"]},
+            # httpx logs full request URLs at INFO (userinfo and query strings included), and
+            # sqlalchemy.engine at INFO logs bound parameters: password and token hashes.
+            "loggers": {name: {"level": "WARNING"} for name in QUIET_LOGGERS},
         }
     )

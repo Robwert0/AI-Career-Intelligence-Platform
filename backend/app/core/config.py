@@ -43,6 +43,16 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
+    @field_validator("ollama_base_url")
+    @classmethod
+    def _reject_url_credentials(cls, url: str) -> str:
+        parsed = urlsplit(url)
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError(
+                "must not carry credentials, a query or a fragment: httpx logs request URLs"
+            )
+        return url
+
     @field_validator("cors_allowed_origins", mode="after")
     @classmethod
     def _reject_unusable_origins(cls, origins: list[str]) -> list[str]:
