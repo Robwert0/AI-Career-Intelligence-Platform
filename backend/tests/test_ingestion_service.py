@@ -1,3 +1,4 @@
+import re
 import uuid
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from fakes import FakeEmbedder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.redaction import PHONE_PLACEHOLDER
 from app.models import Chunk
 from app.repositories import ChunkRepository
 from app.services.ingestion_service import EmptyDocumentError, IngestionService
@@ -13,6 +15,8 @@ from app.services.ingestion_service import EmptyDocumentError, IngestionService
 FIXTURES = Path(__file__).parent / "fixtures"
 CV_PDF = (FIXTURES / "a_titlecase.pdf").read_bytes()
 DOCUMENT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+REAL_CV = Path(__file__).parents[2] / "files/RobertMirea_CV2026.pdf"
+DIGIT_RUN = re.compile(r"(?:\d[\s().+-]*){9,}")
 
 
 def service(session: AsyncSession) -> IngestionService:
@@ -90,3 +94,27 @@ async def test_a_rejected_reingest_leaves_the_previous_chunks_intact(
 
     after = await stored(db_session, DOCUMENT_ID)
     assert [row.chunk_index for row in after] == [row.chunk_index for row in before]
+
+
+async def test_a_phone_number_never_reaches_a_stored_chunk(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "app.services.ingestion_service.pdf_to_markdown",
+        lambda _: "Jane Doe\n(+40) 700 000 000 | jane@example.com\n\n## SUMMARY\nBackend engineer.",
+    )
+
+    await service(db_session).ingest(CV_PDF, DOCUMENT_ID)
+
+    contents = [row.content for row in await stored(db_session, DOCUMENT_ID)]
+    assert not any(DIGIT_RUN.search(content) for content in contents)
+    assert PHONE_PLACEHOLDER in contents[0]
+    assert "jane@example.com" in contents[0]
+
+
+@pytest.mark.skipif(not REAL_CV.exists(), reason="personal CV not present")
+async def test_the_real_cv_stores_no_phone_number(db_session: AsyncSession) -> None:
+    await service(db_session).ingest(REAL_CV.read_bytes(), DOCUMENT_ID)
+
+    contents = [row.content for row in await stored(db_session, DOCUMENT_ID)]
+    assert not any(DIGIT_RUN.search(content) for content in contents)
