@@ -65,7 +65,8 @@ class RagPipeline:
 
         if result.best_similarity < settings.retrieval_similarity_threshold:
             logger.info(
-                "chat refused before generation best_similarity=%.4f text_hits=%d",
+                "chat refused before generation user=%s best_similarity=%.4f text_hits=%d",
+                user_id,
                 result.best_similarity,
                 result.text_hit_count,
             )
