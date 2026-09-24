@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { cv } from '../cv'
 
+const PHONE_SHAPED = /(?:\d[\s().-]*){9,}/
+
+function everyString(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(everyString)
+  if (value && typeof value === 'object') return Object.values(value).flatMap(everyString)
+  return []
+}
+
 const everyHref = [
   ...cv.links.map((link) => link.href),
   ...cv.projects.flatMap((project) => (project.repo ? [project.repo] : [])),
@@ -12,9 +21,10 @@ describe('cv content', () => {
   })
 
   it('never publishes a phone number', () => {
-    const content = JSON.stringify(cv)
-    expect(content).not.toMatch(/\+\d{2}/)
-    expect(content.replace(/\D/g, '')).not.toContain('766308044')
+    for (const text of everyString(cv)) {
+      expect(text).not.toMatch(/\+\d{2}/)
+      expect(text).not.toMatch(PHONE_SHAPED)
+    }
     expect(everyHref.some((href) => href.startsWith('tel:'))).toBe(false)
   })
 
