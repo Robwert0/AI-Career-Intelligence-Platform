@@ -201,7 +201,7 @@ export const projects: Project[] = [
     period: 'Mar 2024',
     purpose: 'Practise C++ fundamentals through small, self-contained programs.',
     description:
-      'Three console programs: a backtracking Sudoku solver, a two-player tic-tac-toe game, and a credit card number validator. The repository is private.',
+      'Three console programs: a backtracking Sudoku solver, a two-player tic-tac-toe game, and a credit card number validator.',
     stack: ['C++'],
     highlights: [
       'Sudoku solved by backtracking with row, column and box safety checks.',
@@ -249,7 +249,7 @@ export const projects: Project[] = [
     context: 'Git practice',
     period: 'Nov 2025',
     purpose: 'Practise the basic Git workflow: commits, history and pushing to GitHub.',
-    description: 'A throwaway repository with a text file edited over a few commits.',
+    description: 'A small repository with a text file edited over a few commits.',
     stack: ['Git', 'GitHub'],
     highlights: ['Commits, history and remotes practised on a single file.'],
     repos: ['https://github.com/Robwert0/git-demo'],

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { getProject, projects } from '../projects'
 
-const PRIVATE_REPOS = ['Practica', 'FunProjetcs']
+const PRIVATE_REPOS = ['practica', 'funprojetcs']
 
 describe('projects', () => {
   it('uses unique, URL-safe slugs because each one is a route', () => {
@@ -31,7 +31,7 @@ describe('projects', () => {
     const hrefs = projects.flatMap((project) => project.repos)
     for (const href of hrefs) {
       expect(href).toMatch(/^https:\/\/github\.com\/Robwert0\/[\w.-]+$/)
-      expect(PRIVATE_REPOS).not.toContain(href.split('/').pop())
+      expect(PRIVATE_REPOS).not.toContain(href.split('/').pop()?.toLowerCase())
     }
   })
 

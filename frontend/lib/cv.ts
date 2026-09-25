@@ -1,5 +1,6 @@
-// Hand-written from files/RobertMirea_CV2026.pdf. When the PDF changes, update this file too:
-// the chat answers from the ingested PDF, so the two drifting apart shows up as contradictions.
+// Hand-written from files/RobertMirea_CV2026.pdf (projects come from lib/projects.ts instead). When
+// the PDF changes, update this file too: the chat answers from the ingested PDF, so drift shows up
+// as contradictions.
 
 import { projects, type Project } from './projects'
 
