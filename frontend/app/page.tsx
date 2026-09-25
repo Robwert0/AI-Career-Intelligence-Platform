@@ -1,16 +1,8 @@
 import Image from 'next/image'
-import { cv, type Project, type Role } from '@/lib/cv'
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section aria-labelledby={title} className="space-y-5">
-      <h2 id={title} className="font-mono text-xs tracking-widest text-accent uppercase">
-        {title}
-      </h2>
-      {children}
-    </section>
-  )
-}
+import Link from 'next/link'
+import { Highlights, Section, Tags } from '@/components/CvBlocks'
+import { cv, type Role } from '@/lib/cv'
+import type { Project, ProjectCategory } from '@/lib/projects'
 
 function Portrait() {
   const frame = 'size-28 shrink-0 rounded-full border border-line sm:size-32'
@@ -34,31 +26,6 @@ function Portrait() {
   )
 }
 
-function Tags({ items }: { items: string[] }) {
-  return (
-    <ul className="flex flex-wrap gap-1.5">
-      {items.map((item) => (
-        <li
-          key={item}
-          className="rounded-sm border border-line px-2 py-0.5 font-mono text-xs text-muted"
-        >
-          {item}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function Highlights({ items }: { items: string[] }) {
-  return (
-    <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed marker:text-line">
-      {items.map((item) => (
-        <li key={item}>{item}</li>
-      ))}
-    </ul>
-  )
-}
-
 function RoleEntry({ role }: { role: Role }) {
   return (
     <article className="space-y-2">
@@ -76,29 +43,53 @@ function RoleEntry({ role }: { role: Role }) {
   )
 }
 
-function ProjectCard({ project }: { project: Project }) {
+const PROJECT_GROUPS: { category: ProjectCategory; label: string }[] = [
+  { category: 'featured', label: 'featured' },
+  { category: 'internship', label: 'internship' },
+  { category: 'learning', label: 'learning' },
+]
+
+function ProjectTile({ project }: { project: Project }) {
   return (
-    <article className="flex flex-col gap-3 rounded-sm border border-line p-5 md:last:odd:col-span-2">
-      <div className="flex items-baseline justify-between gap-4">
-        <h3 className="font-medium">{project.name}</h3>
-        <span className="font-mono text-xs text-muted">{project.period}</span>
-      </div>
-      <p className="text-sm text-muted">{project.tagline}</p>
-      <Highlights items={project.highlights} />
-      <div className="mt-auto space-y-3 pt-2">
-        <Tags items={project.stack} />
-        {project.repo ? (
-          <a
-            href={project.repo}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block font-mono text-xs text-accent underline underline-offset-4"
-          >
-            source ↗
-          </a>
-        ) : null}
-      </div>
-    </article>
+    <Link
+      href={`/projects/${project.slug}`}
+      className="group flex flex-col gap-1.5 rounded-sm border border-line p-4 transition-colors hover:border-accent focus-visible:border-accent"
+    >
+      <span className="flex items-baseline justify-between gap-3">
+        <span className="font-medium">{project.name}</span>
+        <span aria-hidden="true" className="text-muted transition-colors group-hover:text-accent">
+          →
+        </span>
+      </span>
+      <span className="text-sm text-muted">{project.tagline}</span>
+    </Link>
+  )
+}
+
+function ProjectGrid() {
+  const flagship = cv.projects.filter((project) => project.category === 'flagship')
+  return (
+    <div className="space-y-6">
+      {flagship.map((project) => (
+        <ProjectTile key={project.slug} project={project} />
+      ))}
+      {PROJECT_GROUPS.map(({ category, label }) => {
+        const group = cv.projects.filter((project) => project.category === category)
+        if (group.length === 0) return null
+        return (
+          <div key={category} className="space-y-3">
+            <h3 className="font-mono text-xs text-muted">{label}</h3>
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {group.map((project) => (
+                <li key={project.slug} className="grid">
+                  <ProjectTile project={project} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -142,11 +133,7 @@ export default function Home() {
       </Section>
 
       <Section title="projects">
-        <div className="grid gap-4 md:grid-cols-2">
-          {cv.projects.map((project) => (
-            <ProjectCard key={project.name} project={project} />
-          ))}
-        </div>
+        <ProjectGrid />
       </Section>
 
       <Section title="skills">

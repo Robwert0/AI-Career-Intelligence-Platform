@@ -1,6 +1,8 @@
 // Hand-written from files/RobertMirea_CV2026.pdf. When the PDF changes, update this file too:
 // the chat answers from the ingested PDF, so the two drifting apart shows up as contradictions.
 
+import { projects, type Project } from './projects'
+
 export type Link = { label: string; href: string }
 
 export type Role = {
@@ -10,15 +12,6 @@ export type Role = {
   period: string
   context?: string
   highlights: string[]
-}
-
-export type Project = {
-  name: string
-  tagline: string
-  stack: string[]
-  period: string
-  highlights: string[]
-  repo?: string
 }
 
 export type SkillGroup = { name: string; skills: string[] }
@@ -90,38 +83,7 @@ export const cv: Cv = {
       ],
     },
   ],
-  projects: [
-    {
-      name: 'Jarvis',
-      tagline: 'Voice-controlled AI assistant',
-      stack: ['Python 3.12', 'FastAPI', 'TypeScript', 'Claude API', 'ElevenLabs'],
-      period: '2026',
-      highlights: [
-        'Full voice loop (speech-to-text → Claude → text-to-speech) with turn-taking and barge-in, built on ElevenLabs Agents with Claude as the LLM.',
-        'On-device client-tool executor: launches any installed app by voice using fuzzy name matching (Windows/WSL); FastAPI chat endpoint with multi-turn history, web UI, and pytest test suite.',
-      ],
-      repo: 'https://github.com/Robwert0/jarvis',
-    },
-    {
-      name: 'Price Comparator',
-      tagline: 'Grocery price comparison across Romanian retailers',
-      stack: ['Java', 'Spring Boot'],
-      period: '2025',
-      highlights: [
-        'Backend service comparing grocery prices across Lidl, Kaufland, and Profi: daily optimized cart, discount tracking, price history, custom alerts, and unit-price (per kg/l) recommendations.',
-      ],
-      repo: 'https://github.com/Robwert0/Price_comparator',
-    },
-    {
-      name: 'Face Recognition Attendance',
-      tagline: 'Real-time webcam attendance system',
-      stack: ['Python', 'OpenCV', 'MediaPipe'],
-      period: '2024 – 2025',
-      highlights: [
-        'MediaPipe face-mesh detection, cosine-similarity embedding matching, Tkinter registration GUI, and duplicate-safe CSV logging — a modular pipeline running in real time on standard laptops.',
-      ],
-    },
-  ],
+  projects,
   skills: [
     { name: 'Languages', skills: ['Java', 'Python', 'SQL', 'TypeScript', 'C++'] },
     {

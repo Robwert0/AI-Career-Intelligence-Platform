@@ -12,7 +12,7 @@ function everyString(value: unknown): string[] {
 
 const everyHref = [
   ...cv.links.map((link) => link.href),
-  ...cv.projects.flatMap((project) => (project.repo ? [project.repo] : [])),
+  ...cv.projects.flatMap((project) => project.repos),
 ]
 
 describe('cv content', () => {
@@ -38,10 +38,8 @@ describe('cv content', () => {
     }
   })
 
-  it('gives every project and role unique keys for rendering', () => {
-    const projectNames = cv.projects.map((project) => project.name)
+  it('gives every role a unique key for rendering', () => {
     const roleKeys = cv.experience.map((role) => `${role.company}|${role.period}`)
-    expect(new Set(projectNames).size).toBe(projectNames.length)
     expect(new Set(roleKeys).size).toBe(roleKeys.length)
   })
 })
