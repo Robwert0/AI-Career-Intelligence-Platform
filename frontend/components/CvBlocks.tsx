@@ -34,3 +34,32 @@ export function Highlights({ items }: { items: string[] }) {
     </ul>
   )
 }
+
+export function Chapter({
+  id,
+  index,
+  title,
+  intro,
+  children,
+}: {
+  id: string
+  index: string
+  title: string
+  intro?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section id={id} aria-labelledby={`${id}-title`} className="reveal space-y-10">
+      <header className="space-y-3">
+        <p className="font-mono text-xs text-accent">
+          {index} <span className="text-muted">/ {id}</span>
+        </p>
+        <h2 id={`${id}-title`} className="text-2xl font-medium tracking-tight sm:text-3xl">
+          {title}
+        </h2>
+        {intro ? <p className="max-w-2xl leading-relaxed text-muted">{intro}</p> : null}
+      </header>
+      {children}
+    </section>
+  )
+}
