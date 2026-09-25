@@ -52,7 +52,7 @@ export function Chapter({
     <section id={id} aria-labelledby={`${id}-title`} className="reveal space-y-10">
       <header className="space-y-3">
         <p className="font-mono text-xs text-accent">
-          {index} <span className="text-muted">/ {id}</span>
+          {index} <span className="text-subtle">/ {id}</span>
         </p>
         <h2 id={`${id}-title`} className="text-2xl font-medium tracking-tight sm:text-3xl">
           {title}

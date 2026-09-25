@@ -62,7 +62,7 @@ describe('portfolio wiring', () => {
   })
 
   it('points every nav link at a section the home page renders', () => {
-    const sectionIds = ['work', 'experience', 'skills', 'projects', 'contact']
+    const sectionIds = ['work', 'experience', 'skills', 'education', 'contact']
     for (const link of NAV_LINKS) expect(sectionIds).toContain(link.href.replace('/#', ''))
   })
 })

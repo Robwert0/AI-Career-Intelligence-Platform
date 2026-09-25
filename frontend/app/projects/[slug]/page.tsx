@@ -28,12 +28,12 @@ export default async function ProjectPage({ params }: PageProps<'/projects/[slug
   return (
     <>
       <SiteNav initials={cv.initials} />
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-4 pt-12 pb-28 sm:px-6">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-6 pt-12 pb-24 sm:px-10">
         <Link
-          href="/#projects"
+          href="/#work"
           className="inline-block font-mono text-xs text-accent underline underline-offset-4"
         >
-          ← back to projects
+          ← back to selected work
         </Link>
 
         <header className="space-y-3">
@@ -42,7 +42,7 @@ export default async function ProjectPage({ params }: PageProps<'/projects/[slug
           <p className="inline-block rounded-sm border border-line-strong px-2 py-0.5 font-mono text-[11px] text-accent">
             {project.context}
           </p>
-          <p className="font-mono text-xs text-muted">{project.period}</p>
+          <p className="font-mono text-xs text-subtle">{project.period}</p>
         </header>
 
         <Section title="what it does">

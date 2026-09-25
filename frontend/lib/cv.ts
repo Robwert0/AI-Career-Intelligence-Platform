@@ -4,7 +4,7 @@
 
 import { projects, type Project } from './projects'
 
-export type Link = { label: string; href: string }
+export type Link = { name: 'Email' | 'GitHub' | 'LinkedIn'; label: string; href: string }
 
 export type Role = {
   title: string
@@ -19,10 +19,13 @@ export type Fact = { label: string; value: string }
 
 export type SelectedWork = {
   title: string
+  employer?: string
   context: string
   period: string
+  summary: string
   problem: string
   contribution: string
+  decisions: string[]
   outcome?: string
   stack: string[]
   projectSlug?: string
@@ -58,46 +61,59 @@ export const cv: Cv = {
   title: 'Software Engineer — Backend',
   location: 'Bucharest, Romania',
   links: [
-    { label: 'mirearobert32@gmail.com', href: 'mailto:mirearobert32@gmail.com' },
-    { label: 'github.com/Robwert0', href: 'https://github.com/Robwert0' },
+    { name: 'Email', label: 'mirearobert32@gmail.com', href: 'mailto:mirearobert32@gmail.com' },
+    { name: 'GitHub', label: 'github.com/Robwert0', href: 'https://github.com/Robwert0' },
     {
+      name: 'LinkedIn',
       label: 'linkedin.com/in/robert-mirea',
       href: 'https://www.linkedin.com/in/robert-mirea-413a91222',
     },
   ],
   headline: 'I build the backend services behind a real-time conversational AI platform.',
   intro:
-    'Software engineer at Tyrell Corporation, writing Python microservices in an event-driven architecture — RabbitMQ, PostgreSQL/pgvector and Redis — and owning their reliability in production. Also at home in Java and Spring Boot, and studying for an MSc in Automatic Control and Computer Science.',
+    'I build and maintain services that run in production, and I own what happens after they ship: alerting, incident response, and debugging failures that cross service boundaries, backed by unit, integration and end-to-end tests. Before that I interned at BearingPoint and Synergo Applications, working in Python and Java.',
   glance: [
-    { label: 'now', value: 'Software Engineer, Tyrell Corporation' },
-    { label: 'focus', value: 'Python microservices · event-driven systems · conversational AI' },
-    { label: 'stack', value: 'Python · RabbitMQ · PostgreSQL/pgvector · Redis · Docker' },
-    { label: 'studying', value: 'MSc, Politehnica Bucharest' },
-    { label: 'based in', value: 'Bucharest, Romania' },
+    { label: 'role', value: 'Software Engineer, Tyrell Corporation' },
+    { label: 'core stack', value: 'Python · RabbitMQ · PostgreSQL · Redis · Docker' },
+    { label: 'education', value: 'MSc student, Politehnica Bucharest' },
+    { label: 'location', value: 'Bucharest, Romania' },
   ],
   summary:
     'Backend-focused software engineer building Python microservices on a high-scale, event-driven conversational AI platform. Hands-on with RabbitMQ, PostgreSQL/pgvector, Redis, Docker, and CI/CD, with production reliability ownership and comprehensive testing (unit, integration, end-to-end). Also experienced with Java/Spring Boot. Currently pursuing an MSc in Computer Science.',
   selectedWork: [
     {
       title: 'Generative image pipeline',
-      context: 'At Tyrell Corporation',
+      employer: 'Tyrell Corporation',
+      context: 'Employer work',
       period: '2025 – present',
+      summary: 'Generates images for the platform by calling ML inference services.',
       problem:
-        'Image generation depends on ML inference services that can fail mid-request, and each generation is tied to user credits and transactions.',
+        'Inference calls can fail, and every generation involves user credits and transactions that have to stay correct when they do.',
       contribution:
-        'Developed the pipeline integrating the ML inference services, with automatic failure recovery and credit/transaction integrity.',
+        'Developed the pipeline that integrates the ML inference services, including its failure handling.',
+      decisions: [
+        'Automatic recovery from failed inference requests.',
+        'Credit and transaction integrity preserved when failures happen.',
+      ],
       stack: ['Python', 'Microservices', 'Event-driven architecture', 'ML inference services'],
     },
     {
       title: 'AI Career Intelligence Platform',
       context: 'Personal project',
       period: '2026 – present',
+      summary:
+        'This site: a chat that answers questions about my CV and cites the passages it used.',
       problem:
-        'A CV is a static document; recruiters cannot ask it follow-up questions, and an LLM that answers about it must not be steerable by what users type.',
-      contribution:
-        'Designed and built this site end to end: CV ingestion into pgvector, hybrid retrieval, a hardened generation prompt, JWT auth with rotating refresh tokens, and Redis rate limiting.',
+        'A CV cannot answer follow-up questions, and a model that answers for it must not be steerable by what visitors type.',
+      contribution: 'Designed and built the backend, the retrieval pipeline and the frontend.',
+      decisions: [
+        'Hybrid retrieval: pgvector HNSW similarity combined with Postgres full-text ranking.',
+        'System prompt, visitor input and retrieved CV text kept in separate channels; chat-template tokens escaped.',
+        'Refresh tokens rotate on every use, and reuse revokes the whole token family.',
+        'Redis rate limits per IP and per user that fail closed.',
+      ],
       outcome:
-        '370+ backend tests; every auth, rate-limit and AI-input change security-reviewed before merge.',
+        'Works end to end on my real CV, with 370+ backend tests and a security review on every auth or AI-input change.',
       stack: ['FastAPI', 'PostgreSQL/pgvector', 'Redis', 'Next.js', 'TypeScript'],
       projectSlug: 'ai-career-intelligence-platform',
     },
@@ -105,10 +121,15 @@ export const cv: Cv = {
       title: 'Jarvis',
       context: 'Personal project',
       period: '2026',
-      problem:
-        'Everyday desktop actions — opening apps, running a set of them together, searching the web — still need hands on the keyboard.',
-      contribution:
-        'Built a desktop voice assistant: an ElevenLabs voice loop with barge-in, a FastAPI Claude tool-use loop, and six local tools shared by voice and text.',
+      summary:
+        'A desktop voice assistant that opens apps, runs macros, searches the web and controls the system.',
+      problem: 'Everyday desktop actions still need hands on the keyboard.',
+      contribution: 'Built the Electron app, the FastAPI agent service and the local tools.',
+      decisions: [
+        'Two LLM paths share one toolset: an ElevenLabs agent drives voice, a server-side Claude tool-use loop drives text.',
+        'Tools execute locally in the Python process, with cooperative cancellation of in-flight actions.',
+        'Long-term memories stored in SQLite and injected into every text and voice session.',
+      ],
       outcome: 'Feature-complete for daily use in July 2026, with a pytest suite running in CI.',
       stack: ['Python', 'FastAPI', 'Claude API', 'ElevenLabs', 'Electron', 'React'],
       projectSlug: 'jarvis',
@@ -117,21 +138,30 @@ export const cv: Cv = {
       title: 'Price Comparator',
       context: 'Internship application challenge',
       period: '2025',
+      summary: 'A REST backend that compares grocery prices across Lidl, Kaufland and Profi.',
       problem:
-        'Grocery prices differ across Lidl, Kaufland and Profi, and package sizes make direct comparison misleading.',
-      contribution:
-        'Built a Spring Boot REST backend: cheapest-basket optimization across stores, discount and price-history tracking, scheduled email price alerts, and unit-price recommendations.',
-      stack: ['Java', 'Spring Boot', 'REST APIs', 'Spring Mail'],
+        'Prices differ between stores, and different package sizes make direct comparison misleading.',
+      contribution: 'Built the Spring Boot service end to end.',
+      decisions: [
+        'A basket optimizer that splits a shopping list across stores to find the cheapest combination.',
+        'Recommendations by price per kg or litre, so package sizes compare fairly.',
+        'Price alerts checked by a scheduled job and delivered by email; retailer data loaded from CSV.',
+      ],
+      stack: ['Java', 'Spring Boot', 'REST APIs', 'OpenCSV', 'Spring Mail'],
       projectSlug: 'price-comparator',
     },
     {
       title: 'Employee data validation',
-      context: 'At BearingPoint · internship',
+      employer: 'BearingPoint',
+      context: 'Internship',
       period: '2024',
-      problem:
-        'Employee records arrived in inconsistent formats, with duplicates and invalid values.',
-      contribution:
-        'Built a Python application that validates every record with Pydantic, prevents duplicates, stores results in PostgreSQL and produces structured exports for analysis.',
+      summary: 'Validates employee records, stores them in PostgreSQL and exports clean data.',
+      problem: 'Employee records arrived with inconsistent formats, duplicates and invalid values.',
+      contribution: 'Built the application, from the validation models to storage and export.',
+      decisions: [
+        'Pydantic validators for each rule, including checking a personal numeric code (CNP) against the stated gender.',
+        'Duplicate prevention on employee ID before records are appended.',
+      ],
       stack: ['Python', 'Pydantic', 'PostgreSQL'],
       projectSlug: 'employee-data-validator',
     },

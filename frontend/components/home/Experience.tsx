@@ -12,8 +12,8 @@ export function Experience() {
               className="absolute top-1.5 -left-[29px] size-2.5 rounded-full border-2 border-bg bg-accent sm:-left-[37px]"
             />
             <div className="grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-8">
-              <div className="space-y-1 font-mono text-xs text-muted">
-                <p className="text-fg/80">{role.period}</p>
+              <div className="space-y-1 font-mono text-xs text-subtle">
+                <p className="text-muted">{role.period}</p>
                 <p>{role.location}</p>
               </div>
               <div className="space-y-3">

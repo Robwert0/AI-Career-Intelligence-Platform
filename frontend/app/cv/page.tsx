@@ -17,7 +17,7 @@ export default function CvPage() {
   return (
     <>
       <SiteNav initials={cv.initials} />
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-4 pt-12 pb-28 sm:px-6 print:max-w-none print:space-y-7 print:p-0">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-6 pt-12 pb-24 sm:px-10 print:max-w-none print:space-y-7 print:p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
           <p className="font-mono text-xs text-muted">curriculum vitae</p>
           <div className="flex flex-wrap gap-2">

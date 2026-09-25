@@ -1,16 +1,17 @@
 import { Chapter } from '@/components/CvBlocks'
+import { LinkIcon } from '@/components/LinkIcon'
 import { cv } from '@/lib/cv'
 
 export function Education() {
   return (
-    <Chapter id="education" index="05" title="Education">
+    <Chapter id="education" index="04" title="Education">
       <div className="space-y-8">
         {cv.education.map((degree) => (
           <article
             key={degree.degree}
             className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-8"
           >
-            <p className="font-mono text-xs text-muted">{degree.period}</p>
+            <p className="font-mono text-xs text-subtle">{degree.period}</p>
             <div className="space-y-1.5">
               <h3 className="font-medium">{degree.degree}</h3>
               <p className="text-sm text-muted">{degree.school}</p>
@@ -19,7 +20,7 @@ export function Education() {
           </article>
         ))}
         <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-8">
-          <p className="font-mono text-xs text-muted">languages</p>
+          <p className="font-mono text-xs text-subtle">languages</p>
           <p className="text-sm">{cv.languages.join(' · ')}</p>
         </div>
       </div>
@@ -37,7 +38,7 @@ export function Contact() {
       className="reveal rounded-lg border border-line bg-surface px-6 py-12 sm:px-12"
     >
       <p className="font-mono text-xs text-accent">
-        06 <span className="text-muted">/ contact</span>
+        05 <span className="text-subtle">/ contact</span>
       </p>
       <h2 id="contact-title" className="mt-3 text-2xl font-medium tracking-tight sm:text-3xl">
         Let&apos;s talk.
@@ -61,9 +62,10 @@ export function Contact() {
             href={link.href}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-mono text-xs text-muted underline decoration-line-strong underline-offset-4 hover:text-fg hover:decoration-accent"
+            className="inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted transition-colors hover:bg-bg hover:text-fg"
           >
-            {link.label} ↗
+            <LinkIcon name={link.name} />
+            {link.name}
           </a>
         ))}
       </div>

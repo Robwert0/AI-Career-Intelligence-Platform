@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { CONTAINER } from '@/lib/layout'
 import { NAV_LINKS } from '@/lib/nav'
 
 export function SiteNav({ initials }: { initials: string }) {
@@ -19,10 +20,10 @@ export function SiteNav({ initials }: { initials: string }) {
     'rounded-md px-3 py-2 text-sm text-muted transition-colors hover:bg-surface hover:text-fg'
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-bg/95 print:hidden">
+    <header className="sticky top-0 z-30 border-b border-line bg-bg print:hidden">
       <nav
         aria-label="Main"
-        className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between gap-4 px-4 sm:px-6"
+        className={`${CONTAINER} flex h-16 items-center justify-between gap-4`}
       >
         <Link
           href="/"
@@ -81,7 +82,7 @@ export function SiteNav({ initials }: { initials: string }) {
       </nav>
 
       {open ? (
-        <ul id="mobile-nav" className="space-y-1 border-t border-line px-4 py-3 md:hidden">
+        <ul id="mobile-nav" className="space-y-1 border-t border-line px-6 py-3 sm:px-10 md:hidden">
           {NAV_LINKS.map((link) => (
             <li key={link.href}>
               <Link

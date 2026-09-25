@@ -1,36 +1,24 @@
 import Image from 'next/image'
 import Link from 'next/link'
+import { LinkIcon } from '@/components/LinkIcon'
 import { cv } from '@/lib/cv'
 
 const buttonBase =
   'inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-medium transition-colors'
 
-function External({ href, children }: { href: string; children: React.ReactNode }) {
-  const isWeb = href.startsWith('https:')
-  return (
-    <a
-      href={href}
-      {...(isWeb ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-      className="font-mono text-xs text-muted underline decoration-line-strong underline-offset-4 transition-colors hover:text-fg hover:decoration-accent"
-    >
-      {children}
-    </a>
-  )
-}
-
 export function Hero() {
   return (
     <section
       aria-labelledby="hero-title"
-      className="grid gap-12 pt-12 sm:pt-20 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-end lg:gap-16"
+      className="grid gap-10 pt-14 sm:pt-20 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-center lg:gap-16"
     >
-      <div className="enter space-y-8">
+      <div className="enter space-y-7">
         <div className="space-y-4">
           <p className="font-mono text-xs tracking-wide text-accent">{cv.title}</p>
           <h1 id="hero-title" className="text-4xl font-medium tracking-tight sm:text-5xl">
             {cv.name}
           </h1>
-          <p className="max-w-2xl text-xl leading-snug text-fg/90 sm:text-2xl">{cv.headline}</p>
+          <p className="max-w-2xl text-xl leading-snug text-fg sm:text-2xl">{cv.headline}</p>
         </div>
         <p className="max-w-2xl leading-relaxed text-muted">{cv.intro}</p>
 
@@ -58,10 +46,19 @@ export function Hero() {
           ) : null}
         </div>
 
-        <ul className="flex flex-wrap gap-x-6 gap-y-2">
+        <ul className="flex flex-wrap gap-x-2 gap-y-2" aria-label="Contact and profiles">
           {cv.links.map((link) => (
             <li key={link.href}>
-              <External href={link.href}>{link.label}</External>
+              <a
+                href={link.href}
+                {...(link.href.startsWith('https:')
+                  ? { target: '_blank', rel: 'noopener noreferrer' }
+                  : {})}
+                className="-mx-1 inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
+              >
+                <LinkIcon name={link.name} />
+                {link.name}
+              </a>
             </li>
           ))}
         </ul>
@@ -84,7 +81,7 @@ export function Hero() {
         <dl className="space-y-4">
           {cv.glance.map((fact) => (
             <div key={fact.label} className="space-y-1">
-              <dt className="font-mono text-[11px] tracking-wider text-muted uppercase">
+              <dt className="font-mono text-[11px] tracking-wider text-subtle uppercase">
                 {fact.label}
               </dt>
               <dd className="text-sm leading-relaxed">{fact.value}</dd>
