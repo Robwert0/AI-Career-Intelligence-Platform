@@ -1,5 +1,7 @@
 import asyncio
+import codecs
 import gzip
+import logging
 import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -9,6 +11,7 @@ import pytest
 
 from app.integrations.errors import FetchError, FetchFailure
 from app.integrations.safe_fetch import (
+    Resolver,
     RobotsCache,
     SafeFetcher,
     is_public_address,
@@ -53,10 +56,12 @@ def site(
 def fetcher(
     handler: Handler,
     mapping: dict[str, list[str]] | None = None,
+    *,
+    resolve: Resolver | None = None,
     **kwargs: float,
 ) -> SafeFetcher:
     return SafeFetcher(
-        resolver=resolver(mapping or {"jobs.example.com": [PUBLIC]}),
+        resolver=resolve or resolver(mapping or {"jobs.example.com": [PUBLIC]}),
         # Handler covers both sync and async page functions; MockTransport's overloads
         # only type one shape at a time, though it accepts either at runtime.
         transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
@@ -232,6 +237,34 @@ async def test_an_unknown_host_is_an_invalid_url() -> None:
     code = await failure(fetcher(handler).fetch("https://nowhere.example.org/"))
 
     assert code is FetchFailure.INVALID_URL
+
+
+def failing_resolver(errno: int) -> Resolver:
+    async def resolve(host: str, port: int) -> list[str]:
+        raise socket.gaierror(errno, "resolver said no")
+
+    return resolve
+
+
+def dns_fetcher(errno: int) -> SafeFetcher:
+    handler, _ = site()
+    return fetcher(handler, resolve=failing_resolver(errno))
+
+
+@pytest.mark.parametrize(
+    "errno", [socket.EAI_NONAME, *([socket.EAI_NODATA] if hasattr(socket, "EAI_NODATA") else [])]
+)
+async def test_a_name_that_does_not_exist_is_an_invalid_url(errno: int) -> None:
+    code = await failure(dns_fetcher(errno).fetch("https://jobs.example.com/"))
+
+    assert code is FetchFailure.INVALID_URL
+
+
+@pytest.mark.parametrize("errno", [socket.EAI_AGAIN, socket.EAI_FAIL])
+async def test_a_temporary_dns_failure_is_site_unavailable(errno: int) -> None:
+    code = await failure(dns_fetcher(errno).fetch("https://jobs.example.com/"))
+
+    assert code is FetchFailure.SITE_UNAVAILABLE
 
 
 @pytest.mark.parametrize("host", ["2130706433", "0x7f000001", "017700000001", "127.1"])
@@ -470,6 +503,40 @@ async def test_a_non_text_charset_falls_back_to_utf8(charset: str) -> None:
     assert result.text == body.decode("utf-8")
 
 
+async def test_a_charset_fallback_logs_the_normalised_declared_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO):
+        await fetcher(charset_page("ROT13", b"hello")).fetch("https://jobs.example.com/")
+
+    assert f"charset_fallback declared={codecs.lookup('rot13').name}" in caplog.text
+
+
+async def test_an_unknown_charset_fallback_never_logs_the_declared_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO):
+        await fetcher(charset_page("x-jane-doe", b"hello")).fetch("https://jobs.example.com/")
+
+    assert "charset_fallback declared=unknown" in caplog.text
+    assert "jane" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("charset", "text"),
+    [("latin-1", "Développeur"), ("windows-1252", "Café €"), ("shift_jis", "開発者")],
+)
+async def test_an_honoured_charset_logs_no_fallback(
+    charset: str, text: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO):
+        await fetcher(charset_page(charset, text.encode(charset))).fetch(
+            "https://jobs.example.com/"
+        )
+
+    assert "charset_fallback" not in caplog.text
+
+
 @pytest.mark.parametrize(
     ("charset", "text"),
     [("latin-1", "Développeur"), ("windows-1252", "Café €"), ("shift_jis", "開発者")],
@@ -503,6 +570,32 @@ async def test_a_connection_failure_is_site_unavailable() -> None:
     assert await failure(fetcher(handler).fetch("https://jobs.example.com/")) is (
         FetchFailure.SITE_UNAVAILABLE
     )
+
+
+async def test_a_transport_failure_logs_its_type_only(caplog: pytest.LogCaptureFixture) -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("secret-internal-detail")
+
+    handler, _ = site(refuse)
+
+    with caplog.at_level(logging.INFO):
+        await failure(fetcher(handler).fetch("https://jobs.example.com/"))
+
+    assert "fetch failed failure=site_unavailable error_type=ConnectError" in caplog.text
+    assert "secret-internal-detail" not in caplog.text
+
+
+async def test_a_robots_transport_failure_logs_its_type_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.RemoteProtocolError("secret-internal-detail")
+
+    with caplog.at_level(logging.INFO):
+        await failure(fetcher(handler).fetch("https://jobs.example.com/"))
+
+    assert "error_type=RemoteProtocolError" in caplog.text
+    assert "secret-internal-detail" not in caplog.text
 
 
 async def test_a_broken_server_response_is_site_unavailable() -> None:
@@ -560,13 +653,29 @@ async def test_a_missing_robots_file_allows_everything() -> None:
     assert (await fetcher(handler).fetch("https://jobs.example.com/x")).text
 
 
-async def test_an_erroring_robots_file_means_disallow_all() -> None:
-    # RFC 9309: an unreachable robots.txt means the crawler must assume complete disallow.
-    handler, _ = site(robots=httpx.Response(503))
+async def test_an_erroring_robots_file_disallows_the_fetch_as_site_unavailable() -> None:
+    # RFC 9309: a robots.txt server error means complete disallow; the reason is the outage.
+    handler, seen = site(robots=httpx.Response(503))
 
     assert await failure(fetcher(handler).fetch("https://jobs.example.com/x")) is (
-        FetchFailure.BLOCKED_BY_ROBOTS
+        FetchFailure.SITE_UNAVAILABLE
     )
+    assert [request.url.path for request in seen] == ["/robots.txt"]
+
+
+async def test_an_unreadable_robots_file_disallows_all_and_logs_why(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, headers={"content-encoding": "br"}, content=b"x")
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=PAGE)
+
+    with caplog.at_level(logging.INFO):
+        code = await failure(fetcher(handle).fetch("https://jobs.example.com/x"))
+
+    assert code is FetchFailure.BLOCKED_BY_ROBOTS
+    assert "robots unreadable failure=not_extractable" in caplog.text
 
 
 async def test_robots_rules_are_cached_per_origin() -> None:

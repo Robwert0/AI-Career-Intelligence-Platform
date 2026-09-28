@@ -2,6 +2,7 @@ import asyncio
 import codecs
 import http.cookiejar
 import ipaddress
+import logging
 import socket
 import time
 import zlib
@@ -14,6 +15,8 @@ import httpx
 
 from app.integrations.errors import FetchError, FetchFailure
 from app.integrations.html_text import looks_like_challenge
+
+logger = logging.getLogger(__name__)
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
@@ -75,11 +78,19 @@ _UNSAFE_V6 = tuple(
     )
 )
 _ALLOW_ALL: list[str] = []
+# Robots-level failures that are reported as themselves; any other one is a plain disallow.
+_ROBOTS_REPORTED = frozenset(
+    {FetchFailure.BLOCKED_ADDRESS, FetchFailure.INVALID_URL, FetchFailure.SITE_UNAVAILABLE}
+)
 _DISALLOW_ALL = ["User-agent: *", "Disallow: /"]
-# httpx 0.28 _client.py:526 (_redirect_url) raises RemoteProtocolError with this exact prefix
+# httpx 0.28 _redirect_url raises RemoteProtocolError with this exact prefix
 # for a malformed Location header; any other RemoteProtocolError is a genuine broken-server
 # wire-protocol failure (disconnect, bad status line, ...), not a URL problem.
 _INVALID_LOCATION_PREFIX = "Invalid URL in location header"
+# Only "this name does not exist" is the URL's fault; EAI_AGAIN and friends are an outage.
+_NO_SUCH_NAME = frozenset(
+    {socket.EAI_NONAME, *((socket.EAI_NODATA,) if hasattr(socket, "EAI_NODATA") else ())}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,8 +205,10 @@ def _decode(body: bytes, response: httpx.Response) -> str:
     try:
         charset = codecs.lookup(response.charset_encoding or "utf-8").name
     except LookupError:
-        charset = "utf-8"
+        charset = "unknown"
     if charset not in TEXT_CHARSETS:
+        # Only a codec's canonical name is logged, never the header's own text.
+        logger.info("charset_fallback declared=%s", charset)
         charset = "utf-8"
     return body.decode(charset, errors="replace")
 
@@ -319,7 +332,10 @@ class SafeFetcher:
                         await response.aclose()
             except TimeoutError, httpx.TimeoutException:
                 raise FetchError(FetchFailure.FETCH_TIMEOUT) from None
-            except httpx.HTTPError:
+            except httpx.HTTPError as exc:
+                logger.info(
+                    "fetch failed failure=site_unavailable error_type=%s", type(exc).__name__
+                )
                 raise FetchError(FetchFailure.SITE_UNAVAILABLE) from None
 
     async def _open(
@@ -341,7 +357,13 @@ class SafeFetcher:
     async def _send_pinned(self, client: httpx.AsyncClient, url: PublicUrl) -> httpx.Response:
         try:
             addresses = await self._resolver(url.host, _PORTS[url.scheme])
-        except socket.gaierror, UnicodeError:
+        except socket.gaierror as exc:
+            no_such_name = exc.errno in _NO_SUCH_NAME
+            logger.info("dns failed errno=%s", exc.errno)
+            raise FetchError(
+                FetchFailure.INVALID_URL if no_such_name else FetchFailure.SITE_UNAVAILABLE
+            ) from None
+        except UnicodeError:
             raise FetchError(FetchFailure.INVALID_URL) from None
         if not addresses or not all(is_public_address(address) for address in addresses):
             raise FetchError(FetchFailure.BLOCKED_ADDRESS)
@@ -387,17 +409,22 @@ class SafeFetcher:
                     if 200 <= response.status_code < 300:
                         body = await _read_bounded(response, MAX_ROBOTS_BYTES, truncate=True)
                         return _rules(_decode(body, response).splitlines()), True
+                    if response.status_code >= 500:
+                        # RFC 9309 still means disallow; the truthful reason is the outage.
+                        raise FetchError(FetchFailure.SITE_UNAVAILABLE)
                 finally:
                     await response.aclose()
         except FetchError as exc:
-            if exc.failure in (FetchFailure.BLOCKED_ADDRESS, FetchFailure.INVALID_URL):
+            if exc.failure in _ROBOTS_REPORTED:
                 raise
+            logger.info("robots unreadable failure=%s", exc.failure.value)
         except TimeoutError, httpx.TimeoutException:
             # A transport failure is a real, reportable reason, not a robots verdict — the
             # page is still never fetched, but the caller learns why, not a made-up "disallow".
             raise FetchError(FetchFailure.FETCH_TIMEOUT) from None
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            logger.info("robots failed failure=site_unavailable error_type=%s", type(exc).__name__)
             raise FetchError(FetchFailure.SITE_UNAVAILABLE) from None
-        # RFC 9309: a server error or an unreachable robots.txt means disallow everything.
+        # RFC 9309: an unreadable robots.txt means disallow everything.
         # Not cached, so the next attempt asks again.
         return _rules(_DISALLOW_ALL), False
