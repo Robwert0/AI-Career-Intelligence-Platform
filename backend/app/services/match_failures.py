@@ -167,6 +167,15 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "This analysis isn't waiting for a decision any more. Refresh to see where it is.",
         "retry",
     ),
+    "analysis_ai_invalid_output": (
+        "We couldn't complete the match reliably this time. Try the analysis again.",
+        "retry",
+    ),
+    "analysis_input_too_long": (
+        "This posting has too many requirements to analyse in one run. Go back to the job "
+        "preview and trim the requirements.",
+        "edit_job",
+    ),
     "queue_full": (
         "Too many analyses are waiting right now. Try again in a minute.",
         "wait",

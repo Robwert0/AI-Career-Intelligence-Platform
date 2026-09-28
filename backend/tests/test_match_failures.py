@@ -84,3 +84,15 @@ _ANALYSIS_CODES = [
 @pytest.mark.parametrize("code", _ANALYSIS_CODES)
 def test_every_analysis_code_has_its_own_catalogue_entry(code: str) -> None:
     assert code in _FAILURES
+
+
+@pytest.mark.parametrize(
+    ("code", "recovery"),
+    [("analysis_ai_invalid_output", "retry"), ("analysis_input_too_long", "edit_job")],
+)
+def test_analysis_stage_codes_have_their_own_recovery(code: str, recovery: str) -> None:
+    failure = describe_failure(code)
+
+    assert failure.recovery == recovery
+    assert failure.message != describe_failure("ai_invalid_output").message
+

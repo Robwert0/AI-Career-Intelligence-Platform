@@ -284,7 +284,7 @@ def test_two_invalid_assessments_fail_as_invalid_output(
 
     run(job_id)
 
-    assert load(job_id).error_code == "ai_invalid_output"
+    assert load(job_id).error_code == "analysis_ai_invalid_output"
 
 
 def test_a_redelivered_task_for_a_paused_analysis_changes_nothing(
@@ -348,3 +348,16 @@ def test_a_github_retry_with_a_corrected_url_reads_the_new_profile(
 
     assert load(job_id).status is JobStatus.DONE
     assert fetcher.usernames[-1] == corrected.rsplit("/", 1)[1]
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("ai_invalid_output", "analysis_ai_invalid_output"),
+        ("input_too_long", "analysis_input_too_long"),
+        ("ai_unavailable", "ai_unavailable"),
+    ],
+)
+def test_assessment_failures_get_analysis_specific_codes(code: str, expected: str) -> None:
+    assert tasks.analysis_failure_code(code) == expected
+

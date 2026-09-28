@@ -30,6 +30,7 @@ Recovery = Literal[
     "paste_cv",
     "fix_github_url",
     "retry_or_continue",
+    "edit_job",
 ]
 
 

@@ -265,6 +265,17 @@ def _sources(
     return state
 
 
+_ANALYSIS_CODES = {
+    "ai_invalid_output": "analysis_ai_invalid_output",
+    "input_too_long": "analysis_input_too_long",
+}
+
+
+def analysis_failure_code(code: str) -> str:
+    # The shared loop's codes are worded for job intake; an analysis needs its own copy.
+    return _ANALYSIS_CODES.get(code, code)
+
+
 async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
     raw = await store.read_blob(record.id, "analysis_input")
     if raw is None:
@@ -319,7 +330,7 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
             min_similarity=settings.match_preselect_thresholds,
         )
     except ExtractionError as exc:
-        raise JobError(exc.code) from None
+        raise JobError(analysis_failure_code(exc.code)) from None
     finally:
         await generators.aclose()
         await redis.aclose()
