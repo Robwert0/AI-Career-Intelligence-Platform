@@ -111,3 +111,38 @@ def test_every_5_4_category_from_the_audit_probe_is_dropped(sentence: str) -> No
 )
 def test_the_wider_5_4_coverage_still_keeps_ordinary_text(text: str) -> None:
     assert scrub_evidence_text(text) == text
+
+
+# --- M4: contact masking gaps -------------------------------------------------------------
+
+
+def test_an_obfuscated_email_is_masked() -> None:
+    scrubbed = scrub_evidence_text("Reach me at john at gmail dot com for details.")
+
+    assert EMAIL_PLACEHOLDER in scrubbed
+    assert "gmail" not in scrubbed
+
+
+def test_a_labelled_contact_line_is_dropped_whole() -> None:
+    scrubbed = scrub_evidence_text(
+        "Built Go payment services. Tel 2345 6789. Address: 12 Strada Mihai, 400001 Cluj. "
+        "Led a team of 4."
+    )
+
+    assert scrubbed == "Built Go payment services. Led a team of 4."
+
+
+def test_a_profile_url_is_masked_but_github_links_survive() -> None:
+    scrubbed = scrub_evidence_text(
+        "Connect via linkedin.com/in/john-doe-123 or see github.com/octo/repo for the code."
+    )
+
+    assert "linkedin.com" not in scrubbed
+    assert "github.com/octo/repo" in scrubbed
+
+
+def test_an_email_embedded_in_a_url_is_still_masked() -> None:
+    scrubbed = scrub_evidence_text("Contact via https://example.com/contact?email=jane@x.com")
+
+    assert EMAIL_PLACEHOLDER in scrubbed
+    assert "jane@x.com" not in scrubbed

@@ -49,3 +49,26 @@ def test_every_number_in_the_text_is_redacted() -> None:
     text = "mobile 0700 000 000, office +40 21 000 0000"
 
     assert redact_phone_numbers(text).count(PHONE_PLACEHOLDER) == 2
+
+
+# --- M4: an 8-digit number grouped by spaces (Nordics, Singapore, Hong Kong) is a phone -----
+
+
+@pytest.mark.parametrize("phone", ["12 34 56 78", "2345 6789"])
+def test_an_eight_digit_spaced_number_is_redacted(phone: str) -> None:
+    text = f"Call {phone} for support"
+
+    redacted = redact_phone_numbers(text)
+
+    assert PHONE_PLACEHOLDER in redacted
+    assert phone not in redacted
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["2021 - 2025", "2021-2025", "Oct 2025 – Present\n2021 – 2025\n1 2 3"],
+)
+def test_a_hyphenated_eight_digit_run_still_survives_as_a_date_range(text: str) -> None:
+    # An 8-digit run split by a hyphen ("2021 - 2025") is a date range, never how a phone
+    # number is grouped ("12 34 56 78"), so it must not be swept up by the new 8-digit rule.
+    assert redact_phone_numbers(text) == text

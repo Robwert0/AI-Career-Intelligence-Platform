@@ -3,8 +3,27 @@ import re
 from app.ai.redaction import redact_phone_numbers
 
 EMAIL_PLACEHOLDER = "[email redacted]"
+URL_PLACEHOLDER = "[profile link redacted]"
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# "john at gmail dot com": a name-shaped token, " at ", a domain-shaped token, then one or more
+# " dot " groups, so multi-part domains ("some dot co dot uk") are still masked whole.
+_OBFUSCATED_EMAIL = re.compile(
+    r"\b[\w.+-]+\s+(?:at|\[at\]|\(at\))\s+[\w-]+(?:\s+(?:dot|\[dot\]|\(dot\))\s+[\w-]+)+\b",
+    re.IGNORECASE,
+)
+# Social/professional profile links carry the same identifying weight as an address; github.com
+# links are the one exception, since the id-merge dedup (dedup.py) needs them verbatim.
+_PROFILE_URL = re.compile(
+    r"\b(?:https?://)?(?:www\.)?(?:linkedin|twitter|x|facebook|instagram)\.com(?:/\S*)?",
+    re.IGNORECASE,
+)
+# A sentence that opens with one of these labels is a contact line in its own right (an address,
+# a phone or social handle): drop it whole rather than only masking the value inside it.
+_CONTACT_LABEL = re.compile(
+    r"^(?:address|adresa|tel|telefon|phone|mobile|email|e-mail|linkedin)\s*:?\s",
+    re.IGNORECASE,
+)
 # Characteristics a match must never weigh (spec §5.4: age, gender, ethnicity, religion,
 # nationality, marital/family status, health, disability, work authorisation/visa/citizenship,
 # sexual orientation), plus identity numbers. A sentence that mentions one is dropped whole:
@@ -41,12 +60,19 @@ def mentions_sensitive(text: str) -> bool:
 
 
 def mask_contacts(text: str) -> str:
-    return redact_phone_numbers(_EMAIL.sub(EMAIL_PLACEHOLDER, text)).strip()
+    text = _OBFUSCATED_EMAIL.sub(EMAIL_PLACEHOLDER, text)
+    text = _EMAIL.sub(EMAIL_PLACEHOLDER, text)
+    text = _PROFILE_URL.sub(URL_PLACEHOLDER, text)
+    return redact_phone_numbers(text).strip()
 
 
 def scrub_evidence_text(text: str) -> str:
     """Drops sentences naming a sensitive characteristic and masks emails and phone numbers."""
     kept = (piece.strip() for piece in _PIECES.split(text))
     return mask_contacts(
-        " ".join(piece for piece in kept if piece and not mentions_sensitive(piece))
+        " ".join(
+            piece
+            for piece in kept
+            if piece and not mentions_sensitive(piece) and not _CONTACT_LABEL.match(piece)
+        )
     )
