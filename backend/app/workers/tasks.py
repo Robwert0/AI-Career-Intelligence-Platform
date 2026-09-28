@@ -3,7 +3,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from celery.exceptions import SoftTimeLimitExceeded
 
@@ -26,6 +26,7 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 JobHandler = Callable[[JobStore, JobRecord], Awaitable[dict[str, Any]]]
+Outcome = Literal["done", "lost", "failed"]
 
 
 class JobError(Exception):
@@ -42,25 +43,26 @@ async def fail_job(store: JobStore, job_id: str, error_code: str) -> None:
 
 async def _run_handler(
     store: JobStore, record: JobRecord, handler: JobHandler
-) -> tuple[str | None, str | None]:
-    # Returns (error_code, error_type); None, None means done. Every store call stays outside the
-    # except blocks: a store failure raised inside one would chain the handler's exception, whose
+) -> tuple[Outcome, str | None, str | None]:
+    # Returns (outcome, error_code, error_type). Every store call stays outside the except
+    # blocks: a store failure raised inside one would chain the handler's exception, whose
     # message can carry CV text, into Celery's logged traceback.
     try:
         result = await handler(store, record)
     except JobError as exc:
-        return exc.code, None
+        return "failed", exc.code, None
     except SoftTimeLimitExceeded:
-        return "timeout", None
+        return "failed", "timeout", None
     except Exception as exc:
-        return "internal_error", type(exc).__name__
+        return "failed", "internal_error", type(exc).__name__
 
     try:
         with contextlib.suppress(JobStateError):
-            await store.mark_done(record.id, result=result, now=time.time())
+            if await store.mark_done(record.id, result=result, now=time.time()) is None:
+                return "lost", None, None
     except Exception as exc:
-        return "internal_error", type(exc).__name__
-    return None, None
+        return "failed", "internal_error", type(exc).__name__
+    return "done", None, None
 
 
 async def execute_job(store: JobStore, job_id: str, handler: JobHandler, *, stage: str) -> None:
@@ -88,12 +90,16 @@ async def execute_job(store: JobStore, job_id: str, handler: JobHandler, *, stag
         return
 
     started = time.monotonic()
-    error_code, error_type = await _run_handler(store, running, handler)
-    if error_code is not None:
-        await fail_job(store, job_id, error_code)
+    outcome, error_code, error_type = await _run_handler(store, running, handler)
+    if outcome == "failed":
+        await fail_job(store, job_id, error_code or "internal_error")
         logger.warning(
             "job failed job_id=%s error_code=%s error_type=%s", job_id, error_code, error_type
         )
+        return
+    if outcome == "lost":
+        # The record expired mid-run; the xx write refused to recreate it, so the result is gone.
+        logger.warning("job lost job_id=%s reason=expired", job_id)
         return
 
     logger.info(

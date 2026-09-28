@@ -136,6 +136,22 @@ async def test_a_job_that_expires_mid_run_is_not_recreated(
     assert await redis_client.exists(f"job:{record.id}") == 0
 
 
+async def test_a_job_that_expires_mid_run_is_logged_as_lost_not_done(
+    store: JobStore, redis_client: Redis, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create("ping", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        await redis_client.delete(f"job:{current.id}")
+        return {"late": True}
+
+    with caplog.at_level(logging.INFO):
+        await execute_job(store, record.id, handler, stage="x")
+
+    assert f"job lost job_id={record.id} reason=expired" in caplog.text
+    assert "job done" not in caplog.text
+
+
 async def test_a_job_queued_past_the_stale_cut_off_never_runs(
     store: JobStore, caplog: pytest.LogCaptureFixture
 ) -> None:
