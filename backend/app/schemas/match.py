@@ -62,3 +62,16 @@ class JobStatusResponse(BaseModel):
         if self.status == "failed" and self.error is None:
             raise ValueError("a failed job must carry its error")
         return self
+
+
+SourceName = Literal["cv", "github"]
+
+
+class AnalysisInput(BaseModel):
+    """What the worker needs besides the CV bytes; stored as a blob next to the record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    posting: JobPosting
+    github_url: str | None = None
+    cv_provided: bool = False
