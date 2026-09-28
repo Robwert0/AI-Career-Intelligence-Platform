@@ -83,7 +83,8 @@ async def _cv(form: FormData) -> CvUpload | None:
     except DocumentError as exc:
         if exc.failure is DocumentFailure.FILE_TOO_LARGE:
             raise rejected(status.HTTP_413_CONTENT_TOO_LARGE, "file_too_large") from None
-        raise rejected(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "unsupported_type") from None
+        code = "unsafe_docx" if exc.failure is DocumentFailure.UNSAFE_DOCX else "unsupported_type"
+        raise rejected(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, code) from None
     return CvUpload(kind="file", data=data)
 
 

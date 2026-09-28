@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
+from documents import make_docx
 from fakes import AllowAllLimiter, FakeTaskQueue
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from app.core.job_store import JobStateError, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.deps import get_analysis_registry, get_job_store, get_limiter, get_task_queue
 from app.main import app
+from app.services.match_failures import describe_failure
 from app.services.match_service import CvUpload, MatchService
 
 PASSWORD = "supersecret1"
@@ -765,3 +767,13 @@ async def test_a_corrected_url_is_validated_like_the_submit_field(
     assert detail_code(response) == "invalid_github_url"
     record = await env.store.load(analysis_id)
     assert record is not None and record.status is JobStatus.NEEDS_DECISION
+
+
+async def test_a_macro_docx_is_415_unsafe_docx(env: Env) -> None:
+    macro = make_docx("Backend engineer", extra={"word/vbaProject.bin": b"\x00" * 64})
+
+    response = await env.submit(files={"cv": ("cv.docx", macro, "application/octet-stream")})
+
+    assert response.status_code == 415
+    assert detail_code(response) == "unsafe_docx"
+    assert response.json()["detail"]["message"] == describe_failure("unsafe_docx").message

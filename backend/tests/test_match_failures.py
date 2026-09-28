@@ -95,4 +95,3 @@ def test_analysis_stage_codes_have_their_own_recovery(code: str, recovery: str) 
 
     assert failure.recovery == recovery
     assert failure.message != describe_failure("ai_invalid_output").message
-

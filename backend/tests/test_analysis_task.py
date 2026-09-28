@@ -360,4 +360,3 @@ def test_a_github_retry_with_a_corrected_url_reads_the_new_profile(
 )
 def test_assessment_failures_get_analysis_specific_codes(code: str, expected: str) -> None:
     assert tasks.analysis_failure_code(code) == expected
-
