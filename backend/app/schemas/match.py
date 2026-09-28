@@ -20,7 +20,16 @@ class JobIntakeRequest(BaseModel):
         return self
 
 
-Recovery = Literal["paste", "retry", "fix_url", "wait"]
+Recovery = Literal[
+    "paste",
+    "retry",
+    "fix_url",
+    "wait",
+    "choose_file",
+    "paste_cv",
+    "fix_github_url",
+    "retry_or_continue",
+]
 
 
 class JobSubmitted(BaseModel):
