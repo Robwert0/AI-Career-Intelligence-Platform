@@ -3,6 +3,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from pydantic import ValidationError
+
 from app.ai.generation import Generator, SamplingSettings
 from app.ai.input_guard import detect_injection_phrases
 from app.ai.match.prompts import build_evidence_extract_messages
@@ -176,7 +178,7 @@ def _languages(languages: dict[str, int]) -> str:
     return ", ".join(f"{name} {round(share)}%" for share, name in shares[:5] if share >= 1)
 
 
-def _repo_item(repo: GitHubRepo) -> EvidenceItem:
+def _repo_item(repo: GitHubRepo) -> EvidenceItem | None:
     parts = [f"{repo.name}: {repo.description}" if repo.description else repo.name]
     if languages := _languages(repo.languages):
         parts.append(f"Languages: {languages}")
@@ -188,15 +190,27 @@ def _repo_item(repo: GitHubRepo) -> EvidenceItem:
         parts.append(f"{repo.stars} stars")
     if repo.readme and (summary := _readme_summary(repo.readme)):
         parts.append(f"README: {summary}")
-    return EvidenceItem(
-        id=f"gh:repo:{repo.name.lower()}",
-        sources=("github",),
-        kind="repo",
-        section_label=clip_text(f"GitHub · {repo.name}", 120),
-        name=repo.name[:120],
-        text=clip_text(scrub_evidence_text(". ".join(part.rstrip(". ") for part in parts))),
-        url=repo.url,
-    )
+    text = clip_text(scrub_evidence_text(". ".join(part.rstrip(". ") for part in parts)))
+    if not text:
+        # Every fact about this repo was sensitive (M2): a bare repo name is never itself
+        # sensitive unless the name is, so fall back to it rather than crashing on an empty
+        # EvidenceText, and drop the repo outright in that one case.
+        fallback = f"GitHub repository {repo.name}"
+        if mentions_sensitive(fallback):
+            return None
+        text = fallback
+    try:
+        return EvidenceItem(
+            id=f"gh:repo:{repo.name.lower()}",
+            sources=("github",),
+            kind="repo",
+            section_label=clip_text(f"GitHub · {repo.name}", 120),
+            name=repo.name[:120],
+            text=text,
+            url=repo.url,
+        )
+    except ValidationError:
+        return None
 
 
 def _profile_item(profile: GitHubProfile) -> EvidenceItem | None:
@@ -206,18 +220,21 @@ def _profile_item(profile: GitHubProfile) -> EvidenceItem | None:
         return None
     who = profile.name or profile.login
     text = f"GitHub profile of {who}. {about}. {profile.public_repos} public repositories."
-    return EvidenceItem(
-        id="gh:profile",
-        sources=("github",),
-        kind="profile",
-        section_label="GitHub · profile",
-        name=profile.login[:120],
-        text=clip_text(mask_contacts(text)),
-    )
+    try:
+        return EvidenceItem(
+            id="gh:profile",
+            sources=("github",),
+            kind="profile",
+            section_label="GitHub · profile",
+            name=profile.login[:120],
+            text=clip_text(mask_contacts(text)),
+        )
+    except ValidationError:
+        return None
 
 
 def github_evidence(snapshot: GitHubSnapshot) -> tuple[EvidenceItem, ...]:
     """Deterministic: the same snapshot always yields the same items, with no model involved."""
-    repos = [_repo_item(repo) for repo in snapshot.repos]
+    repos = [item for repo in snapshot.repos if (item := _repo_item(repo)) is not None]
     profile = _profile_item(snapshot.profile)
     return tuple([profile, *repos] if profile is not None else repos)

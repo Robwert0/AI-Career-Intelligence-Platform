@@ -49,6 +49,34 @@ def cv_item(id: str, kind: str, name: str | None, **extra: Any) -> EvidenceItem:
 # --- GitHub evidence --------------------------------------------------------------------
 
 
+def test_a_repo_whose_only_text_is_sensitive_is_dropped_not_crashed() -> None:
+    # M2: every fact was scrubbed away and the fallback ("GitHub repository photos") is itself
+    # sensitive, so the whole item is skipped rather than raising a pydantic ValidationError.
+    repo = gh_repo(
+        "photos", description=None, languages={}, topics=[], stars=0, pushed_at=None, readme=None
+    )
+
+    items = github_evidence(snapshot(repo, bio=None))
+
+    assert items == ()
+
+
+def test_a_repo_whose_scrubbed_text_is_empty_falls_back_to_its_name() -> None:
+    repo = gh_repo(
+        "toolkit",
+        description="Nationality checker",
+        readme="Passport scanner. ID number parser",
+        languages={},
+        topics=[],
+        stars=0,
+        pushed_at=None,
+    )
+
+    items = github_evidence(snapshot(repo, bio=None))
+
+    assert [item.text for item in items] == ["GitHub repository toolkit"]
+
+
 def test_each_repository_becomes_one_deterministic_item() -> None:
     items = github_evidence(snapshot(gh_repo("Jarvis")))
 
