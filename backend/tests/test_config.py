@@ -171,3 +171,29 @@ def test_ollama_url_accepts_a_plain_host(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
     assert Settings().ollama_base_url == "http://127.0.0.1:11434"
+
+
+def test_worker_settings_default_to_local_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("CELERY_BROKER_URL", "JOB_TTL_SECONDS", "JOB_SOFT_TIME_LIMIT_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    # DB 1, not 0: a broker flush must never wipe rate-limit buckets.
+    assert settings.celery_broker_url == "redis://localhost:6379/1"
+    assert settings.job_ttl_seconds == 3600
+    assert settings.job_soft_time_limit_seconds == 300
+
+
+def test_a_job_ttl_under_a_minute_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JOB_TTL_SECONDS", "59")
+
+    with pytest.raises(ValidationError, match="job_ttl_seconds"):
+        Settings()
+
+
+def test_a_soft_time_limit_under_ten_seconds_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JOB_SOFT_TIME_LIMIT_SECONDS", "9")
+
+    with pytest.raises(ValidationError, match="job_soft_time_limit_seconds"):
+        Settings()

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     chat_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     chat_max_concurrent_generations: int = Field(default=4, ge=1)
     chat_queue_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    celery_broker_url: str = "redis://localhost:6379/1"
+    job_ttl_seconds: int = Field(default=3600, ge=60)
+    job_soft_time_limit_seconds: int = Field(default=300, ge=10)
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
