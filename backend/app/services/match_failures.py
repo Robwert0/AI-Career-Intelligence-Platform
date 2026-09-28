@@ -137,6 +137,10 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "Your CV is too long to analyse in full. Paste the most relevant part instead.",
         "paste_cv",
     ),
+    "cv_no_evidence": (
+        "We couldn't verify any evidence in your CV. Try again, or continue without your CV.",
+        "retry_or_continue",
+    ),
 }
 _FALLBACK: tuple[str, Recovery] = _FAILURES["internal_error"]
 

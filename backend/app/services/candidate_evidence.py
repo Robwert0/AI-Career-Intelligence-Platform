@@ -32,10 +32,15 @@ _CV_SPECIFIC_CODES = {
 
 
 class SourceError(Exception):
-    def __init__(self, code: str, *, reset_at: int | None = None) -> None:
+    def __init__(
+        self, code: str, *, reset_at: int | None = None, dropped: int | None = None
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.reset_at = reset_at
+        # How many extracted items failed grounding, when known: lets the caller (slice 4) add a
+        # "many items were dropped" limitation line even though the source itself failed.
+        self.dropped = dropped
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +87,8 @@ async def read_cv(
         evidence = await extract_cv_evidence(generator, document.text)
     except ExtractionError as exc:
         raise SourceError(_CV_SPECIFIC_CODES.get(exc.code, exc.code)) from None
+    if not evidence.items:
+        raise SourceError("cv_no_evidence", dropped=evidence.dropped)
     logger.info(
         "cv read kind=%s pages=%s chars=%d items=%d dropped=%d",
         document.kind,

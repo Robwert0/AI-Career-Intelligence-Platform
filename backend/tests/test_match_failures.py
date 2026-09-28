@@ -41,6 +41,7 @@ _CANDIDATE_CODES = [
     "not_a_cv",
     "cv_ai_invalid_output",
     "cv_input_too_long",
+    "cv_no_evidence",
 ]
 
 

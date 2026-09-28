@@ -63,6 +63,38 @@ async def test_an_uploaded_cv_is_parsed_then_extracted() -> None:
     assert (reading.document_kind, reading.pages, reading.truncated) == ("pdf", 1, False)
 
 
+async def test_a_cv_with_no_grounded_evidence_is_a_failed_source() -> None:
+    empty_reply = json.dumps({"is_cv": True, "items": []})
+
+    error = await source_error(
+        read_cv(text=f"{CV_LINE}\n" * 5, generator=ScriptedGenerator([empty_reply]))
+    )
+
+    assert error.code == "cv_no_evidence"
+
+
+async def test_a_cv_with_no_grounded_evidence_exposes_how_many_were_dropped() -> None:
+    invented = json.dumps(
+        {
+            "is_cv": True,
+            "items": [
+                {
+                    "kind": "work",
+                    "section_label": "Experience · Ghost",
+                    "text": "Invented role at a company never mentioned in this CV.",
+                    "links": [],
+                }
+            ],
+        }
+    )
+
+    error = await source_error(
+        read_cv(text=f"{CV_LINE}\n" * 5, generator=ScriptedGenerator([invented]))
+    )
+
+    assert (error.code, error.dropped) == ("cv_no_evidence", 1)
+
+
 async def test_a_real_pdf_goes_through_the_sandbox_by_default() -> None:
     reading = await read_cv(file=make_pdf([text_page()]), generator=ScriptedGenerator([WORK_REPLY]))
 
