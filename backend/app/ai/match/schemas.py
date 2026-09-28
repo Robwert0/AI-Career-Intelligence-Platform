@@ -1,6 +1,6 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -26,3 +26,59 @@ class JobPosting(BaseModel):
 
 class ExtractedJob(JobPosting):
     is_job_posting: bool
+
+
+EvidenceSource = Literal["cv", "github"]
+EvidenceKind = Literal[
+    "work", "project", "repo", "skill_list", "education", "accomplishment", "profile"
+]
+CvEntryKind = Literal["work", "project", "skill_list", "education", "accomplishment"]
+EvidenceId = Annotated[
+    str,
+    StringConstraints(
+        pattern=(
+            r"^(?:gh:profile|gh:repo:[a-z0-9._-]{1,100}"
+            r"|cv:(?:experience|project|skills|education|accomplishment):\d{1,3})$"
+        )
+    ),
+]
+Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+EvidenceText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=600)
+]
+_REPO_URL = r"^https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$"
+RepoLink = Annotated[str, StringConstraints(pattern=_REPO_URL)]
+
+
+class EvidenceItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: EvidenceId
+    sources: tuple[EvidenceSource, ...] = Field(min_length=1, max_length=2)
+    kind: EvidenceKind
+    section_label: Label
+    name: Label | None = None
+    text: EvidenceText
+    url: RepoLink | None = None
+    repo_links: tuple[RepoLink, ...] = ()
+
+
+def _clipped(limit: int) -> BeforeValidator:
+    # The model is told the limits; a reply that overshoots is cut, not failed and retried.
+    return BeforeValidator(lambda value: value[:limit] if isinstance(value, str) else value)
+
+
+class CvEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: CvEntryKind
+    section_label: Annotated[str, _clipped(120)]
+    text: Annotated[str, _clipped(600)]
+    links: list[str] = Field(default_factory=list)
+
+
+class ExtractedCv(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    is_cv: bool
+    items: list[CvEntry] = Field(default_factory=list)
