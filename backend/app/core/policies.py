@@ -13,3 +13,6 @@ MATCH_JOB_USER = Policy(
 )
 MATCH_POLL_IP = Policy("match_poll_ip", capacity=120, refill_per_second=2.0, scope=Scope.IP)
 MATCH_POLL_USER = Policy("match_poll_user", capacity=60, refill_per_second=1.0, scope=Scope.USER)
+MATCH_ANALYSIS_USER = Policy(
+    "match_analysis_user", capacity=5, refill_per_second=5 / 3600, scope=Scope.USER
+)

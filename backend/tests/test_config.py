@@ -1,7 +1,12 @@
+import inspect
+
 import pytest
 from pydantic import ValidationError
 
+from app.core import config
 from app.core.config import Settings
+from app.integrations.doc_sandbox import PARSE_TIMEOUT_SECONDS
+from app.integrations.github import GitHubClient
 
 
 def test_short_secret_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,3 +291,70 @@ def test_the_github_token_never_appears_in_the_settings_repr(
     assert settings.github_token is not None
     assert settings.github_token.get_secret_value() == "ghp_not_a_real_token_value"
     assert "ghp_not_a_real_token_value" not in repr(settings)
+
+
+def test_analysis_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "MATCH_CV_TTL_SECONDS",
+        "MATCH_PRESELECT_TOP_K",
+        "MATCH_ASSESS_GENERATION_TIMEOUT_SECONDS",
+        "MATCH_RECOMMEND_GENERATION_TIMEOUT_SECONDS",
+        "MATCH_ANALYSIS_SOFT_TIME_LIMIT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.match_cv_ttl_seconds == 900
+    assert settings.match_preselect_top_k == 8
+    assert settings.match_assess_generation_timeout_seconds == 60
+    assert settings.match_recommend_generation_timeout_seconds == 90
+    assert settings.match_analysis_soft_time_limit_seconds == 1800
+    assert settings.match_analysis_hard_time_limit_seconds == 1830
+
+
+def test_the_refusal_gate_has_no_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MATCH_PRESELECT_MIN_SIMILARITY")
+
+    with pytest.raises(ValidationError, match="match_preselect_min_similarity"):
+        Settings(_env_file=None)
+
+
+def test_the_worst_case_analysis_is_the_documented_sum() -> None:
+    settings = Settings(_env_file=None)
+
+    # 30 parse + 2x150 evidence + 20 GitHub + 60 embeddings + 8x2x60 assess + 2x90 recommend + 30.
+    assert settings.match_analysis_budget_seconds == 1580
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("MATCH_ASSESS_GENERATION_TIMEOUT_SECONDS", "90"),
+        ("EVIDENCE_EXTRACT_GENERATION_TIMEOUT_SECONDS", "400"),
+        ("MATCH_ANALYSIS_SOFT_TIME_LIMIT_SECONDS", "1500"),
+    ],
+)
+def test_an_analysis_that_cannot_finish_inside_its_soft_limit_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match="analysis worst case"):
+        Settings(_env_file=None)
+
+
+def test_a_queued_analysis_must_be_able_to_finish_before_its_record_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JOB_TTL_SECONDS", "2400")
+
+    with pytest.raises(ValidationError, match="job_ttl_seconds"):
+        Settings(_env_file=None)
+
+
+def test_the_fixed_budget_matches_the_limits_enforced_in_code() -> None:
+    total_timeout = inspect.signature(GitHubClient).parameters["total_timeout"].default
+
+    assert config.PARSE_BUDGET_SECONDS == PARSE_TIMEOUT_SECONDS
+    assert total_timeout == config.GITHUB_BUDGET_SECONDS

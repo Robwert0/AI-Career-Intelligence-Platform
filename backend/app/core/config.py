@@ -8,6 +8,16 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
+# Stage bounds that are fixed in code, not settings; test_config pins each to its source.
+PARSE_BUDGET_SECONDS = 30
+GITHUB_BUDGET_SECONDS = 20
+EMBED_BUDGET_SECONDS = 60
+OVERHEAD_BUDGET_SECONDS = 30
+ANALYSIS_FIXED_BUDGET_SECONDS = (
+    PARSE_BUDGET_SECONDS + GITHUB_BUDGET_SECONDS + EMBED_BUDGET_SECONDS + OVERHEAD_BUDGET_SECONDS
+)
+MAX_ASSESS_CALLS = 8
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT_DIR / ".env", extra="ignore")
@@ -45,6 +55,27 @@ class Settings(BaseSettings):
     github_token: SecretStr | None = None
     github_cache_ttl_seconds: int = Field(default=3600, ge=60)
     evidence_extract_generation_timeout_seconds: int = Field(default=150, ge=10)
+    match_cv_ttl_seconds: int = Field(default=900, ge=60)
+    match_preselect_top_k: int = Field(default=8, ge=1, le=20)
+    # No default on purpose: the refusal gate is measured by `scripts/eval_match.py calibrate`.
+    match_preselect_min_similarity: float = Field(ge=-1.0, le=1.0)
+    match_assess_generation_timeout_seconds: int = Field(default=60, ge=10)
+    match_recommend_generation_timeout_seconds: int = Field(default=90, ge=10)
+    match_analysis_soft_time_limit_seconds: int = Field(default=1800, ge=60)
+
+    @property
+    def match_analysis_hard_time_limit_seconds(self) -> int:
+        return self.match_analysis_soft_time_limit_seconds + 30
+
+    @property
+    def match_analysis_budget_seconds(self) -> int:
+        """Worst case for one run of run_analysis: every model call used twice."""
+        return (
+            ANALYSIS_FIXED_BUDGET_SECONDS
+            + 2 * self.evidence_extract_generation_timeout_seconds
+            + MAX_ASSESS_CALLS * 2 * self.match_assess_generation_timeout_seconds
+            + 2 * self.match_recommend_generation_timeout_seconds
+        )
 
     @property
     def max_upload_bytes(self) -> int:
@@ -67,6 +98,21 @@ class Settings(BaseSettings):
             raise ValueError(
                 "two extraction attempts plus the fetch budget exceed the soft time limit"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _analysis_fits_its_limits(self) -> Settings:
+        if self.match_analysis_budget_seconds >= self.match_analysis_soft_time_limit_seconds:
+            raise ValueError(
+                f"the analysis worst case ({self.match_analysis_budget_seconds}s) must fit inside "
+                "match_analysis_soft_time_limit_seconds"
+            )
+        # A queued-then-running analysis must finish before its record expires.
+        if (
+            self.job_queue_stale_seconds + self.match_analysis_hard_time_limit_seconds
+            > self.job_ttl_seconds
+        ):
+            raise ValueError("job_ttl_seconds is too short for a queued analysis to finish")
         return self
 
     @field_validator("cors_allowed_origins", mode="before")

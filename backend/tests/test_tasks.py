@@ -455,3 +455,10 @@ def test_an_intake_starts_at_the_stage_its_input_kind_needs(
         assert "reading" not in shown
     done = _load(job_id)
     assert done is not None and done.status is JobStatus.DONE
+
+
+def test_the_broker_never_redelivers_a_running_analysis() -> None:
+    # Redis redelivers an unacked task after visibility_timeout; an analysis can run 1830s.
+    visibility = celery_app.conf.broker_transport_options["visibility_timeout"]
+
+    assert visibility > settings.match_analysis_hard_time_limit_seconds

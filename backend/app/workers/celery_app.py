@@ -20,7 +20,13 @@ def create_celery_app(broker_url: str) -> Celery:
         task_soft_time_limit=settings.job_soft_time_limit_seconds,
         task_time_limit=settings.job_hard_time_limit_seconds,
         broker_connection_retry_on_startup=True,
-        broker_transport_options={"socket_connect_timeout": 2, "socket_timeout": 2},
+        # visibility_timeout: an unacked task is redelivered after this long. It must outlast
+        # the longest task, or a slow analysis would be handed to the worker a second time.
+        broker_transport_options={
+            "socket_connect_timeout": 2,
+            "socket_timeout": 2,
+            "visibility_timeout": settings.job_ttl_seconds,
+        },
         # Bounded so a dead broker fails the HTTP request in seconds instead of hanging it.
         task_publish_retry_policy={
             "max_retries": 2,
