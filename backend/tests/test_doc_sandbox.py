@@ -47,11 +47,29 @@ async def test_a_hanging_parse_is_killed_at_the_timeout() -> None:
     assert time.monotonic() - started < 5
 
 
-async def test_the_child_runs_under_its_memory_limit() -> None:
-    # 32 MiB cannot even hold the PDF parser's imports, so the child must die, not parse.
-    failure = await failure_of(make_pdf([text_page()]), memory_bytes=32 * 1024 * 1024)
+async def test_the_child_runs_under_its_memory_limit(caplog: pytest.LogCaptureFixture) -> None:
+    # 32 MiB cannot even hold the PDF parser's imports, so the child reports MemoryError
+    # instead of trying to parse — and that reason is distinguishable in the log, not just
+    # a bare crashed exit code.
+    with caplog.at_level("WARNING"):
+        failure = await failure_of(make_pdf([text_page()]), memory_bytes=32 * 1024 * 1024)
 
     assert failure is DocumentFailure.UNREADABLE_DOCUMENT
+    assert "error_type=MemoryError" in caplog.text
+
+
+async def test_an_unexpected_child_exception_is_reported_by_type_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    script = (
+        "import json, sys; sys.stdin.buffer.read(); "
+        "sys.stdout.write(json.dumps({'error_type': 'RuntimeError'}))"
+    )
+    with caplog.at_level("WARNING"):
+        failure = await failure_of(b"", command=[sys.executable, "-c", script])
+
+    assert failure is DocumentFailure.UNREADABLE_DOCUMENT
+    assert "error_type=RuntimeError" in caplog.text
 
 
 async def test_a_crashing_child_is_unreadable() -> None:

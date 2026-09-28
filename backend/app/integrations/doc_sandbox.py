@@ -20,6 +20,7 @@ class _ChildReply(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     error: DocumentFailure | None = None
+    error_type: str | None = None
     kind: DocumentKind | None = None
     text: str | None = None
     pages: int | None = None
@@ -69,6 +70,9 @@ async def parse_isolated(
         raise DocumentError(DocumentFailure.UNREADABLE_DOCUMENT) from None
     if reply.error is not None:
         raise DocumentError(reply.error)
+    if reply.error_type is not None:
+        logger.warning("document parse child exception error_type=%s", reply.error_type)
+        raise DocumentError(DocumentFailure.UNREADABLE_DOCUMENT)
     if reply.kind is None or reply.text is None:
         raise DocumentError(DocumentFailure.UNREADABLE_DOCUMENT)
     return ParsedDocument(
