@@ -45,6 +45,12 @@ def test_entities_are_decoded() -> None:
     assert extract_page(html("<p>R&amp;D &lt;team&gt;</p>")).text == "R&D <team>"
 
 
+def test_non_breaking_spaces_collapse_like_other_whitespace() -> None:
+    page = extract_page(html("<p>Salary:&nbsp;&nbsp;$100k</p>"))
+
+    assert page.text == "Salary: $100k"
+
+
 def test_a_json_ld_job_posting_is_extracted() -> None:
     posting = {
         "@context": "https://schema.org",
@@ -84,6 +90,25 @@ def test_broken_json_ld_is_ignored() -> None:
 
     assert page.posting is None
     assert BODY.strip() in page.text
+
+
+def test_a_deeply_nested_json_ld_does_not_crash_extraction() -> None:
+    deeply_nested = "[" * 999 + "]" * 999
+    head = f'<script type="application/ld+json">{deeply_nested}</script>'
+    page = extract_page(html(f"<p>{BODY}</p>", head=head))
+
+    assert page.posting is None
+    assert BODY.strip() in page.text
+
+
+def test_a_job_posting_nested_inside_a_graph_and_a_list_is_still_found() -> None:
+    posting = {"@type": "JobPosting", "title": "SRE", "description": BODY}
+    payload = {"@graph": [[posting]]}
+
+    page = extract_page(html("", head=ld(payload)))
+
+    assert page.posting is not None
+    assert page.posting.title == "SRE"
 
 
 def test_job_text_prefers_a_substantial_json_ld_description() -> None:

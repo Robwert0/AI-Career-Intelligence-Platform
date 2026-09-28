@@ -53,7 +53,7 @@ _CHALLENGE_MARKERS = (
     "captcha-delivery.com",
     "just a moment...",
 )
-_SPACES = re.compile(r"[ \t\f\v\r ]+")
+_SPACES = re.compile(r"[ \t\f\v\r\xa0]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,13 +130,18 @@ def _html_to_text(html: str) -> str:
     return _normalise("".join(extractor.parts))
 
 
-def _job_postings(node: Any) -> list[dict[str, Any]]:
+_MAX_JSON_LD_DEPTH = 16
+
+
+def _job_postings(node: Any, depth: int = 0) -> list[dict[str, Any]]:
+    if depth > _MAX_JSON_LD_DEPTH:
+        return []
     if isinstance(node, list):
-        return [found for item in node for found in _job_postings(item)]
+        return [found for item in node for found in _job_postings(item, depth + 1)]
     if not isinstance(node, dict):
         return []
     if "@graph" in node:
-        return _job_postings(node["@graph"])
+        return _job_postings(node["@graph"], depth + 1)
     kind = node.get("@type")
     kinds = kind if isinstance(kind, list) else [kind]
     return [node] if "JobPosting" in kinds else []
@@ -146,9 +151,10 @@ def _linked_posting(blocks: list[list[str]]) -> LinkedPosting | None:
     for block in blocks:
         try:
             data = json.loads("".join(block))
-        except ValueError:
+            postings = _job_postings(data)
+        except ValueError, RecursionError:
             continue
-        for posting in _job_postings(data):
+        for posting in postings:
             organisation = posting.get("hiringOrganization")
             company = organisation.get("name") if isinstance(organisation, dict) else organisation
             description = posting.get("description")
