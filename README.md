@@ -31,6 +31,24 @@ scalable and explainable** before it counts as done.
 - Prompt-injection defense: an input guard, strict isolation of system prompt / user input /
   retrieved documents, special-token escaping, and an output guard that blocks prompt leaks
 
+**Job Match Analyzer**
+- Add a job posting (a URL our server fetches, or pasted text) and a CV (PDF/DOCX upload, or
+  pasted text) and/or a public GitHub profile; review and edit the extracted requirements before
+  analysing
+- Async pipeline on Celery: read the job → read the CV / GitHub evidence → match evidence to
+  requirements → assess each requirement → score → recommend, with live queue position and stage
+  progress in the UI
+- A transparent, code-computed score (the model never picks the number): a weighted breakdown by
+  category, per-requirement status with cited evidence, immediate/longer-term recommendations, and
+  grounded CV rewrite suggestions
+- The model can refuse to score (no relevant evidence) rather than guess, and personal
+  characteristics / work-authorization requirements are always excluded from scoring, re-checked
+  server-side regardless of client input
+- Recoverable failures at every stage (bad job URL, unreadable CV, GitHub rate limits, one active
+  job/analysis per user) each resolve to a specific recovery action in the UI, not a dead end
+- State (job/analysis records, CV blobs, the GitHub cache) lives in Redis with a short TTL, never
+  written to disk; dedicated per-user/IP rate limits for job intake and analysis submission
+
 **Security and operations**
 - Redis token-bucket rate limiting per IP and per user (e.g. chat: 20 req/min per user), fail-closed
 - Structured backend logging with noisy third-party loggers kept quiet
@@ -48,12 +66,12 @@ scalable and explainable** before it counts as done.
 | 2 | Auth: JWT, refresh rotation, secure cookies | ✅ Done |
 | 3 | Frontend: portfolio, auth UI, chat UI | ✅ Done |
 | 4 | RAG: ingestion, embeddings, hybrid retrieval, chat endpoint | ✅ Done |
-| 5 | CV upload endpoint (S3) | ⏳ Planned |
-| 6 | Async jobs (Celery workers) | 🟡 Partial: worker, Redis job store and CI smoke test done; first real jobs arrive with the Job Match Analyzer |
-| 7 | AI analysis: CV feedback, ATS scoring | ⏳ Planned |
-| 8 | Job matching: CV vs job description | ⏳ Planned |
+| 5 | CV upload endpoint | 🟡 Partial: CV upload (PDF/DOCX, magic-byte + macro validation) ships as part of the Job Match Analyzer, backed by Redis with a TTL, not S3 |
+| 6 | Async jobs (Celery workers) | ✅ Done: job intake and analysis both run as Celery tasks with queue position, stage progress and stale-queue handling |
+| 7 | AI analysis: CV feedback, ATS scoring | 🟡 Partial: grounded CV rewrite suggestions and gap analysis ship as part of the Job Match Analyzer; no separate standalone ATS-scoring endpoint |
+| 8 | Job matching: CV vs job description | ✅ Done: the Job Match Analyzer (job intake, CV + GitHub evidence, hybrid retrieval, multi-stage LLM assessment, transparent scoring). The similarity-preselection threshold is calibrated against one real CV; the eval quality gate (`scripts/eval_match.py`) has not yet passed against hand-labelled postings |
 | 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Planned |
-| 10 | Security hardening | 🟡 Partial: rate limiting and prompt-injection defense done; upload validation pending |
+| 10 | Security hardening | 🟡 Partial: rate limiting, prompt-injection defense and file-upload validation done for chat and the Job Match Analyzer; queue/worker-concurrency hardening (single shared worker, stale-queue edge cases) still open |
 | 11 | Observability | 🟡 Partial: logging done; error tracking and token usage pending |
 | 12 | Deployment | ⏳ Planned |
 
@@ -68,7 +86,8 @@ Browser ──► Next.js (/api/* proxied) ──► FastAPI
                                            ├─ ai            chunking, embeddings, retrieval, prompts, guards
                                            ├─ repositories  the only place DB queries live
                                            └─ models        SQLAlchemy
-                                  PostgreSQL + pgvector   Redis (rate limits)
+                                  PostgreSQL + pgvector   Redis (rate limits, job/analysis state,
+                                                                  CV blobs, GitHub cache)
 ```
 
 The frontend proxies `/api/*` to the backend, so the browser only ever talks to one origin. That is
@@ -108,6 +127,14 @@ npm ci
 npm run dev
 ```
 
+Job Match Analyzer env lines worth calling out (see `.env.example` for the rest):
+- `MATCH_PRESELECT_MIN_SIMILARITY` — required, no default; calibrate it against your own CV with
+  `uv run python scripts/eval_match.py calibrate` before relying on it.
+- `MAX_UPLOAD_MB=5` — the CV upload size limit (1-20); the frontend's own client-side check must
+  agree with whatever value this is set to.
+- `GITHUB_TOKEN` — optional. Without it, every user of this deployment shares GitHub's
+  unauthenticated ~60 requests/hour (about 2 new profiles).
+
 ### Checks
 
 ```bash
@@ -115,4 +142,4 @@ cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd frontend && npm run lint && npm run test && npm run build
 ```
 
-The suite has 447 backend tests (pytest) and 95 frontend tests (Vitest).
+The suite has 1182 backend tests (pytest) and 385 frontend tests (Vitest).

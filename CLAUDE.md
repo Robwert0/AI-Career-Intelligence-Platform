@@ -250,6 +250,12 @@ cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 # Worker
 celery -A app.workers.celery_app worker --loglevel=info
 
+# Job Match Analyzer: calibrate MATCH_PRESELECT_MIN_SIMILARITY against your own CV,
+# then run the eval gate (both need labelled postings under docs/eval/calibration/)
+cd backend && uv run python scripts/eval_match.py prepare
+uv run python scripts/eval_match.py calibrate
+uv run python scripts/eval_match.py run
+
 # Frontend
 cd frontend && npm run dev
 npm run lint && npm run build
