@@ -32,6 +32,11 @@ SENSITIVE_RATIONALE = (
 GITHUB_PUBLIC_ONLY = "GitHub shows public repositories only; professional work is often private"
 GITHUB_METADATA_ONLY = "GitHub was inspected via metadata and READMEs; no code was reviewed"
 CV_TRUNCATED = "Your CV was longer than we read; only its first part was analysed"
+CV_UNVERIFIED = (
+    "Some statements in your CV could not be verified against its text and were left out"
+)
+# Share of extracted CV items dropped by grounding above which the report says so.
+CV_DROPPED_SHARE = 0.25
 CV_SKIPPED = "Your CV could not be read, so this report uses your GitHub profile only"
 GITHUB_SKIPPED = "Your GitHub profile could not be read, so this report uses your CV only"
 NO_PREFERRED = (
@@ -73,6 +78,9 @@ def _coverage(
         limitations += [GITHUB_PUBLIC_ONLY, GITHUB_METADATA_ONLY]
     if sources.cv.status == "read" and sources.cv.truncated:
         limitations.append(CV_TRUNCATED)
+    extracted = sources.cv.dropped + len(sources.cv.items)
+    if sources.cv.dropped and sources.cv.dropped / extracted >= CV_DROPPED_SHARE:
+        limitations.append(CV_UNVERIFIED)
     if sources.cv.status == "skipped":
         limitations.append(CV_SKIPPED)
     if sources.github.status == "skipped":

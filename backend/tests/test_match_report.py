@@ -7,6 +7,7 @@ from app.services.analysis_sources import CvSource, GitHubSource, SourcesState
 from app.services.match_report import (
     CV_SKIPPED,
     CV_TRUNCATED,
+    CV_UNVERIFIED,
     DISCLAIMER,
     GITHUB_METADATA_ONLY,
     GITHUB_PUBLIC_ONLY,
@@ -138,3 +139,10 @@ def test_a_refusal_report_has_no_score_and_zero_rows() -> None:
     ]
     assert refused.coverage.level == "low"
     assert refused.disclaimer == DISCLAIMER
+
+
+def test_many_unverifiable_cv_items_are_explained() -> None:
+    dropping = BOTH_READ.model_copy(update={"cv": BOTH_READ.cv.model_copy(update={"dropped": 2})})
+
+    assert CV_UNVERIFIED in report(dropping).coverage.limitations
+    assert CV_UNVERIFIED not in report().coverage.limitations

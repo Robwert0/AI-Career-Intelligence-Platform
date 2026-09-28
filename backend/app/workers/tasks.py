@@ -294,6 +294,9 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
     async def take_cv(name: str) -> bytes | None:
         return await store.take_blob(record.id, name)
 
+    async def checkpoint(sources: SourcesState) -> None:
+        await store.attach_blob(record.id, "sources", sources.model_dump_json().encode())
+
     generators = build_analysis_generators()
     redis = create_redis()
     github = GitHubClient(token=_github_token())
@@ -312,8 +315,9 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
             read_cv=read_cv_source,
             read_github=read_github_source,
             on_stage=on_stage,
+            checkpoint=checkpoint,
+            fatal=(SoftTimeLimitExceeded,),
         )
-        await store.attach_blob(record.id, "sources", state.model_dump_json().encode())
         verdict = decide(state)
         if isinstance(verdict, Pause):
             raise NeedsDecision(verdict.source, verdict.code, reset_at=verdict.reset_at)

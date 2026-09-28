@@ -270,3 +270,88 @@ def test_the_state_round_trips_through_its_json_checkpoint() -> None:
     state = paused_on_cv()
 
     assert SourcesState.model_validate_json(state.model_dump_json()) == state
+
+
+class Checkpoints:
+    def __init__(self) -> None:
+        self.saved: list[SourcesState] = []
+
+    async def __call__(self, state: SourcesState) -> None:
+        self.saved.append(state)
+
+
+async def test_each_finished_source_is_checkpointed_before_the_next_is_read() -> None:
+    checkpoints = Checkpoints()
+
+    await read_sources(
+        both(),
+        take_cv=Blobs(cv_file=b"%PDF-1.4"),
+        read_cv=CvReader(),
+        read_github=GitHubReader(),
+        on_stage=Stages(),
+        checkpoint=checkpoints,
+    )
+
+    assert [(s.cv.status, s.github.status) for s in checkpoints.saved] == [
+        ("read", "pending"),
+        ("read", "read"),
+    ]
+
+
+async def test_an_unexpected_error_fails_only_its_own_source(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def broken(url: str) -> GitHubReading:
+        raise RuntimeError("secret README text")
+
+    with caplog.at_level("WARNING"):
+        state = await read_sources(
+            both(),
+            take_cv=Blobs(cv_file=b"%PDF-1.4"),
+            read_cv=CvReader(),
+            read_github=broken,
+            on_stage=Stages(),
+        )
+
+    assert state.cv.status == "read"
+    assert decide(state) == Pause(source="github", code="internal_error", reset_at=None)
+    assert "RuntimeError" in caplog.text
+    assert "secret README text" not in caplog.text
+
+
+async def test_a_fatal_error_is_never_swallowed() -> None:
+    class Fatal(Exception):
+        pass
+
+    async def killed(url: str) -> GitHubReading:
+        raise Fatal
+
+    with pytest.raises(Fatal):
+        await read_sources(
+            both(),
+            take_cv=Blobs(cv_file=b"%PDF-1.4"),
+            read_cv=CvReader(),
+            read_github=killed,
+            on_stage=Stages(),
+            fatal=(Fatal,),
+        )
+
+
+async def test_the_cv_keeps_its_dropped_count() -> None:
+    class Dropping(CvReader):
+        async def __call__(
+            self, *, file: bytes | None = None, text: str | None = None
+        ) -> CvReading:
+            reading = await super().__call__(file=file, text=text)
+            evidence = CvEvidence(items=reading.evidence.items, input_truncated=False, dropped=3)
+            return CvReading(evidence, reading.document_kind, reading.pages, reading.truncated)
+
+    state = await read_sources(
+        both(),
+        take_cv=Blobs(cv_file=b"%PDF-1.4"),
+        read_cv=Dropping(),
+        read_github=GitHubReader(),
+        on_stage=Stages(),
+    )
+
+    assert state.cv.dropped == 3
