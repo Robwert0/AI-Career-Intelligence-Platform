@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Sequence
 from typing import cast
 
 import pytest
@@ -185,7 +186,7 @@ async def test_cosine_ordering_is_served_by_the_hnsw_index(db_session: AsyncSess
         )
 
     await db_session.execute(text("SET LOCAL enable_seqscan = off"))
-    plan = (
+    plan: Sequence[str] = (
         (
             await db_session.execute(
                 text(
