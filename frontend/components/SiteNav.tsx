@@ -40,7 +40,7 @@ export function SiteNav({ initials }: { initials: string }) {
           <span className="sr-only sm:hidden">Robert Mirea, home</span>
         </Link>
 
-        <ul className="hidden items-center gap-1 md:flex">
+        <ul className="hidden items-center gap-1 lg:flex">
           {NAV_LINKS.map((link) => (
             <li key={link.href}>
               <Link href={link.href} className={linkClass}>
@@ -63,7 +63,7 @@ export function SiteNav({ initials }: { initials: string }) {
             aria-expanded={open}
             aria-controls="mobile-nav"
             onClick={() => setOpen((value) => !value)}
-            className="inline-flex size-9 items-center justify-center rounded-md border border-line text-muted hover:text-fg md:hidden"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-line text-muted hover:text-fg lg:hidden"
           >
             <span className="sr-only">{open ? 'Close menu' : 'Open menu'}</span>
             <svg
@@ -82,7 +82,7 @@ export function SiteNav({ initials }: { initials: string }) {
       </nav>
 
       {open ? (
-        <ul id="mobile-nav" className="space-y-1 border-t border-line px-6 py-3 sm:px-10 md:hidden">
+        <ul id="mobile-nav" className="space-y-1 border-t border-line px-6 py-3 sm:px-10 lg:hidden">
           {NAV_LINKS.map((link) => (
             <li key={link.href}>
               <Link

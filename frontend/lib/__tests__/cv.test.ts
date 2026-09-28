@@ -61,8 +61,9 @@ describe('portfolio wiring', () => {
     expect(existsSync(join(__dirname, '..', '..', 'public', cv.pdf.href))).toBe(true)
   })
 
-  it('points every nav link at a section the home page renders', () => {
+  it('points every hash nav link at a section the home page renders', () => {
     const sectionIds = ['work', 'experience', 'skills', 'education', 'contact']
-    for (const link of NAV_LINKS) expect(sectionIds).toContain(link.href.replace('/#', ''))
+    const hashLinks = NAV_LINKS.filter((link) => link.href.startsWith('/#'))
+    for (const link of hashLinks) expect(sectionIds).toContain(link.href.replace('/#', ''))
   })
 })
