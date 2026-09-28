@@ -82,6 +82,12 @@ SourceStatus = Literal["read", "not_provided", "failed", "skipped"]
 RequirementStatus = Literal["demonstrated", "partial", "not_demonstrated", "unmet", "not_assessed"]
 
 
+class MatchConfig(BaseModel):
+    max_upload_bytes: int
+    cv_text_min_chars: int
+    cv_text_max_chars: int
+
+
 class AnalysisSubmitted(BaseModel):
     analysis_id: str
 

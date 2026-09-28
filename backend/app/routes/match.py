@@ -9,11 +9,18 @@ from redis.exceptions import RedisError
 
 from app.ai.match.schemas import JobPosting
 from app.core import policies
+from app.core.config import settings
 from app.core.job_store import JobRecord, JobStatus
 from app.deps import get_current_user, get_match_service, rate_limit
 from app.integrations.errors import FetchError
 from app.models import User
-from app.routes.match_forms import analysis_form, rejected, retry_form
+from app.routes.match_forms import (
+    MAX_CV_TEXT_CHARS,
+    MIN_CV_TEXT_CHARS,
+    analysis_form,
+    rejected,
+    retry_form,
+)
 from app.schemas.match import (
     AnalysisStatusResponse,
     AnalysisSubmitted,
@@ -21,6 +28,7 @@ from app.schemas.match import (
     JobIntakeRequest,
     JobStatusResponse,
     JobSubmitted,
+    MatchConfig,
     MatchReport,
 )
 from app.services.match_failures import describe_failure
@@ -340,3 +348,13 @@ async def discard_analysis(
     if discarded is None:
         raise rejected(status.HTTP_404_NOT_FOUND, "analysis_not_found")
     return AnalysisSubmitted(analysis_id=discarded)
+
+
+@router.get("/config", dependencies=[Depends(rate_limit(policies.MATCH_POLL_IP))])
+async def match_config() -> MatchConfig:
+    """Public: the limits the upload form must enforce, so the UI never hard-codes them."""
+    return MatchConfig(
+        max_upload_bytes=settings.max_upload_bytes,
+        cv_text_min_chars=MIN_CV_TEXT_CHARS,
+        cv_text_max_chars=MAX_CV_TEXT_CHARS,
+    )

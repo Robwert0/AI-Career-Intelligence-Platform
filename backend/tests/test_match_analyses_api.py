@@ -846,3 +846,19 @@ def test_a_status_response_that_breaks_the_contract_is_rejected(fields: dict[str
     }
     with pytest.raises(ValidationError):
         AnalysisStatusResponse.model_validate({**base, "queue_position": None, **fields})
+
+
+async def test_the_upload_limits_are_published_without_auth(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "max_upload_mb", 12)
+
+    response = await env.client.get("/match/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "max_upload_bytes": 12 * 1024 * 1024,
+        "cv_text_min_chars": 50,
+        "cv_text_max_chars": 40_000,
+    }
+    assert [name for name, _ in env.limiter.calls] == ["match_poll_ip"]
