@@ -193,6 +193,8 @@ describe('analysisFailureAction', () => {
     ['too_many_pages', 'edit_candidate'],
     ['unsafe_docx', 'edit_candidate'],
     ['github_user_not_found', 'edit_candidate'],
+    ['github_rate_limited', 'edit_candidate'],
+    ['github_unavailable', 'edit_candidate'],
     ['scanned_pdf_suspected', 'paste_cv'],
     ['unreadable_document', 'paste_cv'],
     ['invalid_job', 'edit_job'],

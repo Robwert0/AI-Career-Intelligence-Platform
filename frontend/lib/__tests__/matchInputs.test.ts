@@ -3,6 +3,7 @@ import type { JobPosting } from '../match'
 import {
   buildAnalysisForm,
   buildCvRetryForm,
+  buildGithubRetryForm,
   candidateErrors,
   candidateSources,
   cvFileError,
@@ -10,6 +11,7 @@ import {
   DISCLOSURE,
   EMPTY_CANDIDATE,
   formatBytes,
+  githubRetryError,
   hasCandidateErrors,
   hasSource,
   isGithubProfileUrl,
@@ -210,6 +212,32 @@ describe('CV retry', () => {
     const form = buildCvRetryForm(candidate({ cvFile: PDF, githubUrl: 'https://github.com/x' }))
 
     expect([...form.keys()]).toEqual(['cv'])
+  })
+})
+
+describe('githubRetryError (Amendment 5: fixing a github_user_not_found decision)', () => {
+  it('requires a URL', () => {
+    expect(githubRetryError('')).toBeDefined()
+    expect(githubRetryError('   ')).toBeDefined()
+  })
+
+  it('requires a real profile link', () => {
+    expect(githubRetryError('octocat')).toBeDefined()
+    expect(githubRetryError('https://github.com/octocat/repo')).toBeDefined()
+  })
+
+  it('accepts a real profile link', () => {
+    expect(githubRetryError('https://github.com/octocat')).toBeNull()
+    expect(githubRetryError('  https://github.com/octocat  ')).toBeNull()
+  })
+})
+
+describe('buildGithubRetryForm', () => {
+  it('sends only the trimmed github_url', () => {
+    const form = buildGithubRetryForm('  https://github.com/octocat  ')
+
+    expect([...form.keys()]).toEqual(['github_url'])
+    expect(form.get('github_url')).toBe('https://github.com/octocat')
   })
 })
 

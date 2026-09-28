@@ -155,6 +155,21 @@ export function buildCvRetryForm(input: CandidateInput): FormData {
   return form
 }
 
+export function githubRetryError(url: string): string | null {
+  const trimmed = url.trim()
+  if (trimmed === '') return 'Enter your GitHub profile link.'
+  if (!isGithubProfileUrl(trimmed)) {
+    return 'Use your profile link, like https://github.com/your-username'
+  }
+  return null
+}
+
+export function buildGithubRetryForm(url: string): FormData {
+  const form = new FormData()
+  form.append('github_url', url.trim())
+  return form
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
