@@ -144,6 +144,7 @@ class OllamaGenerator:
             ) from exc
 
         usage = Usage(body.get("prompt_eval_count", 0), body.get("eval_count", 0))
+        # Backstop in case an Ollama version ignores truncate=False and cuts the prompt anyway.
         if usage.prompt_tokens >= settings.generation_context_tokens:
             raise ContextOverflowError(
                 f"{self.model_name} evaluated {usage.prompt_tokens} prompt tokens, "

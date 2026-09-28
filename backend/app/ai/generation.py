@@ -62,7 +62,7 @@ class GenerationRequestError(Exception):
 
 
 class ContextOverflowError(GenerationRequestError):
-    """The prompt does not fit the context window; the provider refused rather than cut it."""
+    """The prompt does not fit the context window: refused outright, or evaluated to fill it all."""
 
 
 class Generator(Protocol):

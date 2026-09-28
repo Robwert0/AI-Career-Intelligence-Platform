@@ -76,9 +76,6 @@ async def failure(coro: Awaitable[object]) -> FetchFailure:
     return caught.value.failure
 
 
-# --- URL parsing -------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "raw",
     ["https://jobs.example.com/a?b=1", "http://jobs.example.com", "  https://JOBS.example.com/x  "],
@@ -121,9 +118,6 @@ def test_the_fragment_is_dropped_and_the_query_kept() -> None:
     )
 
 
-# --- address checks ----------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("address", "public"),
     [
@@ -156,9 +150,6 @@ def test_is_public_address(address: str, public: bool) -> None:
     assert is_public_address(address) is public
 
 
-# --- pinning and resolution --------------------------------------------------------------
-
-
 async def test_the_connection_is_pinned_to_the_checked_address() -> None:
     handler, seen = site()
 
@@ -180,9 +171,6 @@ async def test_the_user_agent_is_honest() -> None:
     assert seen[-1].headers["user-agent"].startswith("CareerIntelBot/")
     assert "cookie" not in seen[-1].headers
     assert "authorization" not in seen[-1].headers
-
-
-# --- cookies -------------------------------------------------------------------------------
 
 
 async def test_a_robots_cookie_is_not_sent_on_the_page_request() -> None:
@@ -288,9 +276,6 @@ def test_the_client_ignores_proxy_environment_variables() -> None:
     assert SafeFetcher().build_client().trust_env is False
 
 
-# --- redirects ---------------------------------------------------------------------------
-
-
 async def test_a_relative_redirect_is_followed_and_revalidated() -> None:
     def page(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/old":
@@ -348,9 +333,6 @@ async def test_more_than_three_redirects_are_not_followed() -> None:
     assert await failure(fetcher(handler).fetch("https://jobs.example.com/0")) is (
         FetchFailure.NOT_EXTRACTABLE
     )
-
-
-# --- status codes, types, sizes ----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -616,9 +598,6 @@ async def test_a_broken_robots_response_is_site_unavailable() -> None:
     assert await failure(fetcher(handler).fetch("https://jobs.example.com/")) is (
         FetchFailure.SITE_UNAVAILABLE
     )
-
-
-# --- robots.txt --------------------------------------------------------------------------
 
 
 async def test_a_robots_disallow_for_our_agent_blocks_without_fetching_the_page() -> None:
