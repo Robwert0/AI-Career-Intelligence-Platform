@@ -1,5 +1,6 @@
 import re
 
+from app.ai.match.text_limits import SEGMENT_BOUNDARY
 from app.ai.redaction import redact_phone_numbers
 from app.core.text_hygiene import strip_invisible_unicode
 
@@ -58,7 +59,6 @@ _SENSITIVE = re.compile(
     r"|na[țt]ionalitate|cet[ăa][țt]enie|data\s+na[șs]terii|stare\s+civil[ăa]|religie)",
     re.IGNORECASE,
 )
-_PIECES = re.compile(r"(?<=[.!?;])\s+|\s+[·|•]\s+|\n+")
 
 
 def mentions_sensitive(text: str) -> bool:
@@ -75,7 +75,7 @@ def mask_contacts(text: str) -> str:
 def scrub_evidence_text(text: str) -> str:
     """Drops sentences naming a sensitive characteristic and masks emails and phone numbers."""
     text = strip_invisible_unicode(text)
-    kept = (piece.strip() for piece in _PIECES.split(text))
+    kept = (piece.strip() for piece in SEGMENT_BOUNDARY.split(text))
     return mask_contacts(
         " ".join(
             piece

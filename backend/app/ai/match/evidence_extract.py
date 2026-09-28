@@ -11,6 +11,7 @@ from app.ai.match.prompts import build_evidence_extract_messages
 from app.ai.match.schemas import CvEntry, CvEntryKind, EvidenceItem, ExtractedCv
 from app.ai.match.scrub import mask_contacts, mentions_sensitive, scrub_evidence_text
 from app.ai.match.structured import ExtractionError, generate_validated
+from app.ai.match.text_limits import SEGMENT_BOUNDARY, cap_text
 from app.integrations.github import GitHubProfile, GitHubRepo, GitHubSnapshot
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,6 @@ _WORD = re.compile(r"[a-z0-9][a-z0-9+#]*")
 _REPO_LINK = re.compile(
     r"(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9-]{1,39})/([A-Za-z0-9._-]{1,100})"
 )
-# Mirrors scrub.py's own sentence split: a bigram never bridges two of the CV's own sentences.
-_SEGMENT_BOUNDARY = re.compile(r"(?<=[.!?;])\s+|\s+[·|•]\s+|\n+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +69,7 @@ def _bigrams(words: list[str]) -> list[tuple[str, str]]:
 
 def _cv_bigrams(cv_text: str) -> set[tuple[str, str]]:
     grams: set[tuple[str, str]] = set()
-    for segment in _SEGMENT_BOUNDARY.split(cv_text):
+    for segment in SEGMENT_BOUNDARY.split(cv_text):
         grams.update(_bigrams(_words(segment)))
     return grams
 
@@ -115,15 +114,10 @@ def _entry_name(label: str) -> str | None:
     return _short_field(name.strip()) if separator else None
 
 
-def _cap(text: str) -> tuple[str, bool]:
-    # Characters alone don't bound tokens: an emoji is 4 bytes and several tokens.
-    encoded = text[:MAX_CV_PROMPT_CHARS].encode()
-    capped = encoded[:MAX_CV_PROMPT_BYTES].decode(errors="ignore")
-    return capped, len(capped) < len(text)
-
-
 async def extract_cv_evidence(generator: Generator, cv_text: str) -> CvEvidence:
-    text, truncated = _cap(cv_text)
+    text, truncated = cap_text(
+        cv_text, max_chars=MAX_CV_PROMPT_CHARS, max_bytes=MAX_CV_PROMPT_BYTES
+    )
     flagged = detect_injection_phrases(text)
     if flagged:
         logger.warning("cv injection phrasing detected patterns=%s", ",".join(flagged))

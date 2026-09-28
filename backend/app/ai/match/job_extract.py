@@ -4,6 +4,7 @@ from app.ai.generation import Generator, SamplingSettings
 from app.ai.match.prompts import build_job_extract_messages
 from app.ai.match.schemas import ExtractedJob, JobPosting
 from app.ai.match.structured import ExtractionError, generate_validated
+from app.ai.match.text_limits import cap_text
 
 MAX_JOB_TEXT_CHARS = 30_000
 MAX_JOB_TEXT_BYTES = 60_000
@@ -16,15 +17,8 @@ class Extraction:
     input_truncated: bool
 
 
-def _cap(text: str) -> tuple[str, bool]:
-    # Characters alone don't bound tokens: an emoji is 4 bytes and several tokens.
-    encoded = text[:MAX_JOB_TEXT_CHARS].encode()
-    capped = encoded[:MAX_JOB_TEXT_BYTES].decode(errors="ignore")
-    return capped, len(capped) < len(text)
-
-
 async def extract_job(generator: Generator, text: str) -> Extraction:
-    capped, truncated = _cap(text)
+    capped, truncated = cap_text(text, max_chars=MAX_JOB_TEXT_CHARS, max_bytes=MAX_JOB_TEXT_BYTES)
     messages = build_job_extract_messages(capped)
 
     parsed = await generate_validated(generator, messages, ExtractedJob, JOB_EXTRACT_SAMPLING)
