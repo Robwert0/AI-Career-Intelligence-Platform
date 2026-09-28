@@ -81,6 +81,16 @@ describe('poll', () => {
     expect(h.onValue).toHaveBeenCalledTimes(1)
   })
 
+  it('backs off using Retry-After on a 429 during polling, without failing the job', async () => {
+    const h = harness([failed(429, 10), done])
+
+    await h.run()
+
+    expect(h.delays).toEqual([10_000])
+    expect(h.onFailure).not.toHaveBeenCalled()
+    expect(h.onValue).toHaveBeenCalledTimes(1)
+  })
+
   it('resets the backoff after a success', async () => {
     const h = harness([failed(503), running, failed(503), done])
 

@@ -16,6 +16,12 @@ describe('requestProblem', () => {
     expect(requestProblem(failure({ status: 0 })).message).toMatch(/could not reach the server/i)
   })
 
+  it('ends the session on a 401, whatever shape the body is (app-wide 401s are plain strings)', () => {
+    expect(requestProblem(failure({ status: 401 })).message).toBe(
+      'Your session ended. Sign in again.',
+    )
+  })
+
   it('marks a 404 as expired so the inputs can be resubmitted', () => {
     expect(requestProblem(failure({ status: 404 }))).toMatchObject({ expired: true })
   })
@@ -87,6 +93,23 @@ describe('requestProblem', () => {
     expect(requestProblem(failure({ status: 500 })).message).toBe(
       'Something went wrong. Please try again.',
     )
+  })
+
+  it('treats a coded not_found 404 the same as an uncoded one: start again, inputs kept', () => {
+    const coded = requestProblem(
+      failure({ status: 404, code: 'not_found', body: { detail: { code: 'not_found' } } }),
+    )
+
+    expect(coded).toMatchObject({ expired: true })
+    expect(coded.message).toMatch(/start it again/i)
+  })
+
+  it('treats a coded unavailable 503 the same busy-service way as an uncoded one', () => {
+    const coded = requestProblem(
+      failure({ status: 503, code: 'unavailable', retryAfter: 30, body: {} }),
+    )
+
+    expect(coded.message).toMatch(/busy or unavailable\. Try again in 30 seconds\./)
   })
 })
 
