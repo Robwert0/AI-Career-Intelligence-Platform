@@ -22,7 +22,8 @@ ANALYSIS = "match_analysis"
 RUN_ANALYSIS = "jobs.run_analysis"
 CV_BLOB = {"file": "cv_file", "text": "cv_text"}
 RESUMED_BLOBS = ("analysis_input", "sources")
-DISCARDED_BLOBS = (*RESUMED_BLOBS, *CV_BLOB.values())
+GITHUB_URL_BLOB = "github_url"
+DISCARDED_BLOBS = (*RESUMED_BLOBS, *CV_BLOB.values(), GITHUB_URL_BLOB)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,10 @@ class AnalysisInProgressError(Exception):
 
 class NotAwaitingDecisionError(Exception):
     """continue/retry on an analysis that is not paused."""
+
+
+class RetryUrlNotAllowedError(Exception):
+    """A corrected GitHub URL was sent for a source that is not GitHub."""
 
 
 class QueueFullError(Exception):
@@ -249,7 +254,14 @@ class MatchService:
         return AnalysisView(record=view, queue_position=await self._queue_position(view, now))
 
     async def _resume(
-        self, owner_id: str, analysis_id: str, resume: str, cv: CvUpload | None, *, now: float
+        self,
+        owner_id: str,
+        analysis_id: str,
+        resume: str,
+        cv: CvUpload | None,
+        *,
+        now: float,
+        github_url: str | None = None,
     ) -> str | None:
         record = await self._store.get(analysis_id, owner_id)
         if record is None or record.kind != ANALYSIS:
@@ -259,11 +271,13 @@ class MatchService:
         needs_cv = resume == "retry" and record.failed_source == "cv"
         if needs_cv and cv is None:
             raise CvRequiredError(analysis_id)
-        blob = (
-            (CV_BLOB[cv.kind], cv.data, settings.match_cv_ttl_seconds)
-            if needs_cv and cv is not None
-            else None
-        )
+        if github_url is not None and not (resume == "retry" and record.failed_source == "github"):
+            raise RetryUrlNotAllowedError(analysis_id)
+        blob: tuple[str, bytes, int] | None = None
+        if needs_cv and cv is not None:
+            blob = (CV_BLOB[cv.kind], cv.data, settings.match_cv_ttl_seconds)
+        elif github_url is not None:
+            blob = (GITHUB_URL_BLOB, github_url.encode(), settings.job_ttl_seconds)
         try:
             resumed = await self._store.resume(
                 analysis_id,
@@ -287,6 +301,14 @@ class MatchService:
         return await self._resume(owner_id, analysis_id, "continue", None, now=now)
 
     async def retry_analysis(
-        self, owner_id: str, analysis_id: str, cv: CvUpload | None, *, now: float
+        self,
+        owner_id: str,
+        analysis_id: str,
+        cv: CvUpload | None,
+        *,
+        now: float,
+        github_url: str | None = None,
     ) -> str | None:
-        return await self._resume(owner_id, analysis_id, "retry", cv, now=now)
+        return await self._resume(
+            owner_id, analysis_id, "retry", cv, now=now, github_url=github_url
+        )

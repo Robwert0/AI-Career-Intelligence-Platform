@@ -218,7 +218,7 @@ def extract_job_task(job_id: str) -> None:
     run_job(job_id, _extract_job, stage=None)
 
 
-ANALYSIS_BLOBS = ("analysis_input", "sources", *CV_BLOBS)
+ANALYSIS_BLOBS = ("analysis_input", "sources", "github_url", *CV_BLOBS)
 
 
 class ClosableGenerator(Generator, Protocol):
@@ -253,10 +253,15 @@ def _github_token() -> str | None:
     return settings.github_token.get_secret_value() if settings.github_token else None
 
 
-def _sources(record: JobRecord, request: AnalysisInput, saved: bytes | None) -> SourcesState:
+def _sources(
+    record: JobRecord, request: AnalysisInput, saved: bytes | None, corrected_url: bytes | None
+) -> SourcesState:
     state = SourcesState.model_validate_json(saved) if saved else initial_sources(request)
     if record.resume is not None and record.failed_source is not None:
         state = apply_decision(state, source=record.failed_source, resume=record.resume)
+    if corrected_url is not None and state.github.status == "pending":
+        github = state.github.model_copy(update={"url": corrected_url.decode()})
+        state = state.model_copy(update={"github": github})
     return state
 
 
@@ -265,7 +270,12 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
     if raw is None:
         raise JobError("input_expired")
     request = AnalysisInput.model_validate_json(raw)
-    state = _sources(record, request, await store.read_blob(record.id, "sources"))
+    state = _sources(
+        record,
+        request,
+        await store.read_blob(record.id, "sources"),
+        await store.take_blob(record.id, "github_url"),
+    )
 
     async def on_stage(stage: str) -> None:
         await store.mark_running(record.id, stage=stage, now=time.time())

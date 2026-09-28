@@ -719,3 +719,49 @@ async def test_discarding_someone_elses_analysis_is_404(env: Env) -> None:
     assert response.status_code == 404
     record = await env.store.load(analysis_id)
     assert record is not None and record.status is JobStatus.QUEUED
+
+
+async def test_a_github_retry_can_carry_a_corrected_url(env: Env) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    await env.pause(analysis_id, "github", "github_user_not_found")
+
+    response = await env.client.post(
+        f"/match/analyses/{analysis_id}/retry",
+        data={"github_url": "https://github.com/jane-doe/"},
+        files=NO_FILE,
+        headers=env.headers,
+    )
+
+    assert response.status_code == 202
+    assert await env.store.read_blob(analysis_id, "github_url") == b"https://github.com/jane-doe/"
+
+
+@pytest.mark.parametrize(
+    ("source", "url"),
+    [
+        ("github", "https://github.com/jane/repo"),
+        ("github", "http://github.com/jane"),
+        ("cv", "https://github.com/jane"),
+    ],
+)
+async def test_a_corrected_url_is_validated_like_the_submit_field(
+    env: Env, source: str, url: str
+) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    await env.pause(analysis_id, source, "github_user_not_found")
+
+    response = await env.client.post(
+        f"/match/analyses/{analysis_id}/retry",
+        data={"github_url": url, **({"cv_text": CV_TEXT} if source == "cv" else {})},
+        files=NO_FILE,
+        headers=env.headers,
+    )
+
+    assert response.status_code == 422
+    assert detail_code(response) == "invalid_github_url"
+    record = await env.store.load(analysis_id)
+    assert record is not None and record.status is JobStatus.NEEDS_DECISION

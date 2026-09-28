@@ -22,7 +22,7 @@ MIN_CV_TEXT_CHARS = 50
 MAX_CV_TEXT_CHARS = 40_000
 # job, cv_text, github_url, consent, plus cv when a client sends an empty file as a plain field.
 _ANALYSIS_FIELDS = 5
-_RETRY_FIELDS = 2
+_RETRY_FIELDS = 3
 
 
 def rejected(status_code: int, code: str) -> HTTPException:
@@ -99,16 +99,24 @@ async def analysis_form(request: Request) -> tuple[AnalysisInput, CvUpload | Non
     cv = await _cv(form)
     if cv is None and github_url is None:
         raise rejected(status.HTTP_422_UNPROCESSABLE_CONTENT, "no_candidate_source")
+    _github_url(form)
+    return AnalysisInput(posting=posting, github_url=github_url, cv_provided=cv is not None), cv
+
+
+def _github_url(form: FormData) -> str | None:
+    github_url = _text(form, "github_url")
     if github_url is not None:
         try:
             parse_github_profile_url(github_url)
         except GitHubError:
             raise rejected(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_github_url") from None
-    return AnalysisInput(posting=posting, github_url=github_url, cv_provided=cv is not None), cv
+    return github_url
 
 
-async def retry_form(request: Request) -> CvUpload | None:
+async def retry_form(request: Request) -> tuple[CvUpload | None, str | None]:
+    """The new CV for a CV retry, or an optional corrected URL for a GitHub retry."""
     content_type = request.headers.get("content-type", "").lower()
     if not content_type.startswith("multipart/form-data"):
-        return None
-    return await _cv(await _read_form(request, max_fields=_RETRY_FIELDS))
+        return None, None
+    form = await _read_form(request, max_fields=_RETRY_FIELDS)
+    return await _cv(form), _github_url(form)

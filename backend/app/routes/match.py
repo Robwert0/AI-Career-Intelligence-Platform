@@ -33,6 +33,7 @@ from app.services.match_service import (
     MatchService,
     NotAwaitingDecisionError,
     QueueFullError,
+    RetryUrlNotAllowedError,
 )
 from app.workers.queue import QueueUnavailableError
 
@@ -289,11 +290,13 @@ async def retry_analysis(
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[MatchService, Depends(get_match_service)],
 ) -> AnalysisSubmitted:
-    cv = await retry_form(request)
+    cv, github_url = await retry_form(request)
     try:
         resumed = await service.retry_analysis(
-            str(current_user.id), analysis_id, cv, now=time.time()
+            str(current_user.id), analysis_id, cv, now=time.time(), github_url=github_url
         )
+    except RetryUrlNotAllowedError:
+        raise rejected(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_github_url") from None
     except NotAwaitingDecisionError:
         raise rejected(status.HTTP_409_CONFLICT, "not_awaiting_decision") from None
     except CvRequiredError:

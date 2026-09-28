@@ -54,9 +54,11 @@ class Fetcher:
     def __init__(self, *, error: GitHubError | None = None) -> None:
         self.error = error
         self.calls = 0
+        self.usernames: list[str] = []
 
     async def fetch(self, username: str) -> GitHubSnapshot:
         self.calls += 1
+        self.usernames.append(username)
         if self.error is not None:
             raise self.error
         repos = [
@@ -320,3 +322,29 @@ def test_the_analysis_task_has_its_own_time_limits() -> None:
     assert task.soft_time_limit == settings.match_analysis_soft_time_limit_seconds
     assert task.time_limit == settings.match_analysis_hard_time_limit_seconds
     assert task.time_limit > celery_app.conf.task_time_limit
+
+
+def test_a_github_retry_with_a_corrected_url_reads_the_new_profile(
+    monkeypatch: pytest.MonkeyPatch, fetcher: Fetcher
+) -> None:
+    use_models(monkeypatch, evidence=[CV_REPLY], assess=[ASSESS_REPLY], recommend=[ADVICE_REPLY])
+    fetcher.error = GitHubError(GitHubFailure.GITHUB_USER_NOT_FOUND)
+    job_id = submit(cv_text=CV_TEXT)
+    run(job_id)
+    assert load(job_id).failed_source == "github"
+
+    fetcher.error = None
+    corrected = f"https://github.com/fixed{uuid.uuid4().hex[:8]}"
+    in_store(
+        lambda store: store.resume(
+            job_id,
+            "owner",
+            resume="retry",
+            now=time.time(),
+            blob=("github_url", corrected.encode(), 60),
+        )
+    )
+    run(job_id)
+
+    assert load(job_id).status is JobStatus.DONE
+    assert fetcher.usernames[-1] == corrected.rsplit("/", 1)[1]
