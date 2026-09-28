@@ -17,6 +17,8 @@ services:
 
   redis:
     image: redis:8-alpine
+    # No RDB/AOF: job records and CV bytes must never be written to disk.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "6379:6379"
     healthcheck:
