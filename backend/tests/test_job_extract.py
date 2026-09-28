@@ -2,11 +2,17 @@ import json
 from typing import Any
 
 import pytest
-from fakes import RejectingGenerator, ScriptedGenerator, UnavailableGenerator
+from fakes import (
+    OverflowingGenerator,
+    RejectingGenerator,
+    ScriptedGenerator,
+    UnavailableGenerator,
+)
 
 from app.ai.generation import FinishReason, Role
 from app.ai.match.job_extract import (
     JOB_EXTRACT_SAMPLING,
+    MAX_JOB_TEXT_BYTES,
     MAX_JOB_TEXT_CHARS,
     ExtractionError,
     extract_job,
@@ -171,3 +177,33 @@ async def test_provider_failures_map_to_codes(generator: Any, code: str) -> None
     assert caught.value.code == code
     assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__ is True
+
+
+async def test_a_posting_that_overflows_the_context_is_input_too_long_without_retry() -> None:
+    generator = OverflowingGenerator()
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_job(generator, POSTING)
+
+    assert caught.value.code == "input_too_long"
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+    assert generator.calls == 1
+
+
+async def test_multibyte_text_is_capped_by_bytes_as_well_as_characters() -> None:
+    generator = ScriptedGenerator([reply()])
+    emoji = "\U0001f600"
+
+    extraction = await extract_job(generator, emoji * MAX_JOB_TEXT_CHARS)
+
+    assert extraction.input_truncated is True
+    assert generator.calls[0][1].content.count(emoji) == MAX_JOB_TEXT_BYTES // 4
+
+
+async def test_a_cut_never_splits_a_multibyte_character() -> None:
+    generator = ScriptedGenerator([reply()])
+
+    await extract_job(generator, "a" + "\u00e9" * MAX_JOB_TEXT_CHARS)
+
+    assert "\ufffd" not in generator.calls[0][1].content

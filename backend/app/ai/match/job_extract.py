@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 from app.ai.generation import (
+    ContextOverflowError,
     GenerationRequestError,
     GenerationResult,
     Generator,
@@ -15,6 +16,7 @@ from app.ai.match.schemas import ExtractedJob, JobPosting
 from app.ai.output_guard import validate_output
 
 MAX_JOB_TEXT_CHARS = 30_000
+MAX_JOB_TEXT_BYTES = 60_000
 JOB_EXTRACT_SAMPLING = SamplingSettings(temperature=0.0, seed=0, max_output_tokens=2048)
 _LEAK_CHECKS = frozenset({"canary", "ngram"})
 _SCHEMA = ExtractedJob.model_json_schema()
@@ -39,6 +41,8 @@ async def _generate(generator: Generator, messages: list[Message]) -> Generation
         )
     except GeneratorUnavailableError:
         raise ExtractionError("ai_unavailable") from None
+    except ContextOverflowError:
+        raise ExtractionError("input_too_long") from None
     except GenerationRequestError:
         raise ExtractionError("internal_error") from None
 
@@ -60,9 +64,16 @@ def _parse(result: GenerationResult) -> tuple[ExtractedJob | None, str]:
         return None, "; ".join(problems)
 
 
+def _cap(text: str) -> tuple[str, bool]:
+    # Characters alone don't bound tokens: an emoji is 4 bytes and several tokens.
+    encoded = text[:MAX_JOB_TEXT_CHARS].encode()
+    capped = encoded[:MAX_JOB_TEXT_BYTES].decode(errors="ignore")
+    return capped, len(capped) < len(text)
+
+
 async def extract_job(generator: Generator, text: str) -> Extraction:
-    truncated = len(text) > MAX_JOB_TEXT_CHARS
-    messages = build_job_extract_messages(text[:MAX_JOB_TEXT_CHARS])
+    capped, truncated = _cap(text)
+    messages = build_job_extract_messages(capped)
 
     parsed, problems = _parse(await _generate(generator, messages))
     if parsed is None:

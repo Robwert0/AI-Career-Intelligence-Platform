@@ -61,6 +61,10 @@ class GenerationRequestError(Exception):
     """Provider rejected the request itself; retrying it unchanged will fail identically."""
 
 
+class ContextOverflowError(GenerationRequestError):
+    """The prompt does not fit the context window; the provider refused rather than cut it."""
+
+
 class Generator(Protocol):
     @property
     def model_name(self) -> str: ...

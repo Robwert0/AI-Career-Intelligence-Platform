@@ -38,6 +38,10 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "The site took too long to respond. Try again, or paste the job description instead.",
         _PASTE,
     ),
+    "input_too_long": (
+        "This posting is too long to analyse. Paste just the role description and requirements.",
+        _PASTE,
+    ),
     "too_large": ("That page is too large to read. Paste the job description instead.", _PASTE),
     "site_unavailable": (
         "We couldn't reach that site. Try again later, or paste the job description instead.",

@@ -6,6 +6,7 @@ from typing import Any
 from redis.exceptions import RedisError
 
 from app.ai.generation import (
+    ContextOverflowError,
     FinishReason,
     GenerationRequestError,
     GenerationResult,
@@ -123,6 +124,26 @@ class RejectingGenerator:
         response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         raise GenerationRequestError("the fake provider rejected the request")
+
+
+class OverflowingGenerator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    @property
+    def model_name(self) -> str:
+        return "overflowing-generator"
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> GenerationResult:
+        self.calls += 1
+        raise ContextOverflowError("the prompt does not fit the context window")
 
 
 class AllowAllLimiter:

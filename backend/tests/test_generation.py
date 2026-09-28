@@ -8,6 +8,7 @@ from fakes import FakeGenerator
 from pydantic import ValidationError
 
 from app.ai.generation import (
+    ContextOverflowError,
     FinishReason,
     GenerationRequestError,
     Generator,
@@ -374,6 +375,65 @@ async def test_every_request_carries_the_configured_context_window() -> None:
 
     # Without num_ctx Ollama falls back to a small default and silently drops the prompt's start.
     assert sent_body(seen)["options"]["num_ctx"] == settings.generation_context_tokens
+
+
+OVERFLOW_BODY = json.dumps(
+    {
+        "error": json.dumps(
+            {
+                "error": {
+                    "code": 400,
+                    "message": "request (20123 tokens) exceeds the available context size "
+                    "(16384 tokens), try increasing it",
+                    "type": "exceed_context_size_error",
+                    "n_prompt_tokens": 20123,
+                    "n_ctx": 16384,
+                }
+            }
+        )
+    }
+)
+
+
+async def test_every_request_refuses_silent_prompt_truncation() -> None:
+    generator, seen = stub()
+
+    await generator.generate(MESSAGES)
+
+    assert sent_body(seen)["truncate"] is False
+
+
+async def test_every_request_refuses_a_context_shift_during_generation() -> None:
+    generator, seen = stub()
+
+    await generator.generate(MESSAGES)
+
+    assert sent_body(seen)["shift"] is False
+
+
+async def test_a_context_overflow_is_reported_as_its_own_request_error() -> None:
+    generator, _ = stub(status=400, text=OVERFLOW_BODY)
+
+    with pytest.raises(ContextOverflowError):
+        await generator.generate(MESSAGES)
+
+    assert issubclass(ContextOverflowError, GenerationRequestError)
+
+
+async def test_any_other_rejection_is_not_mistaken_for_a_context_overflow() -> None:
+    generator, _ = stub(status=400, text='{"error":"invalid format"}')
+
+    with pytest.raises(GenerationRequestError) as caught:
+        await generator.generate(MESSAGES)
+
+    assert not isinstance(caught.value, ContextOverflowError)
+
+
+async def test_a_prompt_that_filled_the_whole_window_is_treated_as_an_overflow() -> None:
+    generator, _ = stub(ollama_body(prompt_eval_count=settings.generation_context_tokens))
+
+    with pytest.raises(ContextOverflowError):
+        await generator.generate(MESSAGES)
 
 
 async def test_the_fake_records_the_schema_it_was_given() -> None:
