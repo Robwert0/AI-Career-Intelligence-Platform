@@ -1,0 +1,160 @@
+import { describe, expect, it } from 'vitest'
+import type { AnalysisView, JobView } from '../match'
+import {
+  analysisAnnouncement,
+  analysisStages,
+  jobAnnouncement,
+  jobStages,
+  queueText,
+  type StageItem,
+} from '../matchProgress'
+
+function jobView(patch: Partial<JobView>): JobView {
+  return {
+    job_id: 'j1',
+    status: 'running',
+    stage: null,
+    error: null,
+    posting: null,
+    source_url: null,
+    input_truncated: false,
+    ...patch,
+  }
+}
+
+function analysisView(patch: Partial<AnalysisView>): AnalysisView {
+  return {
+    analysis_id: 'a1',
+    status: 'running',
+    stage: null,
+    queue_position: null,
+    error: null,
+    decision: null,
+    report: null,
+    ...patch,
+  }
+}
+
+function states(items: StageItem[]): string[] {
+  return items.map((item) => `${item.stage}:${item.state}`)
+}
+
+const BOTH = { cv: true, github: true }
+const CV_ONLY = { cv: true, github: false }
+
+describe('jobStages', () => {
+  it('shows every stage pending before the first poll', () => {
+    expect(states(jobStages('url', null))).toEqual(['reading:pending', 'extracting:pending'])
+  })
+
+  it('marks earlier stages done and the current one current', () => {
+    expect(states(jobStages('url', jobView({ stage: 'extracting' })))).toEqual([
+      'reading:done',
+      'extracting:current',
+    ])
+  })
+
+  it('skips reading a page for pasted text', () => {
+    expect(states(jobStages('text', jobView({ status: 'queued' })))).toEqual(['extracting:pending'])
+  })
+})
+
+describe('analysisStages', () => {
+  it('lists the CV and GitHub stages only for the sources given', () => {
+    expect(analysisStages({ cv: false, github: true }, null).map((item) => item.stage)).toEqual([
+      'reading_github',
+      'matching',
+      'assessing',
+      'scoring',
+      'recommending',
+    ])
+  })
+
+  it('tracks the current stage', () => {
+    expect(states(analysisStages(BOTH, analysisView({ stage: 'assessing' })))).toEqual([
+      'reading_cv:done',
+      'reading_github:done',
+      'matching:done',
+      'assessing:current',
+      'scoring:pending',
+      'recommending:pending',
+    ])
+  })
+
+  it('marks everything done when the analysis is done', () => {
+    const items = analysisStages(CV_ONLY, analysisView({ status: 'done' }))
+
+    expect(items.every((item) => item.state === 'done')).toBe(true)
+  })
+
+  it('marks nothing current for a stage outside the list', () => {
+    const items = analysisStages(CV_ONLY, analysisView({ stage: 'reading_github' }))
+
+    expect(items.every((item) => item.state === 'pending')).toBe(true)
+  })
+})
+
+describe('queueText', () => {
+  it.each([
+    [null, null],
+    [0, "You're next in the queue."],
+    [1, '1 analysis ahead of you in the queue.'],
+    [3, '3 analyses ahead of you in the queue.'],
+  ])('%s → %s', (position, expected) => {
+    expect(queueText(position)).toBe(expected)
+  })
+})
+
+describe('announcements', () => {
+  it('announces the queue', () => {
+    const view = analysisView({ status: 'queued', queue_position: 2 })
+
+    expect(analysisAnnouncement(view, analysisStages(CV_ONLY, view))).toBe(
+      'Waiting to start. 2 analyses ahead of you in the queue.',
+    )
+  })
+
+  it('announces the step with its position', () => {
+    const view = analysisView({ stage: 'matching' })
+
+    expect(analysisAnnouncement(view, analysisStages(CV_ONLY, view))).toBe(
+      'Step 2 of 5: Matching evidence to requirements.',
+    )
+  })
+
+  it('announces a pause with its reason', () => {
+    const view = analysisView({
+      status: 'needs_decision',
+      decision: {
+        failed_source: 'github',
+        error: {
+          code: 'github_rate_limited',
+          message: 'GitHub is rate limited.',
+          recovery: 'retry',
+        },
+      },
+    })
+
+    expect(analysisAnnouncement(view, [])).toBe('Paused: GitHub is rate limited.')
+  })
+
+  it('announces a failure and completion', () => {
+    const failed = analysisView({
+      status: 'failed',
+      error: { code: 'ai_unavailable', message: 'The model is unavailable.', recovery: 'retry' },
+    })
+
+    expect(analysisAnnouncement(failed, [])).toBe('The analysis failed: The model is unavailable.')
+    expect(analysisAnnouncement(analysisView({ status: 'done' }), [])).toBe(
+      'Analysis complete. Your report is ready.',
+    )
+    expect(analysisAnnouncement(null, [])).toBe('Starting the analysis.')
+  })
+
+  it('announces job progress', () => {
+    const view = jobView({ stage: 'reading' })
+
+    expect(jobAnnouncement(view, jobStages('url', view))).toBe('Step 1 of 2: Reading the job page.')
+    expect(jobAnnouncement(null, [])).toBe('Sending the job.')
+  })
+})
