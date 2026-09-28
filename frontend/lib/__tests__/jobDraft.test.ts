@@ -94,7 +94,18 @@ describe('editing', () => {
       '5 years of Go',
       'Visa sponsorship available',
     ])
-    expect(d.required[1].sensitive).toBe(true)
+  })
+
+  it('resets the sensitive flag once the text is edited: the server, not the client, re-checks it on submit', () => {
+    const d = updateItem(draft(), 'required', 'k3', 'Visa sponsorship available')
+
+    expect(d.required[1].sensitive).toBe(false)
+  })
+
+  it('still resets sensitive to false even when the edit leaves the text unchanged', () => {
+    const d = updateItem(draft(), 'required', 'k3', 'Right to work in the UK')
+
+    expect(d.required[1].sensitive).toBe(false)
   })
 
   it('removes an item', () => {

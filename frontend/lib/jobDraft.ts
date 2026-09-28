@@ -4,6 +4,8 @@ import { charCount } from './text'
 export const MAX_ITEMS = 40
 export const MAX_ITEM_CHARS = 300
 export const MAX_TITLE_CHARS = 200
+export const SENSITIVE_PREVIEW_NOTE =
+  'Personal characteristics and work-authorization requirements are never scored, however you word them.'
 
 export type RequirementList = 'required' | 'preferred'
 export type DraftList = 'responsibilities' | RequirementList
@@ -74,10 +76,14 @@ export function addItem(draft: JobDraft, list: DraftList, key: string): JobDraft
   return { ...draft, [list]: [...draft[list], { key, text: '', sensitive: false }] }
 }
 
+// The client never re-implements the server's sensitive-characteristic detector (§7): any edit
+// clears the flag, and the server re-checks the new wording when the analysis is submitted.
 export function updateItem(draft: JobDraft, list: DraftList, key: string, text: string): JobDraft {
   return {
     ...draft,
-    [list]: draft[list].map((item) => (item.key === key ? { ...item, text } : item)),
+    [list]: draft[list].map((item) =>
+      item.key === key ? { ...item, text, sensitive: false } : item,
+    ),
   }
 }
 

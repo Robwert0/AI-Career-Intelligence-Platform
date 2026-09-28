@@ -11,6 +11,7 @@ import {
   moveItem,
   otherList,
   removeItem,
+  SENSITIVE_PREVIEW_NOTE,
   updateItem,
   type DraftErrors,
   type DraftList,
@@ -76,6 +77,7 @@ export function JobPreview({ draft, inputTruncated, onChange, onConfirm, onDisca
         Check what we extracted. Fix anything that is wrong, move items between required and
         preferred, and remove anything that does not belong. The analysis uses exactly this list.
       </p>
+      <p className="text-sm text-muted">{SENSITIVE_PREVIEW_NOTE}</p>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
