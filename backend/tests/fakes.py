@@ -213,3 +213,36 @@ class FakeTaskQueue:
         if self.fail:
             raise QueueUnavailableError(task_name)
         self.enqueued.append((task_name, job_id))
+
+
+KEYWORDS = ("go", "postgresql", "kafka", "react", "nursing", "kubernetes")
+
+
+class KeywordEmbedder:
+    """Bag-of-words over a fixed vocabulary: similarities are exact and easy to reason about."""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self.documents: list[str] = []
+
+    @property
+    def model_name(self) -> str:
+        return "keyword-embedder"
+
+    @property
+    def dimensions(self) -> int:
+        return len(KEYWORDS)
+
+    def _vector(self, text: str) -> list[float]:
+        words = text.lower().replace(":", " ").replace(",", " ").split()
+        raw = [float(words.count(term)) for term in KEYWORDS]
+        length = math.sqrt(sum(value * value for value in raw)) or 1.0
+        return [value / length for value in raw]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.documents.extend(texts)
+        return [self._vector(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        return self._vector(text)
