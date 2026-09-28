@@ -131,6 +131,17 @@ async def test_a_prompt_leak_fails_immediately_without_retry() -> None:
     assert len(generator.calls) == 1
 
 
+async def test_a_canary_free_prompt_leak_also_fails_immediately_without_retry() -> None:
+    leaked = "sensitive: true only when a requirement concerns age, gender, ethnicity, religion"
+    generator = ScriptedGenerator([reply(required=[{"text": leaked, "sensitive": False}]), reply()])
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_job(generator, POSTING)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
+
+
 async def test_text_that_is_not_a_posting_is_reported() -> None:
     generator = ScriptedGenerator([reply(is_job_posting=False, required=[], preferred=[])])
 

@@ -10,7 +10,7 @@ from app.ai.generation import (
     Message,
     SamplingSettings,
 )
-from app.ai.match.prompts import build_job_extract_messages, correction_message
+from app.ai.match.prompts import JOB_EXTRACT_PROMPT, build_job_extract_messages, correction_message
 from app.ai.match.schemas import ExtractedJob, JobPosting
 from app.ai.output_guard import validate_output
 
@@ -44,7 +44,7 @@ async def _generate(generator: Generator, messages: list[Message]) -> Generation
 
 
 def _parse(result: GenerationResult) -> tuple[ExtractedJob | None, str]:
-    verdict = validate_output(result)
+    verdict = validate_output(result, protected_prompt=JOB_EXTRACT_PROMPT)
     if verdict.failed_check in _LEAK_CHECKS:
         raise ExtractionError("ai_invalid_output")
     if not verdict.ok:
