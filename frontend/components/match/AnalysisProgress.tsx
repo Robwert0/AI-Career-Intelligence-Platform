@@ -143,7 +143,7 @@ type DecisionPanelProps = {
   onContinue: () => void
 }
 
-// Follows decision.error.recovery, not failed_source alone (Amendment 5): the same CV failure can
+// Follows decision.error.recovery, not failed_source alone: the same CV failure can
 // need a brand new file, a pasted excerpt, or nothing at all (the model just needs another try
 // with the CV already on hand), and a GitHub failure that names the wrong user must never offer a
 // blind retry -- that would just re-fetch the same bad URL and spend another rate-limited token.

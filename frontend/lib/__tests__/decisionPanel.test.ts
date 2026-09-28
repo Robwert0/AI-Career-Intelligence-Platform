@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { decisionPanelKind } from '../decisionPanel'
 import type { Recovery } from '../match'
 
-describe('decisionPanelKind (Amendment 5: the decision panel follows decision.error.recovery)', () => {
+describe('decisionPanelKind: the decision panel follows decision.error.recovery', () => {
   it.each([
     ['fix_github_url', 'fix_github_url'],
     ['paste_cv', 'paste_cv'],

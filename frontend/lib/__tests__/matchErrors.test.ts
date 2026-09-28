@@ -119,7 +119,7 @@ describe('requestProblem', () => {
     expect(coded.message).toMatch(/busy or unavailable\. Try again in 30 seconds\./)
   })
 
-  it("treats a coded analysis_not_found 404 the same as job intake's not_found (amendment 3)", () => {
+  it("treats a coded analysis_not_found 404 the same as job intake's not_found", () => {
     const coded = requestProblem(failure({ status: 404, code: 'analysis_not_found', body: {} }))
 
     expect(coded).toMatchObject({ expired: true })
@@ -170,14 +170,14 @@ describe('jobRecovery', () => {
     })
   })
 
-  it('offers the paste tab for input_too_long from a fetched url, never a pointless retry (amendment 4)', () => {
+  it('offers the paste tab for input_too_long from a fetched url, never a pointless retry', () => {
     expect(jobRecovery(failed('input_too_long', 'paste'), 'url')).toEqual({
       offerRetry: false,
       offerPaste: true,
     })
   })
 
-  it('offers neither button for input_too_long when already on the paste tab (amendment 4)', () => {
+  it('offers neither button for input_too_long when already on the paste tab', () => {
     expect(jobRecovery(failed('input_too_long', 'paste'), 'text')).toEqual({
       offerRetry: false,
       offerPaste: false,
@@ -235,7 +235,7 @@ describe('analysisFailureAction', () => {
     ['analysis_input_too_long', 'edit_job', 'edit_job'],
     ['internal_error', 'retry', 'retry'],
   ] as const)(
-    'amendment 5: %s (recovery %s) → %s, never a futile "Try again" for edit_job',
+    '%s (recovery %s) → %s, never a futile "Try again" for edit_job',
     (code, recovery, action) => {
       expect(analysisFailureAction(failed(code, recovery))).toBe(action)
     },
@@ -249,7 +249,7 @@ describe('analysisFailureAction', () => {
   })
 })
 
-describe('retryLimitProblem (amendment 3: retry spends a 5/hour analysis token)', () => {
+describe('retryLimitProblem: retry spends a 5/hour analysis token, distinct from the ordinary rate limit', () => {
   it('gives a specific analysis-limit message for a 429, not the generic rate-limit one', () => {
     const problem = retryLimitProblem(failure({ status: 429, retryAfter: 900 }))
 
@@ -267,7 +267,7 @@ describe('retryLimitProblem (amendment 3: retry spends a 5/hour analysis token)'
   })
 })
 
-describe('runningJobId (amendment 4: one active intake per user)', () => {
+describe('runningJobId: one active job intake per user', () => {
   it('reads the running job id from a job_in_progress 409', () => {
     const running = failure({
       status: 409,

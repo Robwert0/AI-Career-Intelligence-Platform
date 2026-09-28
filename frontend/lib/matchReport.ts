@@ -42,13 +42,13 @@ const SOURCE_STATUS_TEXT: Record<SourceStatus, string> = {
   read: 'read',
   not_provided: 'not provided',
   failed: 'could not be read',
-  // A done report never actually carries "failed" here (amendment 3): a source that errored mid-
-  // analysis and was skipped by the user's "continue without it" choice shows as "skipped".
+  // A done report never actually carries "failed" here: a source that errored mid-analysis and
+  // was skipped by the user's "continue without it" choice shows as "skipped".
   skipped: 'not used: you continued without it',
 }
 
-// Amendment 3 adds "profile" (a GitHub bio/profile item): it must read as distinct from applied
-// work (work/project/repo), never as though the candidate did that work.
+// "profile" (a GitHub bio/profile item) must read as distinct from applied work
+// (work/project/repo), never as though the candidate did that work.
 export const EVIDENCE_KIND_LABEL: Record<EvidenceKind, string> = {
   work: 'Work experience',
   project: 'Project',

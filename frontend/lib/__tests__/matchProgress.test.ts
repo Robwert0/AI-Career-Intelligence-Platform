@@ -32,7 +32,7 @@ function jobView(patch: Partial<JobView>): JobView {
   }
 }
 
-// AnalysisView is a discriminated union enforcing status<->payload invariants (Amendment 5), so
+// AnalysisView is a discriminated union enforcing status<->payload invariants, so
 // a literal patch can't always be typed as a real member -- some tests here deliberately build an
 // invariant-violating shape to exercise the defensive fallback. This fixture stays a flat, loosely
 // typed shape and casts once at the end, rather than fighting Partial<union> distribution.
@@ -188,7 +188,7 @@ describe('announcements', () => {
     expect(analysisAnnouncement(view, [])).toBe('Paused: GitHub is rate limited.')
   })
 
-  it('shows a github_rate_limited message with its own UTC retry time verbatim, appending nothing (amendment 3)', () => {
+  it('shows a github_rate_limited message with its own UTC retry time verbatim, appending nothing', () => {
     const view = analysisView({
       status: 'needs_decision',
       decision: {

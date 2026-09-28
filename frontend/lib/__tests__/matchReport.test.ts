@@ -207,7 +207,7 @@ describe('coverage text', () => {
     expect(evidenceShare(coverage())).toBe('80% of assessed requirements have cited evidence.')
   })
 
-  it('explains a skipped source as the user continuing without it (amendment 3)', () => {
+  it('explains a skipped source as the user continuing without it', () => {
     expect(sourceSummary(coverage({ cv: 'skipped' }))[0]).toBe(
       'CV: not used: you continued without it',
     )
@@ -223,7 +223,7 @@ describe('coverage text', () => {
   })
 })
 
-describe('evidenceKindLabel (amendment 3: profile)', () => {
+describe('evidenceKindLabel', () => {
   it.each([
     ['work', 'Work experience'],
     ['project', 'Project'],

@@ -43,8 +43,8 @@ export type CandidateSource = 'cv' | 'github'
 export type Decision = { failed_source: CandidateSource; error: FailureOut }
 export type AnalysisSubmitted = { analysis_id: string }
 
-// A discriminated union on `status`, matching the response invariants the backend enforces
-// (Amendment 5): done => report, needs_decision => decision, failed => error, and
+// A discriminated union on `status`, matching the response invariants the backend enforces:
+// done => report, needs_decision => decision, failed => error, and
 // queue_position is set only while queued. `stage` stays uniformly nullable -- it is not one of
 // the guaranteed invariants (a resumed analysis carries stage: null until it runs again).
 type AnalysisCommon = { analysis_id: string; stage: AnalysisStage | null }
@@ -142,13 +142,14 @@ type MatchReportCommon = {
   disclaimer: string
   model: string
 }
-// score null <=> refusal set (Amendment 3): the union lets a caller narrow on `score` and get
-// `refusal` for free, instead of a null check TS can't tie to the score it read.
+// score null <=> refusal set: the union lets a caller narrow on `score` and get `refusal` for
+// free, instead of a null check TS can't tie to the score it read.
 export type MatchReport =
   | (MatchReportCommon & { score: number; refusal: null })
   | (MatchReportCommon & { score: null; refusal: Refusal })
 
-// Up to 5 MB can take longer than the 10s default on a slow connection.
+// The largest allowed CV upload (server-configured, MAX_UPLOAD_MB) can take longer than the 10s
+// default on a slow connection.
 const UPLOAD_TIMEOUT_MS = 60_000
 
 function post(body?: FormData | object): RequestInit {

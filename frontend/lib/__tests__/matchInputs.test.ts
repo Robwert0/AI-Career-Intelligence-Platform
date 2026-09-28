@@ -215,7 +215,7 @@ describe('CV retry', () => {
   })
 })
 
-describe('githubRetryError (Amendment 5: fixing a github_user_not_found decision)', () => {
+describe('githubRetryError: fixing a github_user_not_found decision', () => {
   it('requires a URL', () => {
     expect(githubRetryError('')).toBeDefined()
     expect(githubRetryError('   ')).toBeDefined()
