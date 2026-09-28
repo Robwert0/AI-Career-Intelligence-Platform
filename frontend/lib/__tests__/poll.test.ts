@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiResult } from '../http'
 import {
+  MAX_BACKOFF_MS,
   MAX_POLL_INTERVAL_MS,
   MAX_TRANSIENT_FAILURES,
   POLL_INTERVAL_MS,
@@ -142,6 +143,46 @@ describe('poll', () => {
 
     expect(load).toHaveBeenCalledTimes(1)
   })
+
+  it('reports a thrown error through onFailure and stops, instead of rejecting silently', async () => {
+    const boom = new Error('boom')
+    const load = vi.fn(async () => {
+      throw boom
+    })
+    const onFailure = vi.fn()
+
+    await poll<View>({
+      load,
+      isFinal: () => false,
+      onValue: vi.fn(),
+      onFailure,
+      signal: new AbortController().signal,
+      wait: async () => {},
+    })
+
+    expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ ok: false, status: 0 }))
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an onValue that throws through onFailure too, and stops polling', async () => {
+    const onValue = vi.fn(() => {
+      throw new Error('renderer blew up')
+    })
+    const onFailure = vi.fn()
+    const load = vi.fn(async () => running)
+
+    await poll<View>({
+      load,
+      isFinal: () => false,
+      onValue,
+      onFailure,
+      signal: new AbortController().signal,
+      wait: async () => {},
+    })
+
+    expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ ok: false, status: 0 }))
+    expect(load).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('nextDelay', () => {
@@ -149,10 +190,11 @@ describe('nextDelay', () => {
     [0, undefined, POLL_INTERVAL_MS],
     [1, undefined, 3000],
     [2, undefined, 6000],
-    [4, undefined, MAX_POLL_INTERVAL_MS],
+    [4, undefined, MAX_BACKOFF_MS],
     [1, 5, 5000],
     [1, 1, 3000],
-    [1, 30, MAX_POLL_INTERVAL_MS],
+    [1, 45, 45_000],
+    [1, 90, MAX_POLL_INTERVAL_MS],
   ])('failures=%s retryAfter=%s → %sms', (failures, retryAfter, expected) => {
     expect(nextDelay(failures, retryAfter)).toBe(expected)
   })
