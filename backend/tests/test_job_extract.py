@@ -14,11 +14,11 @@ from app.ai.match.job_extract import (
     JOB_EXTRACT_SAMPLING,
     MAX_JOB_TEXT_BYTES,
     MAX_JOB_TEXT_CHARS,
-    ExtractionError,
     extract_job,
 )
 from app.ai.match.prompts import JOB_EXTRACT_PROMPT
 from app.ai.match.schemas import ExtractedJob
+from app.ai.match.structured import ExtractionError
 from app.ai.prompts import CANARY, JOB_POSTING_TAG
 
 POSTING = "Backend Engineer at Acme. Requirements: 5 years of Go. Nice to have: Kubernetes."
