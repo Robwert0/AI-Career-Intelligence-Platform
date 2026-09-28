@@ -14,9 +14,8 @@ from pydantic import BaseModel, ConfigDict
 
 from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.generation import GenerationResult, Message, SamplingSettings
-from app.ai.match.dedup import merge_evidence
 from app.ai.match.job_extract import extract_job
-from app.ai.match.preselect import preselect
+from app.ai.match.preselect import NO_SIMILARITY, preselect
 from app.ai.match.prompts import correction_message
 from app.ai.match.requirements import requirement_refs
 from app.ai.match.schemas import EvidenceItem, JobPosting, Requirement
@@ -142,6 +141,22 @@ def suggested_threshold(related: Sequence[float], unrelated: Sequence[float]) ->
     return (lowest_related + highest_unrelated) / 2
 
 
+SOURCES = ("cv", "github")
+
+
+def suggested_thresholds(
+    related: dict[str, dict[str, float]], unrelated: dict[str, dict[str, float]]
+) -> dict[str, float | None]:
+    """One threshold per source, each from that source's own related/unrelated distributions."""
+    out: dict[str, float | None] = {}
+    for source in SOURCES:
+        rel = [row[source] for row in related.values() if source in row]
+        unrel = [row[source] for row in unrelated.values() if source in row]
+        if rel and unrel:
+            out[source] = suggested_threshold(rel, unrel)
+    return out
+
+
 @dataclass
 class Tally:
     matches: int = 0
@@ -256,8 +271,10 @@ def unrelated_postings(files: Sequence[LabelFile]) -> dict[str, JobPosting]:
 def best_similarity(
     posting: JobPosting, evidence: Sequence[EvidenceItem], embedder: Embedder
 ) -> float:
+    """The refusal gate's statistic for evidence from one source (see Preselection)."""
     assessable = [ref for ref in requirement_refs(posting) if not ref.sensitive]
-    return preselect(assessable, evidence, embedder, top_k=1).best_similarity
+    relatedness = preselect(assessable, evidence, embedder, top_k=1).relatedness
+    return max(relatedness.values(), default=NO_SIMILARITY)
 
 
 async def prepare(args: argparse.Namespace) -> int:
@@ -299,27 +316,41 @@ async def calibrate(args: argparse.Namespace) -> int:
         state, _ = await read_candidate(args.cv, args.github, generator)
     finally:
         await generator.aclose()
-    evidence = merge_evidence(state.cv.items, state.github.items)
     embedder = BgeEmbedder()
-    related = {f.slug: best_similarity(f.posting, evidence, embedder) for f in files}
+    # Each source alone, as a CV-only or GitHub-only analysis would see it.
+    by_source = {"cv": state.cv.items, "github": state.github.items}
+
+    def best(posting: JobPosting) -> dict[str, float]:
+        return {
+            source: best_similarity(posting, items, embedder)
+            for source, items in by_source.items()
+            if items
+        }
+
+    related = {f.slug: best(f.posting) for f in files}
     extra = load_label_files(args.unrelated) if args.unrelated else []
-    unrelated = {
-        slug: best_similarity(posting, evidence, embedder)
-        for slug, posting in unrelated_postings(extra).items()
+    unrelated = {slug: best(posting) for slug, posting in unrelated_postings(extra).items()}
+    suggested = suggested_thresholds(related, unrelated)
+    names = {
+        "cv": "MATCH_PRESELECT_MIN_SIMILARITY",
+        "github": "MATCH_PRESELECT_MIN_SIMILARITY_GITHUB",
     }
-    for label, rows in (("RELATED", related), ("UNRELATED", unrelated)):
-        for slug, similarity in sorted(rows.items(), key=lambda row: row[1]):
-            print(f"{label}\t{similarity:.4f}\t{slug}")
-    print(f"\nevidence items          {len(evidence)}")
-    print(f"lowest  RELATED         {min(related.values()):.4f}")
-    print(f"highest UNRELATED       {max(unrelated.values()):.4f}")
-    suggested = suggested_threshold(list(related.values()), list(unrelated.values()))
-    if suggested is None:
-        print("\nNO CLEAN SEPARATION: the sets overlap, so no threshold divides them.")
-        print("Record this as a finding and do not pick a number.")
-        return 1
-    print(f"\nsuggested MATCH_PRESELECT_MIN_SIMILARITY={suggested:.4f}")
-    return 0
+    overlap = False
+    for source in suggested:
+        print(f"\n== {source} ({len(by_source[source])} evidence items)")
+        for label, rows in (("RELATED", related), ("UNRELATED", unrelated)):
+            for slug, row in sorted(rows.items(), key=lambda item: item[1][source]):
+                print(f"{label}\t{row[source]:.4f}\t{slug}")
+        low = min(row[source] for row in related.values())
+        high = max(row[source] for row in unrelated.values())
+        print(f"lowest RELATED {low:.4f}  highest UNRELATED {high:.4f}")
+        value = suggested[source]
+        if value is None:
+            overlap = True
+            print(f"NO CLEAN SEPARATION for {source}: do not pick a number.")
+        else:
+            print(f"suggested {names[source]}={value:.4f} (margin {value - high:.4f})")
+    return 1 if overlap else 0
 
 
 @dataclass
@@ -353,7 +384,7 @@ async def _analyse_once(
             recommend_generator=recommend_gen,
             on_stage=_stage,
             top_k=settings.match_preselect_top_k,
-            min_similarity=settings.match_preselect_min_similarity,
+            min_similarity=settings.match_preselect_thresholds,
         )
     except ExtractionError as exc:
         return RunRecord(label.slug, run, None, {}, time.monotonic() - started, 0, 0, exc.code)

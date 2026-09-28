@@ -99,3 +99,42 @@ def test_requirement_ids_follow_the_posting_order() -> None:
         ("req:required:1", "required", True),
         ("req:preferred:0", "preferred", False),
     ]
+
+
+def test_relatedness_is_each_sources_mean_best_match_per_requirement() -> None:
+    repo = EvidenceItem(
+        id="gh:repo:dash",
+        sources=("github",),
+        kind="repo",
+        section_label="GitHub · dash",
+        text="React dashboard",
+        url="https://github.com/jane/dash",
+    )
+    merged = EvidenceItem(
+        id="cv:project:0",
+        sources=("cv", "github"),
+        kind="project",
+        section_label="Projects · Stream",
+        text="Kafka streams",
+        url="https://github.com/jane/stream",
+    )
+
+    selection = preselect(
+        [ref(0, "React"), ref(1, "Kafka")], [EVIDENCE[0], repo, merged], KeywordEmbedder(), top_k=1
+    )
+
+    # React: cv 0, github 1. Kafka: cv 1 (a merged item is CV prose), github 0.
+    assert selection.relatedness == pytest.approx({"cv": 0.5, "github": 0.5})
+
+
+def test_one_strong_pair_does_not_make_a_posting_related() -> None:
+    # A single shared keyword used to pass the gate; the mean over requirements does not.
+    selection = preselect(
+        [ref(0, "Go"), ref(1, "nursing"), ref(2, "nursing")],
+        EVIDENCE[:1],
+        KeywordEmbedder(),
+        top_k=1,
+    )
+
+    assert selection.best_similarity == pytest.approx(1 / 2**0.5)
+    assert selection.relatedness["cv"] == pytest.approx((1 / 2**0.5) / 3)

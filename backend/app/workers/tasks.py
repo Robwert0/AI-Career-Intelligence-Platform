@@ -306,7 +306,7 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
             recommend_generator=generators.recommend,
             on_stage=on_stage,
             top_k=settings.match_preselect_top_k,
-            min_similarity=settings.match_preselect_min_similarity,
+            min_similarity=settings.match_preselect_thresholds,
         )
     except ExtractionError as exc:
         raise JobError(exc.code) from None

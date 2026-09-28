@@ -13,6 +13,7 @@ from app.match.scoring import (
     score,
 )
 
+THRESHOLDS = {"cv": 0.5, "github": 0.4}
 WORK = frozenset({"work"})
 SKILLS = frozenset({"skill_list"})
 
@@ -192,7 +193,7 @@ def test_every_refusal_condition_is_reported() -> None:
     two_items = [req("demonstrated"), pref("demonstrated")]
 
     assert refusal_reasons(
-        two_items, evidence_items=2, best_similarity=0.1, min_similarity=0.5
+        two_items, evidence_items=2, best_similarity={"cv": 0.1}, min_similarity=THRESHOLDS
     ) == (
         "insufficient_job",
         "insufficient_evidence",
@@ -203,23 +204,28 @@ def test_every_refusal_condition_is_reported() -> None:
 def test_no_assessed_required_item_is_an_insufficient_job() -> None:
     items = [pref("demonstrated"), pref("partial"), pref("unmet"), req("not_assessed")]
 
-    assert refusal_reasons(items, evidence_items=9, best_similarity=0.9, min_similarity=0.5) == (
-        "insufficient_job",
-    )
+    assert refusal_reasons(
+        items, evidence_items=9, best_similarity={"cv": 0.9}, min_similarity=THRESHOLDS
+    ) == ("insufficient_job",)
 
 
 def test_sensitive_items_do_not_count_towards_the_minimum() -> None:
     items = [req("demonstrated"), req("partial"), req("not_assessed")]
 
     assert "insufficient_job" in refusal_reasons(
-        items, evidence_items=9, best_similarity=0.9, min_similarity=0.5
+        items, evidence_items=9, best_similarity={"cv": 0.9}, min_similarity=THRESHOLDS
     )
 
 
 def test_a_sufficient_analysis_is_not_refused() -> None:
     items = [req("demonstrated"), req("partial"), pref("unmet")]
 
-    assert refusal_reasons(items, evidence_items=3, best_similarity=0.5, min_similarity=0.5) == ()
+    assert (
+        refusal_reasons(
+            items, evidence_items=3, best_similarity={"cv": 0.5}, min_similarity=THRESHOLDS
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize(
@@ -234,3 +240,24 @@ def test_a_sufficient_analysis_is_not_refused() -> None:
 )
 def test_coverage_levels(share: float, read: bool, level: str) -> None:
     assert coverage_level(share, every_source_read=read) == level
+
+
+@pytest.mark.parametrize(
+    ("best", "refused"),
+    [
+        ({"cv": 0.45, "github": 0.42}, False),
+        ({"github": 0.41}, False),
+        ({"cv": 0.49, "github": 0.39}, True),
+        ({}, True),
+    ],
+)
+def test_each_source_is_judged_against_its_own_threshold(
+    best: dict[str, float], refused: bool
+) -> None:
+    items = [req("demonstrated"), req("partial"), pref("unmet")]
+
+    reasons = refusal_reasons(
+        items, evidence_items=3, best_similarity=best, min_similarity=THRESHOLDS
+    )
+
+    assert ("unrelated_sources" in reasons) is refused

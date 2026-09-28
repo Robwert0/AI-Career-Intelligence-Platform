@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.ai.embeddings import Embedder
 from app.ai.match.requirements import RequirementRef
@@ -18,6 +18,10 @@ class Candidate:
 class Preselection:
     candidates: dict[str, tuple[Candidate, ...]]
     best_similarity: float
+    # Per source: the mean over requirements of that requirement's best match. The refusal gate
+    # uses it because one lucky pair ("Excel" in an accountant posting) made a best-pair gate
+    # barely separate related from unrelated postings.
+    relatedness: dict[str, float] = field(default_factory=dict)
 
     def ids_for(self, requirement_id: str) -> tuple[str, ...]:
         return tuple(candidate.evidence_id for candidate in self.candidates[requirement_id])
@@ -25,6 +29,11 @@ class Preselection:
 
 def evidence_text(item: EvidenceItem) -> str:
     return f"{item.section_label}: {item.text}"
+
+
+def source_of(item: EvidenceItem) -> str:
+    # A CV project merged with its repo is CV prose, so it is judged like the CV.
+    return "cv" if "cv" in item.sources else "github"
 
 
 def _dot(a: Sequence[float], b: Sequence[float]) -> float:
@@ -44,6 +53,7 @@ def preselect(
     vectors = embedder.embed_documents([evidence_text(item) for item in evidence])
     candidates: dict[str, tuple[Candidate, ...]] = {}
     best = NO_SIMILARITY
+    per_source: dict[str, list[float]] = {}
     for requirement in requirements:
         query = embedder.embed_query(requirement.text)
         # Normalised vectors, so the dot product is the cosine similarity.
@@ -55,4 +65,11 @@ def preselect(
         ranked = sorted(scored, key=lambda candidate: candidate.similarity, reverse=True)
         candidates[requirement.id] = tuple(ranked[:top_k])
         best = max(best, ranked[0].similarity)
-    return Preselection(candidates, best)
+        best_here: dict[str, float] = {}
+        for item, candidate in zip(evidence, scored, strict=True):
+            source = source_of(item)
+            best_here[source] = max(best_here.get(source, NO_SIMILARITY), candidate.similarity)
+        for source, value in best_here.items():
+            per_source.setdefault(source, []).append(value)
+    relatedness = {source: sum(values) / len(values) for source, values in per_source.items()}
+    return Preselection(candidates, best, relatedness)

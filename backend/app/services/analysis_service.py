@@ -76,7 +76,7 @@ async def analyse(
     recommend_generator: Generator,
     on_stage: StageCallback,
     top_k: int,
-    min_similarity: float,
+    min_similarity: Mapping[str, float],
 ) -> AnalysisOutcome:
     requirements = requirement_refs(posting)
     assessable = [r for r in requirements if not r.sensitive]
@@ -91,7 +91,7 @@ async def analyse(
     refusal = refusal_reasons(
         scored_requirements(requirements, None, by_id),
         evidence_items=len(evidence),
-        best_similarity=selection.best_similarity,
+        best_similarity=selection.relatedness,
         min_similarity=min_similarity,
     )
     if refusal:

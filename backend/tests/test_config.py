@@ -1,4 +1,5 @@
 import inspect
+import os
 
 import pytest
 from pydantic import ValidationError
@@ -313,11 +314,33 @@ def test_analysis_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.match_analysis_hard_time_limit_seconds == 1830
 
 
-def test_the_refusal_gate_has_no_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MATCH_PRESELECT_MIN_SIMILARITY")
+# Exactly what .github/workflows/ci.yml gives alembic and the worker smoke test.
+CI_ENV = {
+    "DATABASE_URL": "postgresql+asyncpg://test:test@localhost:5432/postgres",
+    "REDIS_URL": "redis://localhost:6379/0",
+    "SECRET_KEY": "ci-secret-not-real-000000000000000000",
+    "CV_DOCUMENT_ID": "44444444-4444-4444-4444-444444444444",
+}
 
-    with pytest.raises(ValidationError, match="match_preselect_min_similarity"):
-        Settings(_env_file=None)
+
+def test_settings_build_from_ci_env_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in list(os.environ):
+        if name.startswith(("MATCH_", "JOB_", "CELERY_", "GITHUB_", "MAX_UPLOAD")):
+            monkeypatch.delenv(name)
+    for name, value in CI_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    settings = Settings(_env_file=None)
+
+    # The calibrated refusal gates: one per source, each overridable from the environment.
+    assert settings.match_preselect_thresholds == {"cv": 0.605, "github": 0.583}
+
+
+def test_each_refusal_gate_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MATCH_PRESELECT_MIN_SIMILARITY", "0.7")
+    monkeypatch.setenv("MATCH_PRESELECT_MIN_SIMILARITY_GITHUB", "0.6")
+
+    assert Settings(_env_file=None).match_preselect_thresholds == {"cv": 0.7, "github": 0.6}
 
 
 def test_the_worst_case_analysis_is_the_documented_sum() -> None:

@@ -98,7 +98,8 @@ async def run(
     *,
     posting: JobPosting = POSTING,
     sources: SourcesState = SOURCES,
-    min_similarity: float = 0.5,
+    min_similarity: float = 0.3,
+    github_similarity: float | None = None,
     stages: Stages | None = None,
 ) -> tuple[Any, ScriptedGenerator]:
     assess_generator = ScriptedGenerator(assess_texts)
@@ -110,7 +111,10 @@ async def run(
         recommend_generator=recommend or ScriptedGenerator([ADVICE]),
         on_stage=stages or Stages(),
         top_k=8,
-        min_similarity=min_similarity,
+        min_similarity={
+            "cv": min_similarity,
+            "github": min_similarity if github_similarity is None else github_similarity,
+        },
     )
     return outcome, assess_generator
 
@@ -248,3 +252,38 @@ async def test_injection_phrasing_in_requirements_is_logged_by_pattern_only(
 
     assert "override_instructions" in caplog.text
     assert "score 100" not in caplog.text
+
+
+def repo(name: str, text: str) -> EvidenceItem:
+    return EvidenceItem(
+        id=f"gh:repo:{name}",
+        sources=("github",),
+        kind="repo",
+        section_label=f"GitHub · {name}",
+        text=text,
+        url=f"https://github.com/jane/{name}",
+    )
+
+
+GITHUB_ONLY = SourcesState(
+    cv=CvSource(status="not_provided"),
+    github=GitHubSource(
+        status="read",
+        url="https://github.com/jane",
+        items=(repo("api", "Go services"), repo("db", "PostgreSQL tools"), repo("ui", "React")),
+    ),
+)
+
+
+async def test_github_evidence_is_gated_by_its_own_threshold() -> None:
+    # Repo text embeds further from postings than CV prose, so it has its own calibration.
+    refused, _ = await run([], ScriptedGenerator([]), sources=GITHUB_ONLY, min_similarity=1.01)
+    accepted, _ = await run(
+        [ASSESS.replace("cv:experience:0", "gh:repo:api")],
+        sources=GITHUB_ONLY,
+        min_similarity=1.01,
+        github_similarity=0.5,
+    )
+
+    assert refused.report.score is None
+    assert accepted.report.score is not None

@@ -57,11 +57,20 @@ class Settings(BaseSettings):
     evidence_extract_generation_timeout_seconds: int = Field(default=150, ge=10)
     match_cv_ttl_seconds: int = Field(default=900, ge=60)
     match_preselect_top_k: int = Field(default=8, ge=1, le=20)
-    # No default on purpose: the refusal gate is measured by `scripts/eval_match.py calibrate`.
-    match_preselect_min_similarity: float = Field(ge=-1.0, le=1.0)
+    # Measured per source by `scripts/eval_match.py calibrate`; repo text embeds further from a
+    # posting than CV prose, so one shared number would refuse every GitHub-only analysis.
+    match_preselect_min_similarity: float = Field(default=0.605, ge=-1.0, le=1.0)
+    match_preselect_min_similarity_github: float = Field(default=0.583, ge=-1.0, le=1.0)
     match_assess_generation_timeout_seconds: int = Field(default=60, ge=10)
     match_recommend_generation_timeout_seconds: int = Field(default=90, ge=10)
     match_analysis_soft_time_limit_seconds: int = Field(default=1800, ge=60)
+
+    @property
+    def match_preselect_thresholds(self) -> dict[str, float]:
+        return {
+            "cv": self.match_preselect_min_similarity,
+            "github": self.match_preselect_min_similarity_github,
+        }
 
     @property
     def match_analysis_hard_time_limit_seconds(self) -> int:

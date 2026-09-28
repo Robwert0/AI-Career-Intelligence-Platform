@@ -14,6 +14,7 @@ from eval_match import (  # noqa: E402
     flip_rate,
     load_label_files,
     suggested_threshold,
+    suggested_thresholds,
     summarise,
     template,
     unrelated_postings,
@@ -75,6 +76,13 @@ def test_the_threshold_is_the_midpoint_between_clean_sets() -> None:
 
 def test_overlapping_sets_give_no_threshold() -> None:
     assert suggested_threshold([0.5, 0.8], [0.6]) is None
+
+
+def test_each_source_gets_its_own_threshold_from_its_own_distribution() -> None:
+    related = {"a": {"cv": 0.7, "github": 0.6}, "b": {"cv": 0.8, "github": 0.62}}
+    unrelated = {"x": {"cv": 0.6, "github": 0.5}, "y": {"cv": 0.5, "github": 0.61}}
+
+    assert suggested_thresholds(related, unrelated) == pytest.approx({"cv": 0.65, "github": None})
 
 
 def test_agreement_and_confusion_count_every_labelled_requirement() -> None:

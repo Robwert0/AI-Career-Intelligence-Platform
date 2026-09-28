@@ -1,5 +1,5 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -110,9 +110,10 @@ def refusal_reasons(
     requirements: Sequence[ScoredRequirement],
     *,
     evidence_items: int,
-    best_similarity: float,
-    min_similarity: float,
+    best_similarity: Mapping[str, float],
+    min_similarity: Mapping[str, float],
 ) -> tuple[RefusalCode, ...]:
+    """Similarities are per source ("cv", "github"): each is judged by its own threshold."""
     assessed = [item for item in requirements if item.assessed]
     reasons: list[RefusalCode] = []
     if len(assessed) < MIN_ASSESSED_REQUIREMENTS or not any(
@@ -121,7 +122,7 @@ def refusal_reasons(
         reasons.append("insufficient_job")
     if evidence_items < MIN_EVIDENCE_ITEMS:
         reasons.append("insufficient_evidence")
-    if best_similarity < min_similarity:
+    if not any(best >= min_similarity[source] for source, best in best_similarity.items()):
         reasons.append("unrelated_sources")
     return tuple(reasons)
 
