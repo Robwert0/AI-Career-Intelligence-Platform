@@ -180,9 +180,18 @@ class JobStore:
         )
 
     async def resume(
-        self, job_id: str, owner_id: str, *, resume: str, now: float
+        self,
+        job_id: str,
+        owner_id: str,
+        *,
+        resume: str,
+        now: float,
+        blob: tuple[str, bytes, int] | None = None,
     ) -> JobRecord | None:
-        """The only write the API makes after create(): needs_decision -> queued, atomically."""
+        """needs_decision -> queued, atomically; `blob` (name, data, ttl) is written in the same
+        transaction, so a request that loses the race writes nothing at all."""
+        if blob is not None and not self._valid_blob(job_id, blob[0]):
+            raise ValueError("invalid job id or blob name")
 
         def change(record: JobRecord) -> JobRecord | None:
             if record.owner_id != owner_id:
@@ -199,7 +208,11 @@ class JobStore:
                 }
             )
 
-        return await self._compare_and_set(job_id, change)
+        extra = None
+        if blob is not None:
+            name, data, ttl = blob
+            extra = (self._blob_key(job_id, name), data, ttl)
+        return await self._compare_and_set(job_id, change, extra=extra)
 
     async def _transition(self, job_id: str, now: float, **changes: Any) -> JobRecord | None:
         def change(record: JobRecord) -> JobRecord:
@@ -210,7 +223,11 @@ class JobStore:
         return await self._compare_and_set(job_id, change)
 
     async def _compare_and_set(
-        self, job_id: str, change: Callable[[JobRecord], JobRecord | None]
+        self,
+        job_id: str,
+        change: Callable[[JobRecord], JobRecord | None],
+        *,
+        extra: tuple[str, bytes, int] | None = None,
     ) -> JobRecord | None:
         # WATCH makes the read-modify-write atomic now that the API writes too (resume).
         if not _ID.fullmatch(job_id):
@@ -228,8 +245,10 @@ class JobStore:
                 pipe.multi()  # type: ignore[no-untyped-call]
                 # xx: never recreate an expired key; keepttl: never extend its lifetime.
                 pipe.set(key, updated.model_dump_json(), xx=True, keepttl=True)
+                if extra is not None:
+                    pipe.set(extra[0], extra[1], ex=extra[2])
                 try:
-                    (stored,) = await pipe.execute()
+                    stored, *_ = await pipe.execute()
                 except WatchError:
                     continue
                 return updated if stored else None

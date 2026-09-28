@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import uuid
@@ -18,6 +19,7 @@ from app.core.job_store import JobStateError, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.deps import get_analysis_registry, get_job_store, get_limiter, get_task_queue
 from app.main import app
+from app.services.match_service import CvUpload, MatchService
 
 PASSWORD = "supersecret1"
 POSTING = {
@@ -542,7 +544,7 @@ async def test_a_cv_retry_checks_the_new_file_like_a_submission(env: Env) -> Non
     assert response.status_code == 415
 
 
-async def test_a_retry_that_loses_the_race_leaves_no_cv_behind(
+async def test_a_retry_that_loses_the_race_writes_no_cv(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     analysis_id = (
@@ -566,6 +568,49 @@ async def test_a_retry_that_loses_the_race_leaves_no_cv_behind(
 
     assert response.status_code == 409
     assert await env.store.read_blob(analysis_id, "cv_text") is None
+
+
+async def test_two_concurrent_cv_retries_keep_the_winners_cv(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    analysis_id = (
+        await env.submit(
+            files={"cv": ("cv.pdf", PDF, "application/pdf")}, github_url="https://github.com/jane"
+        )
+    ).json()["analysis_id"]
+    await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
+    real_resume = env.store.resume
+    arrived = 0
+    both_here = asyncio.Event()
+
+    async def together(*args: Any, **kwargs: Any) -> Any:
+        # Both requests have passed the status check before either writes: the real race.
+        nonlocal arrived
+        arrived += 1
+        if arrived == 2:
+            both_here.set()
+        await both_here.wait()
+        return await real_resume(*args, **kwargs)
+
+    monkeypatch.setattr(env.store, "resume", together)
+    # Straight to the service: two HTTP requests would share the test's one DB session.
+    service = MatchService(env.store, env.queue, env.registry)
+    owner = await env.owner()
+    texts = [b"first retry cv text", b"second retry cv text"]
+    outcomes = await asyncio.gather(
+        *(
+            service.retry_analysis(owner, analysis_id, CvUpload("text", text), now=time.time())
+            for text in texts
+        ),
+        return_exceptions=True,
+    )
+
+    assert sorted(type(outcome).__name__ for outcome in outcomes) == [
+        "NotAwaitingDecisionError",
+        "str",
+    ]
+    winner = texts[[isinstance(outcome, str) for outcome in outcomes].index(True)]
+    assert await env.store.read_blob(analysis_id, "cv_text") == winner
 
 
 async def test_continue_on_someone_elses_analysis_is_404(env: Env) -> None:

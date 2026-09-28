@@ -217,16 +217,18 @@ class MatchService:
         needs_cv = resume == "retry" and record.failed_source == "cv"
         if needs_cv and cv is None:
             raise CvRequiredError(analysis_id)
-        if needs_cv and cv is not None:
-            await self._store.put_blob(
-                analysis_id, CV_BLOB[cv.kind], cv.data, ttl_seconds=settings.match_cv_ttl_seconds
-            )
+        blob = (
+            (CV_BLOB[cv.kind], cv.data, settings.match_cv_ttl_seconds)
+            if needs_cv and cv is not None
+            else None
+        )
         try:
-            resumed = await self._store.resume(analysis_id, owner_id, resume=resume, now=now)
+            resumed = await self._store.resume(
+                analysis_id, owner_id, resume=resume, now=now, blob=blob
+            )
         except JobStateError:
             resumed = None
         if resumed is None:
-            await self._store.delete_blobs(analysis_id, *CV_BLOB.values())
             raise NotAwaitingDecisionError(analysis_id)
         await self._enqueue(owner_id, analysis_id, now)
         return analysis_id
