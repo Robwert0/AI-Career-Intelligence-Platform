@@ -244,6 +244,15 @@ async def read_candidate(
     return state, time.monotonic() - started
 
 
+def unrelated_postings(files: Sequence[LabelFile]) -> dict[str, JobPosting]:
+    """The built-in off-domain postings, plus any real ones prepared into --unrelated."""
+    built_in = {
+        slug: JobPosting(title=slug, required=[Requirement(text=t, sensitive=False) for t in texts])
+        for slug, texts in UNRELATED.items()
+    }
+    return {**built_in, **{f.slug: f.posting for f in files}}
+
+
 def best_similarity(
     posting: JobPosting, evidence: Sequence[EvidenceItem], embedder: Embedder
 ) -> float:
@@ -293,13 +302,10 @@ async def calibrate(args: argparse.Namespace) -> int:
     evidence = merge_evidence(state.cv.items, state.github.items)
     embedder = BgeEmbedder()
     related = {f.slug: best_similarity(f.posting, evidence, embedder) for f in files}
+    extra = load_label_files(args.unrelated) if args.unrelated else []
     unrelated = {
-        slug: best_similarity(
-            JobPosting(title=slug, required=[Requirement(text=t, sensitive=False) for t in texts]),
-            evidence,
-            embedder,
-        )
-        for slug, texts in UNRELATED.items()
+        slug: best_similarity(posting, evidence, embedder)
+        for slug, posting in unrelated_postings(extra).items()
     }
     for label, rows in (("RELATED", related), ("UNRELATED", unrelated)):
         for slug, similarity in sorted(rows.items(), key=lambda row: row[1]):
@@ -461,6 +467,12 @@ def main() -> int:
         sub = commands.add_parser(name)
         sub.add_argument("--cv", type=Path, default=DEFAULT_CV)
         sub.add_argument("--github", default=None, help="https://github.com/<user>, optional")
+    commands.choices["calibrate"].add_argument(
+        "--unrelated",
+        type=Path,
+        default=None,
+        help="a directory of real off-domain postings, prepared like --postings",
+    )
     commands.choices["run"].add_argument("--runs", type=int, default=3)
     commands.choices["run"].add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     args = parser.parse_args()

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 
 from eval_match import (  # noqa: E402
     CORRECTION_PREFIX,
+    UNRELATED,
     LabelFile,
     RunRecord,
     Tally,
@@ -15,6 +16,7 @@ from eval_match import (  # noqa: E402
     suggested_threshold,
     summarise,
     template,
+    unrelated_postings,
 )
 
 from app.ai.match.prompts import correction_message  # noqa: E402
@@ -120,3 +122,11 @@ def test_the_summary_reports_every_metric_the_spec_asks_for() -> None:
     assert summary["seconds_per_analysis"] == {"median": 45.0, "max": 50.0}
     assert summary["stability"]["acme"]["score_range"] == 4
     assert summary["stability"]["acme"]["status_flip_rate"] == 1.0
+
+
+def test_real_unrelated_postings_join_the_built_in_set() -> None:
+    postings = unrelated_postings([template("real-nurse", POSTING)])
+
+    assert postings["real-nurse"] == POSTING
+    assert set(UNRELATED) < set(postings)
+    assert [r.text for r in postings["truck-driver"].required] == UNRELATED["truck-driver"]
