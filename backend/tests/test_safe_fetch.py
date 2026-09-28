@@ -96,6 +96,9 @@ def test_public_http_urls_parse(raw: str) -> None:
         "http://jobs.example.com:22/",
         "https://[::1",
         "https://jobs.example.com/" + "a" * 2100,
+        "https://jobs.example.com/a\x00b",
+        "https://jobs.example.com/\x7f",
+        "https://jobs.example.com/a b",
         "",
     ],
 )
@@ -137,6 +140,9 @@ def test_the_fragment_is_dropped_and_the_query_kept() -> None:
         ("64:ff9b::7f00:1", False),
         ("2002:7f00:1::", False),
         ("::7f00:1", False),
+        ("::ffff:0:a00:1", False),
+        ("::ffff:0:7f00:1", False),
+        ("fec0::1", False),
         ("not-an-ip", False),
     ],
 )
@@ -168,6 +174,31 @@ async def test_the_user_agent_is_honest() -> None:
     assert seen[-1].headers["user-agent"].startswith("CareerIntelBot/")
     assert "cookie" not in seen[-1].headers
     assert "authorization" not in seen[-1].headers
+
+
+# --- cookies -------------------------------------------------------------------------------
+
+
+async def test_a_robots_cookie_is_not_sent_on_the_page_request() -> None:
+    robots = httpx.Response(200, headers={"set-cookie": "sid=abc"}, text="")
+    handler, seen = site(robots=robots)
+
+    await fetcher(handler).fetch("https://jobs.example.com/")
+
+    assert all("cookie" not in request.headers for request in seen)
+
+
+async def test_a_redirect_cookie_is_not_sent_on_the_next_hop_or_its_robots() -> None:
+    def page(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/old":
+            return httpx.Response(301, headers={"location": "/new", "set-cookie": "sid=abc"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=PAGE)
+
+    handler, seen = site(page)
+
+    await fetcher(handler).fetch("https://jobs.example.com/old")
+
+    assert all("cookie" not in request.headers for request in seen)
 
 
 async def test_a_private_resolution_is_blocked_before_any_request() -> None:
@@ -254,6 +285,17 @@ async def test_a_redirect_to_an_internal_host_is_blocked() -> None:
 async def test_a_redirect_to_another_scheme_is_invalid() -> None:
     def page(request: httpx.Request) -> httpx.Response:
         return httpx.Response(302, headers={"location": "file:///etc/passwd"})
+
+    handler, _ = site(page)
+
+    assert await failure(fetcher(handler).fetch("https://jobs.example.com/")) is (
+        FetchFailure.INVALID_URL
+    )
+
+
+async def test_a_redirect_with_a_control_character_in_location_is_invalid() -> None:
+    def page(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": "/x\x00y"})
 
     handler, _ = site(page)
 
@@ -479,6 +521,26 @@ async def test_a_transient_robots_failure_is_not_cached() -> None:
     await failure(shared.fetch("https://jobs.example.com/b"))
 
     assert [request.url.path for request in seen].count("/robots.txt") == 2
+
+
+async def test_a_robots_connection_failure_is_site_unavailable() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    assert await failure(fetcher(refuse).fetch("https://jobs.example.com/")) is (
+        FetchFailure.SITE_UNAVAILABLE
+    )
+
+
+async def test_a_slow_robots_file_times_out() -> None:
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            await asyncio.sleep(2)
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=PAGE)
+
+    code = await failure(fetcher(handle, robots_timeout=0.2).fetch("https://jobs.example.com/"))
+
+    assert code is FetchFailure.FETCH_TIMEOUT
 
 
 async def test_a_redirect_to_another_host_checks_that_hosts_robots() -> None:

@@ -1,5 +1,6 @@
 import asyncio
 import codecs
+import http.cookiejar
 import ipaddress
 import socket
 import time
@@ -28,10 +29,20 @@ MAX_REDIRECTS = 3
 TEXT_TYPES = frozenset({"text/html", "text/plain"})
 _PORTS = {"http": 80, "https": 443}
 _TIMEOUT = httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=3.0)
-# IPv6 ranges that carry an IPv4 address inside them, so "global" does not mean reachable-safe.
-_EMBEDS_IPV4 = tuple(
+# IPv6 ranges "global" alone doesn't make reachable-safe: most carry an IPv4 address inside
+# them (translation/mapping schemes), and fec0::/10 is deprecated site-local space that
+# ipaddress does not classify as private.
+_UNSAFE_V6 = tuple(
     ipaddress.ip_network(network)
-    for network in ("::/96", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32")
+    for network in (
+        "::/96",
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+        "2002::/16",
+        "2001::/32",
+        "::ffff:0:0:0/96",
+        "fec0::/10",
+    )
 )
 _ALLOW_ALL: list[str] = []
 _DISALLOW_ALL = ["User-agent: *", "Disallow: /"]
@@ -70,6 +81,10 @@ def parse_public_url(raw: str) -> PublicUrl:
     raw = raw.strip()
     if not raw or len(raw) > MAX_URL_CHARS:
         raise FetchError(FetchFailure.INVALID_URL)
+    # Control characters (incl. space) can smuggle a header/line break past a lenient parser
+    # further down the line; JSON input can carry a literal "\u0000" straight into this string.
+    if any(ord(char) < 0x21 or ord(char) == 0x7F for char in raw):
+        raise FetchError(FetchFailure.INVALID_URL)
     try:
         parts = urlsplit(raw)
         port = parts.port
@@ -103,7 +118,7 @@ def is_public_address(address: str) -> bool:
     if isinstance(ip, ipaddress.IPv6Address):
         if ip.ipv4_mapped is not None:
             return is_public_address(str(ip.ipv4_mapped))
-        if any(ip in network for network in _EMBEDS_IPV4):
+        if any(ip in network for network in _UNSAFE_V6):
             return False
     return ip.is_global and not ip.is_multicast
 
@@ -238,11 +253,18 @@ class SafeFetcher:
 
     def build_client(self) -> httpx.AsyncClient:
         # trust_env=False: an HTTP(S)_PROXY variable would connect for us, around the pinned IP.
+        # cookies: a policy that allows no domain at all, so a Set-Cookie from robots.txt or a
+        # redirect hop can never be stored or sent back on a later, possibly different-host,
+        # request pinned to the same IP.
+        no_cookies = http.cookiejar.CookieJar(
+            policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[])
+        )
         return httpx.AsyncClient(
             transport=self._transport,
             trust_env=False,
             follow_redirects=False,
             timeout=_TIMEOUT,
+            cookies=no_cookies,
             headers={
                 "User-Agent": USER_AGENT,
                 "Accept": "text/html,text/plain;q=0.9",
@@ -296,7 +318,13 @@ class SafeFetcher:
             headers={"Host": url.netloc},
             extensions={"sni_hostname": url.host} if url.scheme == "https" else {},
         )
-        return await client.send(request, stream=True)
+        try:
+            # httpx pre-parses a redirect's Location into a next request to populate
+            # response.next_request, even though follow_redirects=False means it never
+            # sends it — so a malformed Location can raise here, before we ever read it.
+            return await client.send(request, stream=True)
+        except httpx.InvalidURL, httpx.RemoteProtocolError:
+            raise FetchError(FetchFailure.INVALID_URL) from None
 
     async def _robots_allow(self, client: httpx.AsyncClient, url: PublicUrl) -> bool:
         now = time.monotonic()
@@ -325,8 +353,12 @@ class SafeFetcher:
         except FetchError as exc:
             if exc.failure in (FetchFailure.BLOCKED_ADDRESS, FetchFailure.INVALID_URL):
                 raise
-        except TimeoutError, httpx.HTTPError:
-            pass
+        except TimeoutError, httpx.TimeoutException:
+            # A transport failure is a real, reportable reason, not a robots verdict — the
+            # page is still never fetched, but the caller learns why, not a made-up "disallow".
+            raise FetchError(FetchFailure.FETCH_TIMEOUT) from None
+        except httpx.HTTPError:
+            raise FetchError(FetchFailure.SITE_UNAVAILABLE) from None
         # RFC 9309: a server error or an unreachable robots.txt means disallow everything.
         # Not cached, so the next attempt asks again.
         return _rules(_DISALLOW_ALL), False
