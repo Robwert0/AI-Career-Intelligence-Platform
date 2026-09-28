@@ -33,7 +33,7 @@ _INTAKE_WORKER_CODES = [
     "unavailable",
     "job_in_progress",
 ]
-# The candidate-evidence side of the catalogue (slice 3): every failure code read_cv/read_github
+# The candidate-evidence side of the catalogue: every failure code read_cv/read_github
 # can raise, plus the cv-specific extraction codes not shared with job intake.
 _CANDIDATE_CODES = [
     *(failure.value for failure in DocumentFailure),

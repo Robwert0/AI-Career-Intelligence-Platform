@@ -19,7 +19,7 @@ class MalformedFormError(Exception):
 
 
 class _InMemoryParser(MultiPartParser):
-    # Starlette rolls file parts over 1 MiB into a temp file on disk; D6 forbids any disk.
+    # Starlette rolls file parts over 1 MiB into a temp file; a CV must never touch disk.
     # The body is capped far below this, so a file part never leaves memory.
     spool_max_size = 64 * 1024 * 1024
 

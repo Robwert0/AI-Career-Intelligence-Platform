@@ -240,7 +240,7 @@ async def submit_analysis(
     service: Annotated[MatchService, Depends(get_match_service)],
 ) -> AnalysisSubmitted | JSONResponse:
     # The body is read here, not by FastAPI, so auth and the rate limit run before any upload
-    # is buffered and the size cap applies while reading (§6.2).
+    # is buffered and the size cap applies while reading.
     analysis, cv = await analysis_form(request)
     try:
         analysis_id = await service.submit_analysis(

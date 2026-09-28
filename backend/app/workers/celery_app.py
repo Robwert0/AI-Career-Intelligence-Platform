@@ -31,6 +31,8 @@ def create_celery_app(broker_url: str) -> Celery:
         },
         # visibility_timeout: an unacked task is redelivered after this long. It must outlast
         # the longest task, or a slow analysis would be handed to the worker a second time.
+        # Settings refuses a JOB_TTL_SECONDS below the queued-plus-run worst case, and
+        # test_the_broker_never_redelivers_a_running_analysis pins it against the task limit.
         broker_transport_options={
             "socket_connect_timeout": 2,
             "socket_timeout": 2,

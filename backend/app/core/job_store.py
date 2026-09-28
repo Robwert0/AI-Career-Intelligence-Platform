@@ -266,7 +266,8 @@ class JobStore:
         extra: tuple[str, bytes, int] | None = None,
         extend: tuple[list[str], int] | None = None,
     ) -> JobRecord | None:
-        # WATCH makes the read-modify-write atomic now that the API writes too (resume).
+        # WATCH: the API writes records too (resume, discard), so a concurrent change must
+        # abort this write rather than be overwritten by it.
         if not _ID.fullmatch(job_id):
             return None
         key = self._key(job_id)

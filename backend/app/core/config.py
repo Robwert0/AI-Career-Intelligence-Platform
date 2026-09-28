@@ -8,7 +8,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
-# Stage bounds that are fixed in code, not settings; test_config pins each to its source.
+# Stage bounds that are fixed in code, not settings. test_config pins parse and GitHub to the
+# timeouts that enforce them; embedding and overhead are estimates nothing enforces, so the
+# budget below is a sizing check, not a guaranteed bound.
 PARSE_BUDGET_SECONDS = 30
 GITHUB_BUDGET_SECONDS = 20
 EMBED_BUDGET_SECONDS = 60

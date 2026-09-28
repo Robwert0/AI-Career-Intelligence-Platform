@@ -128,9 +128,6 @@ def detail_code(response: httpx.Response) -> str:
     return str(response.json()["detail"]["code"])
 
 
-# --- submit ---------------------------------------------------------------------------
-
-
 async def test_a_github_only_analysis_is_accepted_and_enqueued(env: Env) -> None:
     response = await env.submit(github_url="https://github.com/jane")
 
@@ -357,9 +354,6 @@ async def test_submitting_requires_authentication(env: Env) -> None:
     assert response.status_code == 401
 
 
-# --- poll -----------------------------------------------------------------------------
-
-
 async def test_a_queued_analysis_reports_its_queue_position(env: Env, redis_client: Redis) -> None:
     await redis_client.delete(QUEUE_KEY)
     other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
@@ -471,9 +465,6 @@ async def test_a_job_intake_id_is_not_an_analysis(env: Env) -> None:
     response = await env.client.get(f"/match/analyses/{record.id}", headers=env.headers)
 
     assert response.status_code == 404
-
-
-# --- continue / retry -----------------------------------------------------------------
 
 
 async def test_continue_requeues_a_paused_analysis(env: Env) -> None:

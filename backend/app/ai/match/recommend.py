@@ -17,9 +17,9 @@ _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
 
 def _choice(ids: tuple[str, ...]) -> Any:
-    # Validation stays a plain id, so a bad one is dropped by code; the enum only steers
-    # the model's grammar. A local model given a free string answers "0" for "req:required:0".
-    # An empty enum is not a valid grammar; with no ids the list itself is capped at 0.
+    # The enum only steers the model's grammar (given a free string, a local model answers "0"
+    # for "req:required:0"); validation stays a plain string, so code still drops a bad id.
+    # An empty enum is not a valid grammar, so with no ids the field is left open.
     extra: dict[str, JsonValue] | None = {"enum": list(ids)} if ids else None
     return (str, Field(max_length=120, json_schema_extra=extra))
 
@@ -190,7 +190,8 @@ def _rewrites(
         source = sources.get(item.evidence_id)
         after = item.after.strip()
         if source is not None:
-            # The model sometimes echoes the prompt's entry header; the reader never wrote it.
+            # The model sometimes echoes the prompt's entry header, "[id] label (kind)"; the
+            # reader never wrote it.
             after = after.removeprefix(f"[{source.id}]").strip()
             after = after.removeprefix(f"{source.section_label} ({source.kind})").strip()
         if source is None or item.evidence_id in kept or not after or after == source.text:
