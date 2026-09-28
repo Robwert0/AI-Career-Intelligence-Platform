@@ -167,6 +167,18 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "This analysis isn't waiting for a decision any more. Refresh to see where it is.",
         "retry",
     ),
+    "queue_full": (
+        "Too many analyses are waiting right now. Try again in a minute.",
+        "wait",
+    ),
+    "analysis_discarded": (
+        "You discarded this analysis. Start a new one when you're ready.",
+        "retry",
+    ),
+    "analysis_running": (
+        "This analysis is already running and can't be discarded. Wait for it to finish.",
+        "wait",
+    ),
     "analysis_not_found": (
         "We couldn't find that analysis. It may have expired; start a new one.",
         "retry",

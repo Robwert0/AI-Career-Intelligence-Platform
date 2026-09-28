@@ -231,6 +231,24 @@ class JobStore:
             extend=(extend, min_ttl_seconds) if min_ttl_seconds else None,
         )
 
+    async def discard(self, job_id: str, owner_id: str, *, now: float) -> JobRecord | None:
+        """queued or needs_decision -> failed(analysis_discarded); JobStateError otherwise."""
+
+        def change(record: JobRecord) -> JobRecord | None:
+            if record.owner_id != owner_id:
+                return None
+            if record.status not in (JobStatus.QUEUED, JobStatus.NEEDS_DECISION):
+                raise JobStateError(f"job {job_id} is {record.status}")
+            return record.model_copy(
+                update={
+                    "status": JobStatus.FAILED,
+                    "error_code": "analysis_discarded",
+                    "updated_at": now,
+                }
+            )
+
+        return await self._compare_and_set(job_id, change)
+
     async def _transition(self, job_id: str, now: float, **changes: Any) -> JobRecord | None:
         def change(record: JobRecord) -> JobRecord:
             if record.status in TERMINAL:

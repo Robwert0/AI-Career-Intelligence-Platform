@@ -75,6 +75,9 @@ _ANALYSIS_CODES = [
     "analysis_in_progress",
     "not_awaiting_decision",
     "analysis_not_found",
+    "queue_full",
+    "analysis_discarded",
+    "analysis_running",
 ]
 
 

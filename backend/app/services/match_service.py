@@ -22,6 +22,7 @@ ANALYSIS = "match_analysis"
 RUN_ANALYSIS = "jobs.run_analysis"
 CV_BLOB = {"file": "cv_file", "text": "cv_text"}
 RESUMED_BLOBS = ("analysis_input", "sources")
+DISCARDED_BLOBS = (*RESUMED_BLOBS, *CV_BLOB.values())
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,14 @@ class AnalysisInProgressError(Exception):
 
 class NotAwaitingDecisionError(Exception):
     """continue/retry on an analysis that is not paused."""
+
+
+class QueueFullError(Exception):
+    """Too many analyses are already waiting for the worker."""
+
+
+class AnalysisRunningError(Exception):
+    """A running analysis cannot be discarded: the worker is already spending on it."""
 
 
 class CvRequiredError(Exception):
@@ -168,6 +177,7 @@ class MatchService:
     ) -> str:
         if request.cv_provided != (cv is not None):
             raise ValueError("cv_provided must match the CV that was sent")
+        await self._ensure_queue_has_room(now)
         record = await self._store.create(ANALYSIS, owner_id, now=now)
         # The lock comes first, so a refused request never writes CV bytes to Redis.
         await self._claim_analysis(owner_id, record.id, now)
@@ -180,6 +190,37 @@ class MatchService:
             )
         await self._enqueue(owner_id, record.id, now)
         return record.id
+
+    async def _ensure_queue_has_room(self, now: float) -> None:
+        # The zset also holds analyses that started or finished since anyone polled them.
+        members = await self._registry.queued()
+        records = await self._store.load_many(members)
+        waiting = [
+            analysis_id
+            for analysis_id, record in zip(members, records, strict=True)
+            if record is not None and self._analysis_view(record, now).status is JobStatus.QUEUED
+        ]
+        gone = sorted(set(members) - set(waiting))
+        if gone:
+            await self._registry.forget(*gone)
+        if len(waiting) >= settings.match_max_queued_analyses:
+            raise QueueFullError
+
+    async def discard_analysis(self, owner_id: str, analysis_id: str, *, now: float) -> str | None:
+        """Start over: a queued or paused analysis is failed, its inputs and its lock released."""
+        record = await self._store.get(analysis_id, owner_id)
+        if record is None or record.kind != ANALYSIS:
+            return None
+        try:
+            discarded = await self._store.discard(analysis_id, owner_id, now=now)
+        except JobStateError:
+            discarded = None
+        if discarded is None:
+            raise AnalysisRunningError(analysis_id)
+        await self._store.delete_blobs(analysis_id, *DISCARDED_BLOBS)
+        await self._registry.forget(analysis_id)
+        await self._registry.release_lock(owner_id, analysis_id)
+        return analysis_id
 
     async def _queue_position(self, record: JobRecord, now: float) -> int | None:
         if record.status is not JobStatus.QUEUED:

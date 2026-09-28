@@ -26,11 +26,13 @@ from app.schemas.match import (
 from app.services.match_failures import describe_failure
 from app.services.match_service import (
     AnalysisInProgressError,
+    AnalysisRunningError,
     AnalysisView,
     CvRequiredError,
     JobInProgressError,
     MatchService,
     NotAwaitingDecisionError,
+    QueueFullError,
 )
 from app.workers.queue import QueueUnavailableError
 
@@ -45,6 +47,15 @@ def _unavailable() -> HTTPException:
         status.HTTP_503_SERVICE_UNAVAILABLE,
         {"code": failure.code, "message": failure.message},
         headers={"Retry-After": "30"},
+    )
+
+
+def _queue_full() -> HTTPException:
+    failure = describe_failure("queue_full")
+    return HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        {"code": failure.code, "message": failure.message},
+        headers={"Retry-After": "60"},
     )
 
 
@@ -216,6 +227,8 @@ async def submit_analysis(
         )
     except AnalysisInProgressError as exc:
         return _analysis_in_progress(exc.analysis_id)
+    except QueueFullError:
+        raise _queue_full() from None
     except QueueUnavailableError, RedisError:
         raise _unavailable() from None
     return AnalysisSubmitted(analysis_id=analysis_id)
@@ -290,3 +303,25 @@ async def retry_analysis(
     if resumed is None:
         raise rejected(status.HTTP_404_NOT_FOUND, "analysis_not_found")
     return AnalysisSubmitted(analysis_id=resumed)
+
+
+@router.post(
+    "/analyses/{analysis_id}/discard",
+    dependencies=[Depends(rate_limit(policies.MATCH_POLL_USER))],
+)
+async def discard_analysis(
+    analysis_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[MatchService, Depends(get_match_service)],
+) -> AnalysisSubmitted:
+    try:
+        discarded = await service.discard_analysis(
+            str(current_user.id), analysis_id, now=time.time()
+        )
+    except AnalysisRunningError:
+        raise rejected(status.HTTP_409_CONFLICT, "analysis_running") from None
+    except RedisError:
+        raise _unavailable() from None
+    if discarded is None:
+        raise rejected(status.HTTP_404_NOT_FOUND, "analysis_not_found")
+    return AnalysisSubmitted(analysis_id=discarded)

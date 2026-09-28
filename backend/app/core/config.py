@@ -55,7 +55,10 @@ class Settings(BaseSettings):
     github_token: SecretStr | None = None
     github_cache_ttl_seconds: int = Field(default=3600, ge=60)
     evidence_extract_generation_timeout_seconds: int = Field(default=150, ge=10)
-    match_cv_ttl_seconds: int = Field(default=900, ge=60)
+    # Longer than job_queue_stale_seconds: a CV must survive the longest wait in the queue.
+    match_cv_ttl_seconds: int = Field(default=1200, ge=60)
+    # Global cap on analyses waiting in the queue; past it a submission is 503 queue_full.
+    match_max_queued_analyses: int = Field(default=20, ge=1)
     match_preselect_top_k: int = Field(default=8, ge=1, le=20)
     # Measured per source by `scripts/eval_match.py calibrate`; repo text embeds further from a
     # posting than CV prose, so one shared number would refuse every GitHub-only analysis.
@@ -122,6 +125,11 @@ class Settings(BaseSettings):
             > self.job_ttl_seconds
         ):
             raise ValueError("job_ttl_seconds is too short for a queued analysis to finish")
+        if self.match_cv_ttl_seconds <= self.job_queue_stale_seconds:
+            raise ValueError(
+                "match_cv_ttl_seconds must exceed job_queue_stale_seconds, or a queued analysis "
+                "loses its CV before it runs"
+            )
         return self
 
     @field_validator("cors_allowed_origins", mode="before")

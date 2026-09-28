@@ -647,3 +647,75 @@ async def test_continue_on_someone_elses_analysis_is_404(env: Env) -> None:
     response = await env.client.post(f"/match/analyses/{analysis_id}/continue", headers=other)
 
     assert response.status_code == 404
+
+
+async def test_a_full_queue_refuses_a_new_analysis_with_queue_full(
+    env: Env, monkeypatch: pytest.MonkeyPatch, redis_client: Redis
+) -> None:
+    await redis_client.delete(QUEUE_KEY)
+    monkeypatch.setattr(settings, "match_max_queued_analyses", 1)
+    other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
+    await env.submit(headers=other, github_url="https://github.com/jane")
+
+    response = await env.submit(github_url="https://github.com/jane")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "queue_full"
+    assert response.headers["Retry-After"]
+    assert len(env.queue.enqueued) == 1
+    assert await env.registry.holder(await env.owner()) is None
+
+
+async def test_analyses_that_left_the_queue_do_not_count_towards_the_cap(
+    env: Env, monkeypatch: pytest.MonkeyPatch, redis_client: Redis
+) -> None:
+    await redis_client.delete(QUEUE_KEY)
+    monkeypatch.setattr(settings, "match_max_queued_analyses", 1)
+    other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
+    first = (await env.submit(headers=other, github_url="https://github.com/jane")).json()
+    await env.store.mark_running(first["analysis_id"], stage="assessing", now=time.time())
+
+    response = await env.submit(github_url="https://github.com/jane")
+
+    assert response.status_code == 202
+
+
+@pytest.mark.parametrize("state", ["paused", "queued"])
+async def test_discarding_an_analysis_frees_the_lock_and_its_inputs(
+    env: Env, redis_client: Redis, state: str
+) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    if state == "paused":
+        await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
+
+    response = await env.client.post(f"/match/analyses/{analysis_id}/discard", headers=env.headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"analysis_id": analysis_id}
+    body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
+    assert (body["status"], body["error"]["code"]) == ("failed", "analysis_discarded")
+    assert await redis_client.keys(f"job:{analysis_id}:blob:*") == []
+    assert (await env.submit(github_url="https://github.com/jane")).status_code == 202
+
+
+async def test_a_running_analysis_cannot_be_discarded(env: Env) -> None:
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    await env.store.mark_running(analysis_id, stage="assessing", now=time.time())
+
+    response = await env.client.post(f"/match/analyses/{analysis_id}/discard", headers=env.headers)
+
+    assert response.status_code == 409
+    assert detail_code(response) == "analysis_running"
+
+
+async def test_discarding_someone_elses_analysis_is_404(env: Env) -> None:
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
+
+    response = await env.client.post(f"/match/analyses/{analysis_id}/discard", headers=other)
+
+    assert response.status_code == 404
+    record = await env.store.load(analysis_id)
+    assert record is not None and record.status is JobStatus.QUEUED

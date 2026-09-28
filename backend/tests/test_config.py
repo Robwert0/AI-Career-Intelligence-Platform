@@ -306,7 +306,7 @@ def test_analysis_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = Settings(_env_file=None)
 
-    assert settings.match_cv_ttl_seconds == 900
+    assert settings.match_cv_ttl_seconds == 1200
     assert settings.match_preselect_top_k == 8
     assert settings.match_assess_generation_timeout_seconds == 60
     assert settings.match_recommend_generation_timeout_seconds == 90
@@ -387,3 +387,22 @@ def test_the_assess_call_cap_matches_the_budget() -> None:
     from app.ai.match.assess import MAX_ASSESS_BATCHES
 
     assert config.MAX_ASSESS_CALLS == MAX_ASSESS_BATCHES
+
+
+def test_a_cv_blob_outlives_the_longest_a_job_can_wait_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MATCH_CV_TTL_SECONDS", raising=False)
+    assert (
+        Settings(_env_file=None).match_cv_ttl_seconds
+        > Settings(_env_file=None).job_queue_stale_seconds
+    )
+
+    monkeypatch.setenv("MATCH_CV_TTL_SECONDS", "900")
+
+    with pytest.raises(ValidationError, match="match_cv_ttl_seconds"):
+        Settings(_env_file=None)
+
+
+def test_the_queued_analysis_cap_has_a_default() -> None:
+    assert Settings(_env_file=None).match_max_queued_analyses == 20

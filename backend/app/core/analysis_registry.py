@@ -73,6 +73,10 @@ class AnalysisRegistry:
         if analysis_ids:
             await self._redis.zrem(QUEUE_KEY, *analysis_ids)
 
+    async def queued(self) -> list[str]:
+        members = cast(list[bytes], await self._redis.zrange(QUEUE_KEY, 0, -1))
+        return [member.decode() for member in members]
+
     async def queued_before(self, analysis_id: str) -> list[str] | None:
         rank = cast(int | None, await self._redis.zrank(QUEUE_KEY, analysis_id))
         if rank is None:
