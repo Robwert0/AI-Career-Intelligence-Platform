@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -13,7 +14,7 @@ from app.ai.generation import (
 )
 from app.ai.match.prompts import JOB_EXTRACT_PROMPT, build_job_extract_messages, correction_message
 from app.ai.match.schemas import ExtractedJob, JobPosting
-from app.ai.output_guard import validate_output
+from app.ai.output_guard import Verdict, validate_output
 
 MAX_JOB_TEXT_CHARS = 30_000
 MAX_JOB_TEXT_BYTES = 60_000
@@ -47,14 +48,29 @@ async def _generate(generator: Generator, messages: list[Message]) -> Generation
         raise ExtractionError("internal_error") from None
 
 
-def _parse(result: GenerationResult) -> tuple[ExtractedJob | None, str]:
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return [text for item in value for text in _strings(item)]
+    return []
+
+
+def _checked(result: GenerationResult) -> Verdict:
     verdict = validate_output(result, protected_prompt=JOB_EXTRACT_PROMPT)
     if verdict.failed_check in _LEAK_CHECKS:
         raise ExtractionError("ai_invalid_output")
+    return verdict
+
+
+def _parse(result: GenerationResult) -> tuple[ExtractedJob | None, str]:
+    verdict = _checked(result)
     if not verdict.ok:
         return None, f"reply was {verdict.failed_check}"
     try:
-        return ExtractedJob.model_validate_json(result.text), ""
+        parsed = ExtractedJob.model_validate_json(result.text)
     except ValidationError as exc:
         # Paths and error types only: echoing the reply back would feed its content forward.
         problems = (
@@ -62,6 +78,9 @@ def _parse(result: GenerationResult) -> tuple[ExtractedJob | None, str]:
             for error in exc.errors()[:10]
         )
         return None, "; ".join(problems)
+    # The raw check sees JSON source; \u escapes and item boundaries hide what the user reads.
+    _checked(replace(result, text="\n".join(_strings(parsed.model_dump()))))
+    return parsed, ""
 
 
 def _cap(text: str) -> tuple[str, bool]:

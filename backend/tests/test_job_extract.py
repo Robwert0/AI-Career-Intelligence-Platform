@@ -207,3 +207,44 @@ async def test_a_cut_never_splits_a_multibyte_character() -> None:
     await extract_job(generator, "a" + "\u00e9" * MAX_JOB_TEXT_CHARS)
 
     assert "\ufffd" not in generator.calls[0][1].content
+
+
+def escaped(text: str, *, only: str | None = None) -> str:
+    return "".join(f"\\u{ord(char):04x}" if only is None or char in only else char for char in text)
+
+
+async def test_a_unicode_escaped_canary_is_caught_after_decoding_without_retry() -> None:
+    raw = reply(title="PLACEHOLDER").replace("PLACEHOLDER", escaped(CANARY))
+    generator = ScriptedGenerator([raw, reply()])
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_job(generator, POSTING)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
+
+
+async def test_a_unicode_escaped_run_of_the_rules_is_caught_after_decoding_without_retry() -> None:
+    leaked = "sensitive: true only when a requirement concerns age, gender, ethnicity, religion"
+    assert leaked in JOB_EXTRACT_PROMPT
+    raw = reply(responsibilities=["PLACEHOLDER"]).replace("PLACEHOLDER", escaped(leaked, only=" "))
+    generator = ScriptedGenerator([raw, reply()])
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_job(generator, POSTING)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
+
+
+async def test_a_rules_run_split_across_items_is_caught_after_decoding() -> None:
+    words = "sensitive: true only when a requirement concerns age, gender, ethnicity, religion"
+    chunks = words.split()
+    items = [" ".join(chunks[index : index + 4]) for index in range(0, len(chunks), 4)]
+    generator = ScriptedGenerator([reply(responsibilities=items), reply()])
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_job(generator, POSTING)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
