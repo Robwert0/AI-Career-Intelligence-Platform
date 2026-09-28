@@ -17,18 +17,20 @@ from app.integrations.github import GitHubProfile, GitHubRepo, GitHubSnapshot
 logger = logging.getLogger(__name__)
 
 # About 8k tokens at a conservative 3 characters per token: with the prompt and a 6k-token
-# reply it stays inside the 16k context window. Longer CVs are cut and the cut is reported.
+# reply, this fits the default 16k GENERATION_CONTEXT_TOKENS but not the 8192-token floor
+# Settings still allows — a deployment running at that floor needs a smaller cap or a bigger
+# window. Longer CVs are cut and the cut is reported.
 MAX_CV_PROMPT_CHARS = 24_000
-# Same 2x ratio as job_extract's own byte cap (30_000 chars / 60_000 bytes): characters alone
-# don't bound tokens, since a multibyte-heavy CV can pack several tokens into 4 bytes each.
+# Same 2x ratio as job_extract's own byte cap (30_000 chars / 60_000 bytes): a non-ASCII
+# character can take several bytes, so a character cap alone doesn't bound the payload size.
 MAX_CV_PROMPT_BYTES = 48_000
 MAX_CV_ITEMS = 40
 EVIDENCE_EXTRACT_SAMPLING = SamplingSettings(temperature=0.0, seed=0, max_output_tokens=6144)
 MIN_GROUNDED_SHARE = 0.7
 # Bag-of-words grounding alone accepts a fabrication that recombines real CV words into a new
-# claim (audit M1): every word of "principal engineer led team of 5 people for 2 months" can be
-# a real CV word without the CV ever saying that. Contiguous bigrams, built per sentence so a
-# splice can't bridge two unrelated ones, catch the seam the recombination leaves behind.
+# claim: every word of "principal engineer led team of 5 people for 2 months" can be a real CV
+# word without the CV ever saying that. Contiguous bigrams, built per sentence so a splice
+# can't bridge two unrelated ones, catch the seam the recombination leaves behind.
 MIN_GROUNDED_NGRAM_SHARE = 0.7
 EVIDENCE_TEXT_CHARS = 600
 

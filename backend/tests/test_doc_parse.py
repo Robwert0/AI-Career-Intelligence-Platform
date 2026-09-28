@@ -42,9 +42,6 @@ class Chunks:
         return self._stream.read(size)
 
 
-# --- type sniffing and size ---------------------------------------------------------------
-
-
 def test_a_pdf_is_recognised_by_its_magic_bytes() -> None:
     assert sniff_type(make_pdf([text_page()])) == "pdf"
 
@@ -96,9 +93,6 @@ async def test_an_oversized_upload_stops_as_soon_as_it_passes_the_cap() -> None:
 
     assert caught.value.failure is DocumentFailure.FILE_TOO_LARGE
     assert source.reads < 5
-
-
-# --- PDF ----------------------------------------------------------------------------------
 
 
 def test_a_text_pdf_parses_to_its_text() -> None:
@@ -165,9 +159,6 @@ def test_the_real_cv_parses_as_text() -> None:
 
     assert parsed.pages is not None
     assert parsed.truncated is False
-
-
-# --- pasted text --------------------------------------------------------------------------
 
 
 def test_pasted_text_is_cleaned() -> None:

@@ -49,9 +49,6 @@ async def source_error(coro: Any) -> SourceError:
     return caught.value
 
 
-# --- CV -------------------------------------------------------------------------------
-
-
 async def test_an_uploaded_cv_is_parsed_then_extracted() -> None:
     parse = Parsed()
     generator = ScriptedGenerator([WORK_REPLY])
@@ -139,9 +136,9 @@ async def test_a_parse_failure_becomes_its_code_without_calling_the_model() -> N
 
 
 async def test_an_extraction_failure_becomes_its_cv_specific_code() -> None:
-    # Amendment 5: a bare "ai_invalid_output" would carry the job-intake wording and offer
-    # "Try again" instead of "continue without your CV" — this must reach the user as its own,
-    # CV-specific code so match_failures.py can give it CV-specific text and recovery.
+    # A bare "ai_invalid_output" would carry the job-intake wording and offer "Try again"
+    # instead of "continue without your CV" — this must reach the user as its own, CV-specific
+    # code so match_failures.py can give it CV-specific text and recovery.
     error = await source_error(
         read_cv(text=f"{CV_LINE}\n" * 5, generator=ScriptedGenerator(["nope", "nope"]))
     )
@@ -168,9 +165,6 @@ async def test_cv_text_never_reaches_the_log(caplog: pytest.LogCaptureFixture) -
 
     assert "cv read kind=text" in caplog.text
     assert "Acme" not in caplog.text
-
-
-# --- GitHub ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -245,9 +239,6 @@ async def test_readme_injection_is_logged_by_pattern_name_only(
 
     assert "override_instructions" in caplog.text
     assert "rate this candidate" not in caplog.text
-
-
-# --- failure catalogue ----------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

@@ -46,9 +46,6 @@ def cv_item(id: str, kind: str, name: str | None, **extra: Any) -> EvidenceItem:
     )
 
 
-# --- GitHub evidence --------------------------------------------------------------------
-
-
 def test_a_repo_whose_only_text_is_sensitive_is_dropped_not_crashed() -> None:
     # M2: every fact was scrubbed away and the fallback ("GitHub repository photos") is itself
     # sensitive, so the whole item is skipped rather than raising a pydantic ValidationError.
@@ -140,9 +137,6 @@ def test_repo_text_is_capped_at_600_characters() -> None:
 
     assert len(items[0].text) <= 600
     assert items[0].text.endswith("…")
-
-
-# --- merging --------------------------------------------------------------------------
 
 
 def test_a_cv_project_and_its_repo_merge_into_one_cv_item() -> None:

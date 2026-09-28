@@ -64,9 +64,6 @@ def test_a_label_is_checked_whole() -> None:
     assert not mentions_sensitive("Experience · Acme")
 
 
-# --- H1: every §5.4 category, from the audit's own probe list ----------------------------
-
-
 @pytest.mark.parametrize(
     "sentence",
     [
@@ -89,13 +86,10 @@ def test_a_label_is_checked_whole() -> None:
         "Nationalitate: română",
     ],
 )
-def test_every_5_4_category_from_the_audit_probe_is_dropped(sentence: str) -> None:
+def test_every_protected_characteristic_category_is_dropped(sentence: str) -> None:
     scrubbed = scrub_evidence_text(f"Built Go payment services. {sentence}. Led a team of 4.")
 
     assert scrubbed == "Built Go payment services. Led a team of 4."
-
-
-# --- M3: the same regex must not delete legitimate skills evidence -----------------------
 
 
 @pytest.mark.parametrize(
@@ -114,11 +108,8 @@ def test_every_5_4_category_from_the_audit_probe_is_dropped(sentence: str) -> No
         "Gender classification model",
     ],
 )
-def test_the_wider_5_4_coverage_still_keeps_ordinary_text(text: str) -> None:
+def test_the_wider_protected_characteristic_coverage_still_keeps_ordinary_text(text: str) -> None:
     assert scrub_evidence_text(text) == text
-
-
-# --- M4: contact masking gaps -------------------------------------------------------------
 
 
 def test_an_obfuscated_email_is_masked() -> None:
@@ -151,9 +142,6 @@ def test_an_email_embedded_in_a_url_is_still_masked() -> None:
 
     assert EMAIL_PLACEHOLDER in scrubbed
     assert "jane@x.com" not in scrubbed
-
-
-# --- M6: invisible unicode, closing the last untrusted channel (github readme/bio) --------
 
 
 def test_invisible_unicode_is_stripped_from_github_text() -> None:

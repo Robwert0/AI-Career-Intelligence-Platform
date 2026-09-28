@@ -137,8 +137,6 @@ async def test_an_item_not_found_in_the_cv_is_dropped() -> None:
     assert evidence.dropped == 1
 
 
-# --- M1: grounding must reject a fabrication that recombines real cv words ----------------
-
 RECOMBINATION_CV = (
     "## Experience\n"
     "Intern at Google for 2 months, focused on internal tooling.\n"
@@ -269,9 +267,6 @@ async def test_a_cv_cut_never_splits_a_multibyte_character() -> None:
     await extract_cv_evidence(generator, "a" + "é" * MAX_CV_PROMPT_CHARS)
 
     assert "�" not in generator.calls[0][1].content
-
-
-# --- carried from slice 2's structured-output fixes: shared by every caller of structured.py --
 
 
 async def test_a_unicode_escaped_canary_is_caught_after_decoding_without_retry() -> None:

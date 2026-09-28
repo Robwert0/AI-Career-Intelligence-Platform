@@ -29,9 +29,9 @@ _CONTACT_LABEL = re.compile(
     r"^(?:address|adresa|tel|telefon|phone|mobile|email|e-mail|linkedin)\s*:?\s",
     re.IGNORECASE,
 )
-# Characteristics a match must never weigh (spec §5.4: age, gender, ethnicity, religion,
-# nationality, marital/family status, health, disability, work authorisation/visa/citizenship,
-# sexual orientation), plus identity numbers. A sentence that mentions one is dropped whole:
+# Characteristics a match must never weigh: age, gender, ethnicity, religion, nationality,
+# marital/family status, health, disability, work authorisation/visa/citizenship, sexual
+# orientation, plus identity numbers. A sentence that mentions one is dropped whole:
 # masking only the value would still leave "Nationality: ___". No bare term here is proven
 # collision-free: each was checked against realistic CV phrasing (a real auth library named
 # "Passport.js", "separated the monolith", WCAG/accessibility work, a "children's" product, a

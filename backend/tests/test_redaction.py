@@ -51,9 +51,6 @@ def test_every_number_in_the_text_is_redacted() -> None:
     assert redact_phone_numbers(text).count(PHONE_PLACEHOLDER) == 2
 
 
-# --- M4: an 8-digit number grouped by spaces (Nordics, Singapore, Hong Kong) is a phone -----
-
-
 @pytest.mark.parametrize("phone", ["12 34 56 78", "2345 6789"])
 def test_an_eight_digit_spaced_number_is_redacted(phone: str) -> None:
     text = f"Call {phone} for support"

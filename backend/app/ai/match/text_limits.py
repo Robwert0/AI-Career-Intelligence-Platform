@@ -7,8 +7,8 @@ SEGMENT_BOUNDARY = re.compile(r"(?<=[.!?;])\s+|\s+[·|•]\s+|\n+")
 
 
 def cap_text(text: str, *, max_chars: int, max_bytes: int) -> tuple[str, bool]:
-    """Bounds by characters first, then bytes: an emoji is 4 bytes and several tokens, so
-    characters alone don't bound tokens. Never splits a multibyte character mid-cut."""
+    """Bounds by characters first, then bytes: a non-ASCII character can take several bytes, so
+    a character cap alone doesn't bound the payload size. Never splits one mid-cut."""
     encoded = text[:max_chars].encode()
     capped = encoded[:max_bytes].decode(errors="ignore")
     return capped, len(capped) < len(text)

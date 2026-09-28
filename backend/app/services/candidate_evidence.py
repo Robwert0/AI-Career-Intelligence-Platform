@@ -21,7 +21,7 @@ from app.integrations.github import (
 logger = logging.getLogger(__name__)
 
 DocumentParser = Callable[[bytes], Awaitable[ParsedDocument]]
-# Amendment 5: a CV read shares ExtractionError with job intake, but "ai_invalid_output" and
+# A CV read shares ExtractionError with job intake, but "ai_invalid_output" and
 # "input_too_long" carry job-posting wording and a "Try again" recovery — wrong for a source the
 # user can simply continue without. Every other code (ai_unavailable, internal_error, not_a_cv)
 # already reads fine unprefixed and keeps its own catalogue entry.

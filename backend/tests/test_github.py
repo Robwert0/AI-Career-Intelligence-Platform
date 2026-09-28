@@ -100,9 +100,6 @@ async def failure_of(api: Api) -> GitHubError:
     return caught.value
 
 
-# --- profile URLs ---------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("raw", "username"),
     [
@@ -142,9 +139,6 @@ def test_anything_but_a_profile_url_is_invalid(raw: str) -> None:
         parse_github_profile_url(raw)
 
     assert caught.value.failure is GitHubFailure.INVALID_GITHUB_URL
-
-
-# --- a successful snapshot ------------------------------------------------------------
 
 
 async def test_a_profile_becomes_a_snapshot_of_its_repositories() -> None:
@@ -253,9 +247,6 @@ def test_the_client_ignores_proxy_environment_variables() -> None:
     assert GitHubClient().build_client().trust_env is False
 
 
-# --- failures -------------------------------------------------------------------------
-
-
 async def test_an_unknown_user_is_not_found() -> None:
     api = Api(routes={f"/users/{USER}": lambda _: httpx.Response(404, json={})})
 
@@ -346,9 +337,6 @@ async def test_a_slow_api_is_cut_off_at_the_total_timeout() -> None:
 
     assert caught.value.failure is GitHubFailure.GITHUB_UNAVAILABLE
     assert time.monotonic() - started < 2
-
-
-# --- caching --------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
