@@ -67,6 +67,8 @@ class AnalysisRegistry:
             pipe.zadd(QUEUE_KEY, {analysis_id: now})
             # Nothing lives longer than a record, so older members can only be leftovers.
             pipe.zremrangebyscore(QUEUE_KEY, "-inf", now - self._ttl)
+            # Every write renews it, so the index outlives its newest member by one record TTL.
+            pipe.expire(QUEUE_KEY, self._ttl)
             await pipe.execute()
 
     async def forget(self, *analysis_ids: str) -> None:

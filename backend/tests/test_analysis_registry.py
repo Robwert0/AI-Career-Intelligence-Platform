@@ -125,3 +125,14 @@ async def test_members_older_than_a_record_can_live_are_pruned(
 
     assert await redis_client.zscore(QUEUE_KEY, old) is None
     await registry.forget(new)
+
+
+async def test_the_queue_index_expires_when_nothing_is_queued_any_more(
+    registry: AnalysisRegistry, redis_client: Redis
+) -> None:
+    analysis = aid()
+    await registry.mark_queued(analysis, now=NOW)
+
+    assert 0 < await redis_client.ttl(QUEUE_KEY) <= TTL
+    await registry.forget(analysis)
+
