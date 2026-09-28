@@ -13,6 +13,18 @@ TERMINAL = frozenset({JobStatus.DONE, JobStatus.FAILED})
 _ID = re.compile(r"[A-Za-z0-9_-]{22}")
 _BLOB_NAME = re.compile(r"[a-z_]{1,32}")
 
+# The record and the slot are written together, so a slot never names a record that was
+# never created. ARGV[1] is the holder the caller saw finished ("" for none).
+_CREATE_EXCLUSIVE_LUA = """
+local holder = redis.call('GET', KEYS[1])
+if holder and holder ~= ARGV[1] then
+  return holder
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+redis.call('SET', KEYS[2], ARGV[4], 'EX', ARGV[5])
+return false
+"""
+
 
 class JobRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -36,6 +48,7 @@ class JobStore:
     def __init__(self, redis: Redis, *, ttl_seconds: int) -> None:
         self._redis = redis
         self._ttl = ttl_seconds
+        self._create_exclusive = redis.register_script(_CREATE_EXCLUSIVE_LUA)
 
     @staticmethod
     def _key(job_id: str) -> str:
@@ -45,8 +58,13 @@ class JobStore:
     def _blob_key(job_id: str, name: str) -> str:
         return f"job:{job_id}:blob:{name}"
 
-    async def create(self, kind: str, owner_id: str, *, now: float) -> JobRecord:
-        record = JobRecord(
+    @staticmethod
+    def _slot_key(kind: str, owner_id: str) -> str:
+        return f"job:active:{kind}:{owner_id}"
+
+    @staticmethod
+    def _new(kind: str, owner_id: str, now: float) -> JobRecord:
+        return JobRecord(
             id=secrets.token_urlsafe(16),
             kind=kind,
             owner_id=owner_id,
@@ -54,8 +72,36 @@ class JobStore:
             created_at=now,
             updated_at=now,
         )
+
+    async def create(self, kind: str, owner_id: str, *, now: float) -> JobRecord:
+        record = self._new(kind, owner_id, now)
         await self._redis.set(self._key(record.id), record.model_dump_json(), ex=self._ttl)
         return record
+
+    async def create_exclusive(
+        self,
+        kind: str,
+        owner_id: str,
+        *,
+        now: float,
+        replacing: str | None,
+        lock_ttl_seconds: int,
+    ) -> tuple[JobRecord | None, str | None]:
+        """Create the owner's one active job of this kind, or return the id holding the slot."""
+        record = self._new(kind, owner_id, now)
+        holder = await self._create_exclusive(
+            keys=[self._slot_key(kind, owner_id), self._key(record.id)],
+            args=[
+                replacing or "",
+                record.id,
+                min(lock_ttl_seconds, self._ttl),
+                record.model_dump_json(),
+                self._ttl,
+            ],
+        )
+        if holder is None:
+            return record, None
+        return None, holder.decode()
 
     async def load(self, job_id: str) -> JobRecord | None:
         if not _ID.fullmatch(job_id):

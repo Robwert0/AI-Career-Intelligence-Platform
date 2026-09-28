@@ -210,3 +210,53 @@ async def test_finished_jobs_are_never_rewritten_by_the_view(store: JobStore, ow
         effective_state(done, now=NOW + 99_999, running_limit_seconds=330, queued_limit_seconds=900)
         == done
     )
+
+
+async def test_an_exclusive_create_claims_a_free_slot_with_the_record(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    record, holder = await store.create_exclusive(
+        "ping", owner, now=NOW, replacing=None, lock_ttl_seconds=30
+    )
+
+    assert holder is None
+    assert record is not None
+    assert await store.get(record.id, owner) == record
+    assert await redis_client.get(f"job:active:ping:{owner}") == record.id.encode()
+    assert 0 < await redis_client.ttl(f"job:active:ping:{owner}") <= 30
+
+
+async def test_an_exclusive_create_reports_the_holder_and_writes_nothing(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    first, _ = await store.create_exclusive(
+        "ping", owner, now=NOW, replacing=None, lock_ttl_seconds=30
+    )
+    assert first is not None
+    before = set(await redis_client.keys("job:*"))
+
+    record, holder = await store.create_exclusive(
+        "ping", owner, now=NOW, replacing=None, lock_ttl_seconds=30
+    )
+
+    assert (record, holder) == (None, first.id)
+    assert set(await redis_client.keys("job:*")) == before
+
+
+async def test_replacing_succeeds_only_while_the_named_holder_still_holds(
+    store: JobStore, owner: str
+) -> None:
+    first, _ = await store.create_exclusive(
+        "ping", owner, now=NOW, replacing=None, lock_ttl_seconds=30
+    )
+    assert first is not None
+    second, _ = await store.create_exclusive(
+        "ping", owner, now=NOW, replacing=first.id, lock_ttl_seconds=30
+    )
+    assert second is not None
+
+    late, holder = await store.create_exclusive(
+        "ping", owner, now=NOW, replacing=first.id, lock_ttl_seconds=30
+    )
+
+    assert (late, holder) == (None, second.id)

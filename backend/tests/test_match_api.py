@@ -1,3 +1,4 @@
+import asyncio
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -14,8 +15,9 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
-from app.deps import get_job_store, get_limiter, get_task_queue
+from app.deps import get_current_user, get_job_store, get_limiter, get_task_queue
 from app.main import app
+from app.models import User
 
 PASSWORD = "supersecret1"
 TEXT = "Backend Engineer at Acme. We need Go, PostgreSQL and Redis experience. " * 3
@@ -303,3 +305,93 @@ async def test_a_job_of_another_kind_is_not_served_here(match_client: MatchFixtu
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "not_found"
+
+
+async def test_a_second_intake_while_one_is_active_is_409_with_the_running_job(
+    match_client: MatchFixture,
+) -> None:
+    client, queue, _, headers, _ = match_client
+    first = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()
+
+    response = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["detail"]["code"] == "job_in_progress"
+    assert body["detail"]["message"]
+    assert body["job_id"] == first["job_id"]
+    assert len(queue.enqueued) == 1
+
+
+async def test_another_users_active_intake_does_not_block_mine(match_client: MatchFixture) -> None:
+    client, _, _, headers, _ = match_client
+    await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+    other = await _login(client, "other@test.dev")
+
+    response = await client.post("/match/jobs", json={"text": TEXT}, headers=other)
+
+    assert response.status_code == 202
+
+
+@pytest.mark.parametrize("outcome", ["done", "failed"])
+async def test_a_finished_intake_frees_the_slot(match_client: MatchFixture, outcome: str) -> None:
+    client, queue, store, headers, _ = match_client
+    first = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()
+    if outcome == "done":
+        await store.mark_done(first["job_id"], result={}, now=time.time())
+    else:
+        await store.mark_failed(first["job_id"], error_code="expired", now=time.time())
+
+    response = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+
+    assert response.status_code == 202
+    assert response.json()["job_id"] != first["job_id"]
+    assert len(queue.enqueued) == 2
+
+
+async def test_a_stale_intake_frees_the_slot(match_client: MatchFixture) -> None:
+    client, _, store, headers, _ = match_client
+    first = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()
+    await store.mark_running(
+        first["job_id"],
+        stage="extracting",
+        now=time.time() - settings.job_hard_time_limit_seconds - 5,
+    )
+
+    response = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+
+    assert response.status_code == 202
+    third = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+    assert third.status_code == 409
+    assert third.json()["job_id"] == response.json()["job_id"]
+
+
+async def test_a_dead_queue_does_not_hold_the_slot(match_client: MatchFixture) -> None:
+    client, queue, _, headers, _ = match_client
+    queue.fail = True
+    await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+    queue.fail = False
+
+    response = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+
+    assert response.status_code == 202
+
+
+async def test_concurrent_intakes_create_exactly_one_job(
+    match_client: MatchFixture, db_session: AsyncSession
+) -> None:
+    client, queue, _, headers, _ = match_client
+    me = (await client.get("/users/me", headers=headers)).json()["id"]
+    user = await db_session.get(User, uuid.UUID(me))
+    # One shared test session can't serve concurrent auth lookups; the race is in Redis.
+    app.dependency_overrides[get_current_user] = lambda: user
+
+    responses = await asyncio.gather(
+        *(client.post("/match/jobs", json={"text": TEXT}, headers=headers) for _ in range(5))
+    )
+
+    statuses = sorted(response.status_code for response in responses)
+    assert statuses == [202, 409, 409, 409, 409]
+    [accepted] = [r.json()["job_id"] for r in responses if r.status_code == 202]
+    assert {r.json()["job_id"] for r in responses if r.status_code == 409} == {accepted}
+    assert queue.enqueued == [("jobs.extract_job", accepted)]

@@ -61,6 +61,10 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "retry",
     ),
     "timeout": ("This took too long and was stopped. Try again.", "retry"),
+    "job_in_progress": (
+        "You already have a job posting being read. Wait for it to finish, then try again.",
+        "wait",
+    ),
     "queue_unavailable": (
         "Background processing is unavailable right now. Try again in a few minutes.",
         "wait",
