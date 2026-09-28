@@ -187,3 +187,19 @@ async def test_two_invalid_replies_are_invalid_output() -> None:
         await recommend(ScriptedGenerator(["{", "{"]), "Backend Engineer", ASSESSMENT, EVIDENCE)
 
     assert caught.value.code == "ai_invalid_output"
+
+
+async def test_a_unicode_escaped_canary_in_advice_is_a_leak() -> None:
+    # Built as text: json.dumps would double the backslashes and hide the escape being tested.
+    escaped = "".join(f"\\u{ord(char):04x}" for char in CANARY)
+    leaked = reply(immediate=[advice("req:required:0", "PLACEHOLDER")]).replace(
+        "PLACEHOLDER", escaped
+    )
+    assert CANARY not in leaked
+    generator = ScriptedGenerator([leaked, reply()])
+
+    with pytest.raises(ExtractionError) as caught:
+        await recommend(generator, "Backend Engineer", ASSESSMENT, EVIDENCE)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1

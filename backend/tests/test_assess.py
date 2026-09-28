@@ -259,3 +259,19 @@ async def test_results_keep_requirement_order_across_batches() -> None:
 )
 def test_batches_are_about_four_and_never_more_than_eight(count: int, sizes: list[int]) -> None:
     assert [len(batch) for batch in batches([ref(i) for i in range(count)])] == sizes
+
+
+async def test_a_unicode_escaped_canary_in_a_rationale_is_a_leak() -> None:
+    # Built as text: json.dumps would double the backslashes and hide the escape being tested.
+    escaped = "".join(f"\\u{ord(char):04x}" for char in CANARY)
+    leaked = reply(entry("R1", "not_demonstrated", [], "PLACEHOLDER")).replace(
+        "PLACEHOLDER", escaped
+    )
+    assert CANARY not in leaked
+    generator = ScriptedGenerator([leaked, reply(entry("R1", "not_demonstrated", []))])
+
+    with pytest.raises(ExtractionError) as caught:
+        await assess(generator, [ref(0)], EVIDENCE, selection({"req:required:0": []}))
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
