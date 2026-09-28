@@ -115,7 +115,7 @@ class JobStore:
             return None
         return record
 
-    async def mark_running(self, job_id: str, *, stage: str, now: float) -> JobRecord | None:
+    async def mark_running(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
         return await self._transition(job_id, now, status=JobStatus.RUNNING, stage=stage)
 
     async def mark_done(

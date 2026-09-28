@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 from app.core.config import settings
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
+from app.integrations.safe_fetch import FetchResult
 from app.schemas.match import JobIntakeRequest
 from app.workers import tasks
 from app.workers.celery_app import celery_app
@@ -409,3 +410,48 @@ def test_an_intake_job_without_its_input_fails_as_input_expired() -> None:
 
 def test_the_extract_task_is_registered() -> None:
     assert "jobs.extract_job" in celery_app.tasks
+
+
+_STAGES: list[str | None] = []
+
+
+class _StageRecordingStore(JobStore):
+    async def mark_running(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
+        _STAGES.append(stage)
+        return await super().mark_running(job_id, stage=stage, now=now)
+
+
+class _PlainTextFetcher:
+    async def fetch(self, raw_url: str) -> FetchResult:
+        return FetchResult(
+            url=raw_url,
+            content_type="text/plain",
+            text="We build payment systems in Go and PostgreSQL. " * 20,
+        )
+
+
+@pytest.mark.parametrize(
+    ("intake", "first_stage"),
+    [
+        (JobIntakeRequest(text="We build payment systems in Go. " * 5), "extracting"),
+        (JobIntakeRequest(url="https://jobs.example.com/1"), "reading"),
+    ],
+)
+def test_an_intake_starts_at_the_stage_its_input_kind_needs(
+    monkeypatch: pytest.MonkeyPatch, intake: JobIntakeRequest, first_stage: str
+) -> None:
+    _STAGES.clear()
+    monkeypatch.setattr(tasks, "JobStore", _StageRecordingStore)
+    monkeypatch.setattr(tasks, "SafeFetcher", _PlainTextFetcher)
+    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    job_id = _create_intake_job(intake)
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    shown = [stage for stage in _STAGES if stage is not None]
+    assert shown[0] == first_stage
+    assert shown[-1] == "extracting"
+    if intake.text is not None:
+        assert "reading" not in shown
+    done = _load(job_id)
+    assert done is not None and done.status is JobStatus.DONE

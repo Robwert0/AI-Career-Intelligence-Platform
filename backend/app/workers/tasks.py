@@ -65,7 +65,9 @@ async def _run_handler(
     return "done", None, None
 
 
-async def execute_job(store: JobStore, job_id: str, handler: JobHandler, *, stage: str) -> None:
+async def execute_job(
+    store: JobStore, job_id: str, handler: JobHandler, *, stage: str | None
+) -> None:
     record = await store.load(job_id)
     if record is None:
         logger.info("job skipped job_id=%s reason=expired", job_id)
@@ -119,7 +121,7 @@ async def _with_store(work: Callable[[JobStore], Awaitable[None]]) -> None:
         await redis.aclose()
 
 
-def run_job(job_id: str, handler: JobHandler, *, stage: str) -> None:
+def run_job(job_id: str, handler: JobHandler, *, stage: str | None) -> None:
     timed_out = False
     try:
         asyncio.run(_with_store(lambda store: execute_job(store, job_id, handler, stage=stage)))
@@ -145,9 +147,16 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
     if raw is None:
         raise JobError("input_expired")
     intake = JobIntakeRequest.model_validate_json(raw)
+    shown: str | None = None
 
     async def on_stage(stage: str) -> None:
-        await store.mark_running(record.id, stage=stage, now=time.time())
+        nonlocal shown
+        if stage != shown:
+            await store.mark_running(record.id, stage=stage, now=time.time())
+            shown = stage
+
+    # Pasted text has nothing to read, so it must never be shown as "reading".
+    await on_stage("reading" if intake.url is not None else "extracting")
 
     generator = OllamaGenerator(timeout_seconds=settings.job_extract_generation_timeout_seconds)
     try:
@@ -162,4 +171,5 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
 
 @celery_app.task(name="jobs.extract_job")
 def extract_job_task(job_id: str) -> None:
-    run_job(job_id, _extract_job, stage="reading")
+    # The stage depends on the input kind, which only the handler learns from the blob.
+    run_job(job_id, _extract_job, stage=None)
