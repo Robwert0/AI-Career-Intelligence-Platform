@@ -1,6 +1,6 @@
 import pytest
 
-from app.integrations.errors import FetchFailure
+from app.integrations.errors import DocumentFailure, FetchFailure, GitHubFailure
 from app.services.match_failures import _FAILURES, describe_failure
 
 
@@ -25,10 +25,18 @@ _INTAKE_WORKER_CODES = [
     "unavailable",
     "job_in_progress",
 ]
+# The candidate-evidence side of the catalogue (slice 3): every failure code read_cv/read_github
+# can raise, plus the cv-specific extraction codes not shared with job intake.
+_CANDIDATE_CODES = [
+    *(failure.value for failure in DocumentFailure),
+    *(failure.value for failure in GitHubFailure),
+    "not_a_cv",
+]
 
 
 @pytest.mark.parametrize(
-    "code", [*(failure.value for failure in FetchFailure), *_INTAKE_WORKER_CODES]
+    "code",
+    [*(failure.value for failure in FetchFailure), *_INTAKE_WORKER_CODES, *_CANDIDATE_CODES],
 )
 def test_every_intake_code_has_its_own_catalogue_entry(code: str) -> None:
     assert code in _FAILURES
