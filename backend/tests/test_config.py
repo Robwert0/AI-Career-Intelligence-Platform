@@ -233,3 +233,56 @@ def test_two_extraction_attempts_must_fit_inside_the_soft_time_limit(
 
     with pytest.raises(ValidationError, match="soft time limit"):
         Settings()
+
+
+def test_candidate_evidence_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "MAX_UPLOAD_MB",
+        "GITHUB_TOKEN",
+        "GITHUB_CACHE_TTL_SECONDS",
+        "EVIDENCE_EXTRACT_GENERATION_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.max_upload_mb == 5
+    assert settings.max_upload_bytes == 5 * 1024 * 1024
+    assert settings.github_token is None
+    assert settings.github_cache_ttl_seconds == 3600
+    assert settings.evidence_extract_generation_timeout_seconds == 150
+
+
+def test_max_upload_mb_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_UPLOAD_MB", "3")
+
+    assert Settings().max_upload_bytes == 3 * 1024 * 1024
+
+
+@pytest.mark.parametrize("value", ["0", "21"])
+def test_an_upload_limit_outside_1_to_20_mb_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("MAX_UPLOAD_MB", value)
+
+    with pytest.raises(ValidationError, match="max_upload_mb"):
+        Settings()
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_a_blank_github_token_means_no_token(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", value)
+
+    assert Settings().github_token is None
+
+
+def test_the_github_token_never_appears_in_the_settings_repr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_not_a_real_token_value")
+
+    settings = Settings()
+
+    assert settings.github_token is not None
+    assert settings.github_token.get_secret_value() == "ghp_not_a_real_token_value"
+    assert "ghp_not_a_real_token_value" not in repr(settings)

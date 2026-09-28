@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -41,6 +41,20 @@ class Settings(BaseSettings):
     generation_context_tokens: int = Field(default=16384, ge=8192)
     job_extract_generation_timeout_seconds: int = Field(default=120, ge=10)
     job_queue_stale_seconds: int = Field(default=900, ge=60)
+    max_upload_mb: int = Field(default=5, ge=1, le=20)
+    github_token: SecretStr | None = None
+    github_cache_ttl_seconds: int = Field(default=3600, ge=60)
+    evidence_extract_generation_timeout_seconds: int = Field(default=150, ge=10)
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return self.max_upload_mb * 1024 * 1024
+
+    @field_validator("github_token", mode="before")
+    @classmethod
+    def _blank_token_is_none(cls, value: object) -> object:
+        # GITHUB_TOKEN= in .env must mean "no token", not a Bearer header with an empty secret.
+        return None if isinstance(value, str) and not value.strip() else value
 
     @property
     def job_hard_time_limit_seconds(self) -> int:
