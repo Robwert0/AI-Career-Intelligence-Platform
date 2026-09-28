@@ -19,8 +19,18 @@ router = APIRouter()
 
 
 def _unavailable() -> HTTPException:
+    failure = describe_failure("unavailable")
     return HTTPException(
-        status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable", headers={"Retry-After": "30"}
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        {"code": failure.code, "message": failure.message},
+        headers={"Retry-After": "30"},
+    )
+
+
+def _not_found() -> HTTPException:
+    failure = describe_failure("not_found")
+    return HTTPException(
+        status.HTTP_404_NOT_FOUND, {"code": failure.code, "message": failure.message}
     )
 
 
@@ -62,7 +72,13 @@ async def submit_job(
     return JobSubmitted(job_id=job_id)
 
 
-@router.get("/jobs/{job_id}")
+@router.get(
+    "/jobs/{job_id}",
+    dependencies=[
+        Depends(rate_limit(policies.MATCH_POLL_IP)),
+        Depends(rate_limit(policies.MATCH_POLL_USER)),
+    ],
+)
 async def get_job(
     job_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -73,5 +89,5 @@ async def get_job(
     except RedisError:
         raise _unavailable() from None
     if record is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        raise _not_found()
     return _to_response(record)

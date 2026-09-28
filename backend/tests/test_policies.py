@@ -69,3 +69,12 @@ def test_job_intake_is_limited_to_twenty_an_hour_per_user() -> None:
     assert policies.MATCH_JOB_USER.capacity == 20
     assert policies.MATCH_JOB_USER.refill_per_second == pytest.approx(20 / 3600)
     assert policies.MATCH_JOB_USER.scope is Scope.USER
+
+
+def test_job_polling_matches_the_users_me_budget() -> None:
+    assert policies.MATCH_POLL_IP.capacity == 120
+    assert policies.MATCH_POLL_IP.refill_per_second == pytest.approx(2.0)
+    assert policies.MATCH_POLL_IP.scope is Scope.IP
+    assert policies.MATCH_POLL_USER.capacity == 60
+    assert policies.MATCH_POLL_USER.refill_per_second == pytest.approx(1.0)
+    assert policies.MATCH_POLL_USER.scope is Scope.USER

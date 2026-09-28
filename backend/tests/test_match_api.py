@@ -1,4 +1,5 @@
 import time
+import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -6,11 +7,12 @@ import pytest
 import pytest_asyncio
 from fakes import AllowAllLimiter, FakeTaskQueue
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.db import get_db
-from app.core.job_store import JobStatus, JobStore
+from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.deps import get_job_store, get_limiter, get_task_queue
 from app.main import app
@@ -91,6 +93,24 @@ async def test_intake_is_rate_limited_per_user(match_client: MatchFixture) -> No
     assert [name for name, _ in limiter.calls] == ["match_job_user"]
 
 
+async def test_polling_fires_both_an_ip_policy_and_a_user_policy(
+    match_client: MatchFixture,
+) -> None:
+    client, _, _, headers, limiter = match_client
+    job_id = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()[
+        "job_id"
+    ]
+    limiter.calls.clear()
+
+    response = await client.get(f"/match/jobs/{job_id}", headers=headers)
+
+    assert response.status_code == 200
+    fired = dict(limiter.calls)
+    assert set(fired) == {"match_poll_ip", "match_poll_user"}
+    assert fired["match_poll_ip"].count(".") == 3
+    assert uuid.UUID(fired["match_poll_user"])
+
+
 @pytest.mark.parametrize(
     "payload",
     [{}, {"url": "https://a.example/", "text": TEXT}, {"text": "short"}, {"link": "x"}],
@@ -139,10 +159,28 @@ async def test_a_dead_queue_is_503_and_the_job_is_recorded_as_failed(
     response = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
 
     assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert response.headers["Retry-After"] == "30"
     [(_, job_id)] = queue.attempted
     record = await store.load(job_id)
     assert record is not None
     assert (record.status, record.error_code) == (JobStatus.FAILED, "queue_unavailable")
+
+
+async def test_a_broken_store_polls_as_503_unavailable(match_client: MatchFixture) -> None:
+    client, _, _, headers, _ = match_client
+
+    class _BrokenStore:
+        async def get(self, job_id: str, owner_id: str) -> JobRecord | None:
+            raise RedisError("redis is down")
+
+    app.dependency_overrides[get_job_store] = lambda: _BrokenStore()
+
+    response = await client.get(f"/match/jobs/{'A' * 22}", headers=headers)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert response.headers["Retry-After"] == "30"
 
 
 async def test_polling_a_queued_job(match_client: MatchFixture) -> None:
@@ -230,13 +268,28 @@ async def test_someone_elses_job_is_404(match_client: MatchFixture) -> None:
     response = await client.get(f"/match/jobs/{job_id}", headers=other)
 
     assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "not_found"
 
 
-@pytest.mark.parametrize("job_id", ["nope", "A" * 22, "..%2F..%2Fetc"])
+@pytest.mark.parametrize("job_id", ["nope", "A" * 22])
 async def test_unknown_or_malformed_ids_are_404(match_client: MatchFixture, job_id: str) -> None:
     client, _, _, headers, _ = match_client
 
     response = await client.get(f"/match/jobs/{job_id}", headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "not_found"
+
+
+async def test_an_encoded_slash_in_the_id_never_reaches_the_route(
+    match_client: MatchFixture,
+) -> None:
+    # An encoded slash keeps the path from matching {job_id} at all, so Starlette's own
+    # routing 404 fires (plain-string body) before our handler, auth, or rate limit ever run —
+    # the same kind of framework-owned exception the contract carves out for 422s.
+    client, _, _, headers, _ = match_client
+
+    response = await client.get("/match/jobs/..%2F..%2Fetc", headers=headers)
 
     assert response.status_code == 404
 
@@ -249,3 +302,4 @@ async def test_a_job_of_another_kind_is_not_served_here(match_client: MatchFixtu
     response = await client.get(f"/match/jobs/{record.id}", headers=headers)
 
     assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "not_found"

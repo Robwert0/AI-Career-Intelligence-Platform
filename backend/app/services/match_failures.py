@@ -63,6 +63,8 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
     ),
     "worker_lost": ("Processing was interrupted. Try again.", "retry"),
     "input_expired": ("This request expired before it was processed. Submit it again.", "retry"),
+    "not_found": ("We couldn't find that job. It may have expired or already finished.", "retry"),
+    "unavailable": ("This service is temporarily unavailable. Try again in a few minutes.", "wait"),
 }
 _FALLBACK: tuple[str, Recovery] = ("Something went wrong on our side. Try again.", "retry")
 

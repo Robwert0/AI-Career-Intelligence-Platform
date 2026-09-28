@@ -71,10 +71,7 @@ async def test_logout_is_limited_per_ip(limited_client: httpx.AsyncClient) -> No
 
 def test_every_route_that_does_work_carries_a_rate_limit() -> None:
     # A route can only ship unlimited by being added here, in a reviewable diff.
-    # GET /match/jobs/{job_id}: an owner-scoped read (404 for anyone else) that the client polls
-    # every ~1.5s while a job runs; the design doc (§3, §6.6) plans only the two submit-side
-    # policies (MATCH_JOB_USER, MATCH_ANALYSIS_USER), not a poll limit.
-    exempt = {("GET", "/health"), ("GET", "/match/jobs/{job_id}")}
+    exempt = {("GET", "/health")}
     unlimited = []
     for included in app.routes:
         router = getattr(included, "original_router", None)
