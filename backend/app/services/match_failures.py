@@ -110,7 +110,7 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
     ),
     "not_a_cv": (
         "That document doesn't look like a CV. Check the file, or paste your CV text instead.",
-        "choose_file",
+        "paste_cv",
     ),
     "invalid_github_url": (
         "Enter a GitHub profile link like https://github.com/your-name.",
@@ -128,6 +128,14 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
     "github_unavailable": (
         "We couldn't reach GitHub. Try again, or continue without GitHub.",
         "retry_or_continue",
+    ),
+    "cv_ai_invalid_output": (
+        "We couldn't read your CV reliably. Try again, or continue without your CV.",
+        "retry_or_continue",
+    ),
+    "cv_input_too_long": (
+        "Your CV is too long to analyse in full. Paste the most relevant part instead.",
+        "paste_cv",
     ),
 }
 _FALLBACK: tuple[str, Recovery] = _FAILURES["internal_error"]

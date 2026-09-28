@@ -11,6 +11,14 @@ def test_an_overlong_posting_asks_for_a_shorter_paste() -> None:
     assert "too long" in failure.message
 
 
+def test_not_a_cv_recovers_by_pasting_the_cv_text() -> None:
+    # Amendment 5 / Amendment 1: the backend previously offered choose_file, but pasting is the
+    # only recovery that never asks the user to re-upload the same rejected file.
+    failure = describe_failure("not_a_cv")
+
+    assert failure.recovery == "paste_cv"
+
+
 _INTAKE_WORKER_CODES = [
     "input_expired",
     "worker_lost",
@@ -31,6 +39,8 @@ _CANDIDATE_CODES = [
     *(failure.value for failure in DocumentFailure),
     *(failure.value for failure in GitHubFailure),
     "not_a_cv",
+    "cv_ai_invalid_output",
+    "cv_input_too_long",
 ]
 
 

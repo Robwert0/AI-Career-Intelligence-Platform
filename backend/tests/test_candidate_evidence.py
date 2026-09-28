@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from documents import CV_LINE, cv_docx, make_pdf, text_page
-from fakes import ScriptedGenerator
+from fakes import OverflowingGenerator, ScriptedGenerator
 from redis.asyncio import Redis
 
 from app.core.config import settings
@@ -106,12 +106,21 @@ async def test_a_parse_failure_becomes_its_code_without_calling_the_model() -> N
     assert generator.calls == []
 
 
-async def test_an_extraction_failure_becomes_its_code() -> None:
+async def test_an_extraction_failure_becomes_its_cv_specific_code() -> None:
+    # Amendment 5: a bare "ai_invalid_output" would carry the job-intake wording and offer
+    # "Try again" instead of "continue without your CV" — this must reach the user as its own,
+    # CV-specific code so match_failures.py can give it CV-specific text and recovery.
     error = await source_error(
         read_cv(text=f"{CV_LINE}\n" * 5, generator=ScriptedGenerator(["nope", "nope"]))
     )
 
-    assert error.code == "ai_invalid_output"
+    assert error.code == "cv_ai_invalid_output"
+
+
+async def test_a_context_overflow_becomes_its_cv_specific_code() -> None:
+    error = await source_error(read_cv(text=f"{CV_LINE}\n" * 5, generator=OverflowingGenerator()))
+
+    assert error.code == "cv_input_too_long"
 
 
 async def test_exactly_one_cv_source_is_required() -> None:
