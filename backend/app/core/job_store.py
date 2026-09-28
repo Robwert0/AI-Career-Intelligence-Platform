@@ -15,6 +15,15 @@ TERMINAL = frozenset({JobStatus.DONE, JobStatus.FAILED})
 _ID = re.compile(r"[A-Za-z0-9_-]{22}")
 _BLOB_NAME = re.compile(r"[a-z_]{1,32}")
 _WRITE_ATTEMPTS = 3
+# One script, so the blob gets the record's exact expiry: time is frozen while it runs.
+_ATTACH_LUA = """
+local remaining = redis.call('PTTL', KEYS[1])
+if remaining <= 0 then
+  return 0
+end
+redis.call('SET', KEYS[2], ARGV[1], 'PX', remaining)
+return 1
+"""
 
 # The record and the slot are written together, so a slot never names a record that was
 # never created. ARGV[1] is the holder the caller saw finished ("" for none).
@@ -55,6 +64,7 @@ class JobStore:
         self._redis = redis
         self._ttl = ttl_seconds
         self._create_exclusive = redis.register_script(_CREATE_EXCLUSIVE_LUA)
+        self._attach = redis.register_script(_ATTACH_LUA)
 
     @staticmethod
     def _key(job_id: str) -> str:
@@ -234,11 +244,10 @@ class JobStore:
         """Stores a blob that expires with its record, never later."""
         if not self._valid_blob(job_id, name):
             raise ValueError("invalid job id or blob name")
-        remaining_ms = await self._redis.pttl(self._key(job_id))
-        if remaining_ms <= 0:
-            return False
-        await self._redis.set(self._blob_key(job_id, name), data, px=remaining_ms)
-        return True
+        attached = await self._attach(
+            keys=[self._key(job_id), self._blob_key(job_id, name)], args=[data]
+        )
+        return bool(attached)
 
     async def read_blob(self, job_id: str, name: str) -> bytes | None:
         if not self._valid_blob(job_id, name):

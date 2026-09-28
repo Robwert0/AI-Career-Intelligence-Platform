@@ -370,6 +370,20 @@ async def test_a_blob_attached_to_a_record_expires_with_it(
     assert 0 < blob_ttl <= record_ttl
 
 
+async def test_an_attached_blob_never_outlives_its_record(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    for _ in range(20):
+        record = await store.create("match_analysis", owner, now=NOW)
+        await asyncio.sleep(0.002)
+
+        await store.attach_blob(record.id, "sources", b"{}")
+
+        record_expiry = await redis_client.pexpiretime(f"job:{record.id}")
+        blob_expiry = await redis_client.pexpiretime(f"job:{record.id}:blob:sources")
+        assert 0 < blob_expiry <= record_expiry
+
+
 async def test_no_blob_is_attached_to_an_expired_record(
     store: JobStore, redis_client: Redis
 ) -> None:
