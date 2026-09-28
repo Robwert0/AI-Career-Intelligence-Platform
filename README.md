@@ -34,6 +34,8 @@ scalable and explainable** before it counts as done.
 **Security and operations**
 - Redis token-bucket rate limiting per IP and per user (e.g. chat: 20 req/min per user), fail-closed
 - Structured backend logging with noisy third-party loggers kept quiet
+- Background jobs run on a Celery worker; job records live in Redis with a 1-hour TTL and Redis
+  persistence is off, so job data is never written to disk
 - CI on every PR: ruff, mypy, pytest against real Postgres + pgvector, model/migration parity
   check, and frontend lint, format, tests and build
 - Backend dependencies are installed from `uv.lock`, so CI tests exactly what runs locally
@@ -47,7 +49,7 @@ scalable and explainable** before it counts as done.
 | 3 | Frontend: portfolio, auth UI, chat UI | ✅ Done |
 | 4 | RAG: ingestion, embeddings, hybrid retrieval, chat endpoint | ✅ Done |
 | 5 | CV upload endpoint (S3) | ⏳ Planned |
-| 6 | Async jobs (Celery workers) | ⏳ Planned |
+| 6 | Async jobs (Celery workers) | 🟡 Partial: worker, Redis job store and CI smoke test done; first real jobs arrive with the Job Match Analyzer |
 | 7 | AI analysis: CV feedback, ATS scoring | ⏳ Planned |
 | 8 | Job matching: CV vs job description | ⏳ Planned |
 | 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Planned |
@@ -99,6 +101,7 @@ uv sync --extra dev
 uv run alembic upgrade head
 uv run python scripts/ingest_cv.py path/to/cv.pdf   # load a CV into the chunks table
 uv run uvicorn app.main:app --reload
+uv run celery -A app.workers.celery_app worker --loglevel=info   # background jobs (separate terminal)
 
 cd ../frontend
 npm ci

@@ -106,6 +106,19 @@ jobs:
           alembic upgrade head
           alembic check
 
+      # Proves the worker boots, reaches the broker and completes a job; pytest runs task code
+      # in-process and cannot catch a broken worker entrypoint or broker URL.
+      - name: Worker smoke test
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/postgres
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/1
+          SECRET_KEY: ci-secret-not-real-000000000000000000
+          CV_DOCUMENT_ID: 44444444-4444-4444-4444-444444444444
+        run: |
+          celery -A app.workers.celery_app worker --loglevel=warning &
+          python scripts/worker_smoke.py --timeout 60
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
