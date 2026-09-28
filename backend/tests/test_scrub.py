@@ -62,3 +62,52 @@ def test_text_that_is_only_sensitive_becomes_empty() -> None:
 def test_a_label_is_checked_whole() -> None:
     assert mentions_sensitive("Personal details · Nationality")
     assert not mentions_sensitive("Experience · Acme")
+
+
+# --- H1: every §5.4 category, from the audit's own probe list ----------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Age 34, based in Oslo",
+        "Born 1990",
+        "34 y/o engineer",
+        "Place of birth: Cluj",
+        "Ethnicity: Roma",
+        "Race: Black",
+        "Visa status: H-1B",
+        "Work permit required",
+        "Health: diabetic",
+        "Two children",
+        "Father of two",
+        "Wife and kids",
+        "Sexual orientation: gay",
+        "Transgender advocate",
+        "Muslim, practising",
+        "Mother tongue: Hungarian",
+        "Nationalitate: română",
+    ],
+)
+def test_every_5_4_category_from_the_audit_probe_is_dropped(sentence: str) -> None:
+    scrubbed = scrub_evidence_text(f"Built Go payment services. {sentence}. Led a team of 4.")
+
+    assert scrubbed == "Built Go payment services. Led a team of 4."
+
+
+# --- M3: the same regex must not delete legitimate skills evidence -----------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Photoshop and Illustrator expert",
+        "Disabled legacy endpoints to cut cost",
+        "Built a healthcare API used by 3 million patients",
+        "Race condition in the scheduler was diagnosed and fixed",
+        "Integrated Visa and Mastercard payment APIs",
+        "Embraced test-driven development for the whole team",
+    ],
+)
+def test_the_wider_5_4_coverage_still_keeps_ordinary_text(text: str) -> None:
+    assert scrub_evidence_text(text) == text
