@@ -1,0 +1,168 @@
+import uuid
+from collections.abc import AsyncGenerator
+
+import pytest
+import pytest_asyncio
+from redis.asyncio import Redis
+
+from app.core.job_store import JobStateError, JobStatus, JobStore
+from app.core.redis import create_redis
+
+NOW = 1_000_000.0
+TTL = 600
+
+
+@pytest_asyncio.fixture
+async def redis_client() -> AsyncGenerator[Redis]:
+    client = create_redis()
+    yield client
+    await client.aclose()
+
+
+@pytest.fixture
+def store(redis_client: Redis) -> JobStore:
+    return JobStore(redis_client, ttl_seconds=TTL)
+
+
+@pytest.fixture
+def owner() -> str:
+    return uuid.uuid4().hex
+
+
+async def test_create_stores_a_queued_record_with_the_ttl(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    record = await store.create("ping", owner, now=NOW)
+
+    assert record.status is JobStatus.QUEUED
+    assert (record.kind, record.owner_id) == ("ping", owner)
+    assert (record.created_at, record.updated_at) == (NOW, NOW)
+    assert 0 < await redis_client.ttl(f"job:{record.id}") <= TTL
+
+
+async def test_ids_are_unguessable_and_unique(store: JobStore, owner: str) -> None:
+    ids = {(await store.create("ping", owner, now=NOW)).id for _ in range(50)}
+
+    assert len(ids) == 50
+    assert all(len(job_id) == 22 for job_id in ids)
+
+
+async def test_get_returns_the_record_only_to_its_owner(store: JobStore, owner: str) -> None:
+    record = await store.create("ping", owner, now=NOW)
+
+    assert await store.get(record.id, owner) == record
+    # None, not an error: a 404 for someone else's job must not reveal that it exists.
+    assert await store.get(record.id, "someone-else") is None
+
+
+async def test_an_unknown_id_is_none(store: JobStore, owner: str) -> None:
+    assert await store.get("A" * 22, owner) is None
+    assert await store.load("A" * 22) is None
+
+
+@pytest.mark.parametrize("job_id", ["*", "job:x", "../../etc", "", "A" * 21, "A" * 5000, "a b"])
+async def test_malformed_ids_are_rejected_before_redis(
+    store: JobStore, redis_client: Redis, owner: str, job_id: str
+) -> None:
+    await redis_client.set(f"job:{job_id}", b"{}")
+    try:
+        assert await store.load(job_id) is None
+        assert await store.get(job_id, owner) is None
+        assert await store.take_blob(job_id, "cv") is None
+    finally:
+        await redis_client.delete(f"job:{job_id}")
+
+
+async def test_transitions_update_status_stage_and_time(store: JobStore, owner: str) -> None:
+    record = await store.create("ping", owner, now=NOW)
+
+    running = await store.mark_running(record.id, stage="reading", now=NOW + 1)
+    assert running is not None
+    assert (running.status, running.stage, running.updated_at) == (
+        JobStatus.RUNNING,
+        "reading",
+        NOW + 1,
+    )
+
+    done = await store.mark_done(record.id, result={"pong": True}, now=NOW + 2)
+    assert done is not None
+    assert (done.status, done.result) == (JobStatus.DONE, {"pong": True})
+    assert await store.load(record.id) == done
+
+
+async def test_mark_failed_records_the_error_code(store: JobStore, owner: str) -> None:
+    record = await store.create("ping", owner, now=NOW)
+
+    failed = await store.mark_failed(record.id, error_code="fetch_timeout", now=NOW + 1)
+
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "fetch_timeout")
+
+
+async def test_a_transition_keeps_the_original_ttl(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    record = await store.create("ping", owner, now=NOW)
+    await redis_client.expire(f"job:{record.id}", 30)
+
+    await store.mark_running(record.id, stage="reading", now=NOW + 1)
+
+    assert 0 < await redis_client.ttl(f"job:{record.id}") <= 30
+
+
+async def test_a_transition_never_resurrects_an_expired_record(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    record = await store.create("ping", owner, now=NOW)
+    await redis_client.delete(f"job:{record.id}")
+
+    assert await store.mark_done(record.id, result={}, now=NOW + 1) is None
+    assert await redis_client.exists(f"job:{record.id}") == 0
+
+
+@pytest.mark.parametrize("final", ["done", "failed"])
+async def test_a_terminal_record_refuses_further_transitions(
+    store: JobStore, owner: str, final: str
+) -> None:
+    record = await store.create("ping", owner, now=NOW)
+    if final == "done":
+        await store.mark_done(record.id, result={}, now=NOW + 1)
+    else:
+        await store.mark_failed(record.id, error_code="x", now=NOW + 1)
+
+    with pytest.raises(JobStateError):
+        await store.mark_running(record.id, stage="again", now=NOW + 2)
+
+
+async def test_a_blob_round_trips_binary_and_is_gone_after_take(
+    store: JobStore, redis_client: Redis, owner: str
+) -> None:
+    record = await store.create("ping", owner, now=NOW)
+    payload = b"%PDF-1.7\x00\xff\xfe binary"
+
+    await store.put_blob(record.id, "cv", payload, ttl_seconds=60)
+
+    assert 0 < await redis_client.ttl(f"job:{record.id}:blob:cv") <= 60
+    assert await store.take_blob(record.id, "cv") == payload
+    assert await store.take_blob(record.id, "cv") is None
+
+
+async def test_a_blob_never_appears_in_the_record(store: JobStore, owner: str) -> None:
+    record = await store.create("ping", owner, now=NOW)
+    await store.put_blob(record.id, "cv", b"secret cv bytes", ttl_seconds=60)
+
+    loaded = await store.load(record.id)
+
+    assert loaded is not None
+    assert "secret cv bytes" not in loaded.model_dump_json()
+    await store.take_blob(record.id, "cv")
+
+
+@pytest.mark.parametrize("name", ["", "CV", "a:b", "x" * 33])
+async def test_an_invalid_blob_name_is_a_programming_error(
+    store: JobStore, owner: str, name: str
+) -> None:
+    record = await store.create("ping", owner, now=NOW)
+
+    with pytest.raises(ValueError):
+        await store.put_blob(record.id, name, b"x", ttl_seconds=60)
