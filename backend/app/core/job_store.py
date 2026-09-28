@@ -187,9 +187,13 @@ class JobStore:
         resume: str,
         now: float,
         blob: tuple[str, bytes, int] | None = None,
+        min_ttl_seconds: int = 0,
+        keep_blobs: tuple[str, ...] = (),
     ) -> JobRecord | None:
-        """needs_decision -> queued, atomically; `blob` (name, data, ttl) is written in the same
-        transaction, so a request that loses the race writes nothing at all."""
+        """needs_decision -> queued, atomically. `blob` (name, data, ttl) is written in the same
+        transaction, so a request that loses the race writes nothing at all. The record and
+        `keep_blobs` are extended to at least `min_ttl_seconds`, so a job resumed near the end of
+        its life can still queue and run."""
         if blob is not None and not self._valid_blob(job_id, blob[0]):
             raise ValueError("invalid job id or blob name")
 
@@ -212,7 +216,20 @@ class JobStore:
         if blob is not None:
             name, data, ttl = blob
             extra = (self._blob_key(job_id, name), data, ttl)
-        return await self._compare_and_set(job_id, change, extra=extra)
+        extend = [
+            self._key(job_id),
+            *(
+                self._blob_key(job_id, name)
+                for name in keep_blobs
+                if self._valid_blob(job_id, name)
+            ),
+        ]
+        return await self._compare_and_set(
+            job_id,
+            change,
+            extra=extra,
+            extend=(extend, min_ttl_seconds) if min_ttl_seconds else None,
+        )
 
     async def _transition(self, job_id: str, now: float, **changes: Any) -> JobRecord | None:
         def change(record: JobRecord) -> JobRecord:
@@ -228,6 +245,7 @@ class JobStore:
         change: Callable[[JobRecord], JobRecord | None],
         *,
         extra: tuple[str, bytes, int] | None = None,
+        extend: tuple[list[str], int] | None = None,
     ) -> JobRecord | None:
         # WATCH makes the read-modify-write atomic now that the API writes too (resume).
         if not _ID.fullmatch(job_id):
@@ -247,6 +265,10 @@ class JobStore:
                 pipe.set(key, updated.model_dump_json(), xx=True, keepttl=True)
                 if extra is not None:
                     pipe.set(extra[0], extra[1], ex=extra[2])
+                if extend is not None:
+                    # gt: only ever lengthens a life, never shortens one.
+                    for extended in extend[0]:
+                        pipe.expire(extended, extend[1], gt=True)
                 try:
                     stored, *_ = await pipe.execute()
                 except WatchError:

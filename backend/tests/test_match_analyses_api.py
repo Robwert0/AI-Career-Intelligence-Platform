@@ -484,6 +484,32 @@ async def test_continue_requeues_a_paused_analysis(env: Env) -> None:
     assert [name for name, _ in env.limiter.calls][-1] == "match_poll_user"
 
 
+async def test_a_resume_near_the_end_of_the_ttl_gets_time_to_queue_and_run(
+    env: Env, redis_client: Redis
+) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
+    await env.store.attach_blob(analysis_id, "sources", b"{}")
+    for key in (
+        f"job:{analysis_id}",
+        *(f"job:{analysis_id}:blob:{n}" for n in ("analysis_input", "sources")),
+    ):
+        await redis_client.expire(key, 5)
+
+    response = await env.client.post(f"/match/analyses/{analysis_id}/continue", headers=env.headers)
+
+    assert response.status_code == 202
+    budget = settings.job_queue_stale_seconds + settings.match_analysis_hard_time_limit_seconds
+    for key in (
+        f"job:{analysis_id}",
+        f"job:{analysis_id}:blob:analysis_input",
+        f"job:{analysis_id}:blob:sources",
+    ):
+        assert await redis_client.ttl(key) >= budget - 5, key
+
+
 async def test_continue_on_an_analysis_that_is_not_paused_is_409(env: Env) -> None:
     analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
 

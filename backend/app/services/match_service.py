@@ -21,6 +21,7 @@ _CLAIM_ATTEMPTS = 3
 ANALYSIS = "match_analysis"
 RUN_ANALYSIS = "jobs.run_analysis"
 CV_BLOB = {"file": "cv_file", "text": "cv_text"}
+RESUMED_BLOBS = ("analysis_input", "sources")
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +225,15 @@ class MatchService:
         )
         try:
             resumed = await self._store.resume(
-                analysis_id, owner_id, resume=resume, now=now, blob=blob
+                analysis_id,
+                owner_id,
+                resume=resume,
+                now=now,
+                blob=blob,
+                # Queued, then run: the worst case the record must outlive once resumed.
+                min_ttl_seconds=settings.job_queue_stale_seconds
+                + settings.match_analysis_hard_time_limit_seconds,
+                keep_blobs=RESUMED_BLOBS,
             )
         except JobStateError:
             resumed = None
