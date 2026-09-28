@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 import { CredentialsForm } from '@/components/CredentialsForm'
+import { safeNextPath, withNext } from '@/lib/redirect'
 
 function LoginForm() {
   const { signIn } = useAuth()
@@ -13,6 +14,7 @@ function LoginForm() {
   const justRegistered = params.get('registered') === '1'
   const logoutIncomplete = params.get('logout') === 'incomplete'
   const sessionExpired = params.get('session') === 'expired'
+  const next = safeNextPath(params.get('next'))
 
   return (
     <>
@@ -42,12 +44,15 @@ function LoginForm() {
         submitLabel="sign in"
         autoCompletePassword="current-password"
         onSubmit={signIn}
-        onSuccess={() => router.replace('/chat')}
+        onSuccess={() => router.replace(next)}
       />
 
       <p className="font-mono text-xs text-muted">
         no account?{' '}
-        <Link href="/register" className="text-accent underline underline-offset-4">
+        <Link
+          href={withNext('/register', next)}
+          className="text-accent underline underline-offset-4"
+        >
           create one
         </Link>
       </p>
