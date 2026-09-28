@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AssessedRequirement, BreakdownRow, Coverage, Evidence, MatchReport } from '../match'
+import type { AssessedRequirement, BreakdownRow, Coverage, Evidence } from '../match'
 import {
   citation,
   evidenceById,
@@ -8,7 +8,6 @@ import {
   formatPercent,
   formatPoints,
   formatWeight,
-  isRefusal,
   requirementTextById,
   safeRepoUrl,
   sourceSummary,
@@ -239,17 +238,5 @@ describe('evidenceKindLabel (amendment 3: profile)', () => {
 
   it('never labels a profile item as applied work', () => {
     expect(evidenceKindLabel('profile')).not.toMatch(/work|project|repo/i)
-  })
-})
-
-describe('isRefusal (amendment 3: clean refusal rendering)', () => {
-  function report(score: MatchReport['score']): Pick<MatchReport, 'score'> {
-    return { score }
-  }
-
-  it('is true only when the score is null', () => {
-    expect(isRefusal(report(null))).toBe(true)
-    expect(isRefusal(report(67))).toBe(false)
-    expect(isRefusal(report(0))).toBe(false)
   })
 })

@@ -10,6 +10,7 @@ export type Recovery =
   | 'paste_cv'
   | 'fix_github_url'
   | 'retry_or_continue'
+  | 'edit_job'
 export type FailureOut = { code: string; message: string; recovery: Recovery }
 
 export type Requirement = { text: string; sensitive: boolean }
@@ -21,7 +22,7 @@ export type JobPosting = {
   preferred: Requirement[]
 }
 
-export type JobIntake = { url: string } | { text: string }
+export type JobIntake = { url: string; text?: never } | { text: string; url?: never }
 export type JobSubmitted = { job_id: string }
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed'
 export type JobStage = 'reading' | 'extracting'
@@ -41,15 +42,48 @@ export type AnalysisStage =
 export type CandidateSource = 'cv' | 'github'
 export type Decision = { failed_source: CandidateSource; error: FailureOut }
 export type AnalysisSubmitted = { analysis_id: string }
-export type AnalysisView = {
-  analysis_id: string
-  status: AnalysisStatus
-  stage: AnalysisStage | null
-  queue_position: number | null
-  error: FailureOut | null
-  decision: Decision | null
-  report: MatchReport | null
-}
+
+// A discriminated union on `status`, matching the response invariants the backend enforces
+// (Amendment 5): done => report, needs_decision => decision, failed => error, and
+// queue_position is set only while queued. `stage` stays uniformly nullable -- it is not one of
+// the guaranteed invariants (a resumed analysis carries stage: null until it runs again).
+type AnalysisCommon = { analysis_id: string; stage: AnalysisStage | null }
+export type AnalysisView =
+  | (AnalysisCommon & {
+      status: 'queued'
+      queue_position: number
+      error: null
+      decision: null
+      report: null
+    })
+  | (AnalysisCommon & {
+      status: 'running'
+      queue_position: null
+      error: null
+      decision: null
+      report: null
+    })
+  | (AnalysisCommon & {
+      status: 'needs_decision'
+      queue_position: null
+      error: null
+      decision: Decision
+      report: null
+    })
+  | (AnalysisCommon & {
+      status: 'failed'
+      queue_position: null
+      error: FailureOut
+      decision: null
+      report: null
+    })
+  | (AnalysisCommon & {
+      status: 'done'
+      queue_position: null
+      error: null
+      decision: null
+      report: MatchReport
+    })
 
 export type RequirementStatus =
   'demonstrated' | 'partial' | 'not_demonstrated' | 'unmet' | 'not_assessed'
@@ -97,9 +131,8 @@ export type Coverage = {
 export type Recommendation = { requirement_id: string; title: string; detail: string }
 export type Rewrite = { evidence_id: string; before: string; after: string; questions: string[] }
 export type Refusal = { reasons: string[]; needed: string[] }
-export type MatchReport = {
-  score: number | null
-  refusal: Refusal | null
+
+type MatchReportCommon = {
   summary: { strongest: string[]; gaps: string[] }
   breakdown: BreakdownRow[]
   coverage: Coverage
@@ -109,6 +142,11 @@ export type MatchReport = {
   disclaimer: string
   model: string
 }
+// score null <=> refusal set (Amendment 3): the union lets a caller narrow on `score` and get
+// `refusal` for free, instead of a null check TS can't tie to the score it read.
+export type MatchReport =
+  | (MatchReportCommon & { score: number; refusal: null })
+  | (MatchReportCommon & { score: null; refusal: Refusal })
 
 // Up to 5 MB can take longer than the 10s default on a slow connection.
 const UPLOAD_TIMEOUT_MS = 60_000

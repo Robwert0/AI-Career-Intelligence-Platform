@@ -4,15 +4,39 @@ import { EMPTY_CANDIDATE, EMPTY_JOB_INPUT, type CandidateInput, type JobInput } 
 
 export type Step = 'job' | 'candidate' | 'analysis' | 'report'
 
-export type FlowState = {
-  step: Step
-  jobInput: JobInput
-  draft: JobDraft | null
-  inputTruncated: boolean
-  candidate: CandidateInput
-  analysisId: string | null
-  report: MatchReport | null
-}
+// A union on `step`: only the job step can be draft-less, and only candidate/analysis/report
+// have a confirmed draft to show or re-run; only analysis/report have the analysis id that
+// produced them, and only report has the report itself.
+type FlowCommon = { jobInput: JobInput; candidate: CandidateInput }
+export type FlowState =
+  | (FlowCommon & {
+      step: 'job'
+      draft: JobDraft | null
+      inputTruncated: boolean
+      analysisId: null
+      report: null
+    })
+  | (FlowCommon & {
+      step: 'candidate'
+      draft: JobDraft
+      inputTruncated: boolean
+      analysisId: null
+      report: null
+    })
+  | (FlowCommon & {
+      step: 'analysis'
+      draft: JobDraft
+      inputTruncated: boolean
+      analysisId: string
+      report: null
+    })
+  | (FlowCommon & {
+      step: 'report'
+      draft: JobDraft
+      inputTruncated: boolean
+      analysisId: string
+      report: MatchReport
+    })
 
 export type FlowAction =
   | { type: 'jobInputChanged'; input: Partial<JobInput> }
@@ -47,26 +71,76 @@ export function matchFlow(state: FlowState, action: FlowAction): FlowState {
     case 'draftChanged':
       return state.draft === null ? state : { ...state, draft: action.draft }
     case 'draftDiscarded':
-      return { ...state, draft: null, inputTruncated: false }
+      return state.step === 'job' ? { ...state, draft: null, inputTruncated: false } : state
     case 'jobConfirmed':
-      return state.draft === null ? state : { ...state, step: 'candidate' }
+      return state.draft === null
+        ? state
+        : {
+            step: 'candidate',
+            jobInput: state.jobInput,
+            candidate: state.candidate,
+            draft: state.draft,
+            inputTruncated: state.inputTruncated,
+            analysisId: null,
+            report: null,
+          }
     case 'candidateChanged':
       return { ...state, candidate: { ...state.candidate, ...action.candidate } }
     case 'backToJob':
-      return { ...state, step: 'job' }
-    case 'analysisStarted':
-      return { ...state, step: 'analysis', analysisId: action.analysisId, report: null }
-    case 'analysisFinished':
-      return state.step === 'analysis' ? { ...state, step: 'report', report: action.report } : state
-    case 'analysisAbandoned':
-      return { ...state, step: 'candidate', analysisId: null }
-    case 'editJob':
       return {
-        ...state,
         step: 'job',
+        jobInput: state.jobInput,
+        candidate: state.candidate,
+        draft: state.draft,
+        inputTruncated: state.inputTruncated,
         analysisId: null,
         report: null,
+      }
+    case 'analysisStarted':
+      return state.draft === null
+        ? state
+        : {
+            step: 'analysis',
+            jobInput: state.jobInput,
+            candidate: state.candidate,
+            draft: state.draft,
+            inputTruncated: state.inputTruncated,
+            analysisId: action.analysisId,
+            report: null,
+          }
+    case 'analysisFinished':
+      return state.step === 'analysis'
+        ? {
+            step: 'report',
+            jobInput: state.jobInput,
+            candidate: state.candidate,
+            draft: state.draft,
+            inputTruncated: state.inputTruncated,
+            analysisId: state.analysisId,
+            report: action.report,
+          }
+        : state
+    case 'analysisAbandoned':
+      return state.draft === null
+        ? state
+        : {
+            step: 'candidate',
+            jobInput: state.jobInput,
+            candidate: state.candidate,
+            draft: state.draft,
+            inputTruncated: state.inputTruncated,
+            analysisId: null,
+            report: null,
+          }
+    case 'editJob':
+      return {
+        step: 'job',
+        jobInput: state.jobInput,
         candidate: { ...state.candidate, consent: false },
+        draft: state.draft,
+        inputTruncated: state.inputTruncated,
+        analysisId: null,
+        report: null,
       }
     case 'startOver':
       return INITIAL_FLOW

@@ -41,7 +41,7 @@ export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers)
           setProblem(problem)
           return
         }
-        if (next.status === 'done' && next.report) deliver(next.report)
+        if (next.status === 'done') deliver(next.report)
       },
       onFailure: (failure) => {
         if (failure.status === 401) sessionExpired()

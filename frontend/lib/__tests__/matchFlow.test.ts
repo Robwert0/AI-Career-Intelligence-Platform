@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { toDraft } from '../jobDraft'
+import { toDraft, type JobDraft } from '../jobDraft'
 import type { MatchReport } from '../match'
-import { INITIAL_FLOW, matchFlow, type FlowState } from '../matchFlow'
+import { INITIAL_FLOW, matchFlow, type FlowState, type Step } from '../matchFlow'
+import type { CandidateInput, JobInput } from '../matchInputs'
 
 const DRAFT = toDraft(
   {
@@ -16,8 +17,22 @@ const DRAFT = toDraft(
 const PDF = new File(['%PDF-1.7'], 'cv.pdf')
 const REPORT = { score: 67 } as unknown as MatchReport
 
-function at(patch: Partial<FlowState>): FlowState {
-  return { ...INITIAL_FLOW, ...patch }
+// FlowState is a union on `step`, so an arbitrary test patch can't always be typed as one real
+// member (e.g. a patch that only sets `draft` while leaving `step: 'job'` implicit). This fixture
+// stays a flat, loosely typed shape and casts once at the end, rather than fighting
+// Partial<union> distribution.
+type FlowStatePatch = Partial<{
+  step: Step
+  jobInput: JobInput
+  draft: JobDraft | null
+  inputTruncated: boolean
+  candidate: CandidateInput
+  analysisId: string | null
+  report: MatchReport | null
+}>
+
+function at(patch: FlowStatePatch): FlowState {
+  return { ...INITIAL_FLOW, ...patch } as FlowState
 }
 
 describe('matchFlow', () => {
@@ -85,6 +100,7 @@ describe('matchFlow', () => {
   it('goes back to the evidence step when an analysis is abandoned, keeping consent', () => {
     const running = at({
       step: 'analysis',
+      draft: DRAFT,
       analysisId: 'a1',
       candidate: { ...INITIAL_FLOW.candidate, cvFile: PDF, consent: true },
     })
@@ -117,6 +133,14 @@ describe('matchFlow', () => {
       githubUrl: 'https://github.com/x',
       consent: false,
     })
+  })
+
+  it('never enters a step that needs a draft without one (the type now guarantees candidate/analysis/report always have a draft)', () => {
+    const noDraft = at({ step: 'job', draft: null })
+
+    expect(matchFlow(noDraft, { type: 'jobConfirmed' })).toBe(noDraft)
+    expect(matchFlow(noDraft, { type: 'analysisStarted', analysisId: 'a1' })).toBe(noDraft)
+    expect(matchFlow(noDraft, { type: 'analysisAbandoned' })).toBe(noDraft)
   })
 
   it('starts over from nothing', () => {

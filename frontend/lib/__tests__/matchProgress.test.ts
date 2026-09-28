@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { AnalysisView, JobView } from '../match'
+import type {
+  AnalysisStage,
+  AnalysisStatus,
+  AnalysisView,
+  Decision,
+  FailureOut,
+  JobView,
+  MatchReport,
+} from '../match'
 import {
   analysisAnnouncement,
   analysisProblem,
@@ -23,7 +31,21 @@ function jobView(patch: Partial<JobView>): JobView {
   }
 }
 
-function analysisView(patch: Partial<AnalysisView>): AnalysisView {
+// AnalysisView is a discriminated union enforcing status<->payload invariants (Amendment 5), so
+// a literal patch can't always be typed as a real member -- some tests here deliberately build an
+// invariant-violating shape to exercise the defensive fallback. This fixture stays a flat, loosely
+// typed shape and casts once at the end, rather than fighting Partial<union> distribution.
+type AnalysisViewPatch = Partial<{
+  analysis_id: string
+  status: AnalysisStatus
+  stage: AnalysisStage | null
+  queue_position: number | null
+  error: FailureOut | null
+  decision: Decision | null
+  report: MatchReport | null
+}>
+
+function analysisView(patch: AnalysisViewPatch): AnalysisView {
   return {
     analysis_id: 'a1',
     status: 'running',
@@ -33,7 +55,7 @@ function analysisView(patch: Partial<AnalysisView>): AnalysisView {
     decision: null,
     report: null,
     ...patch,
-  }
+  } as AnalysisView
 }
 
 function states(items: StageItem[]): string[] {
@@ -235,7 +257,7 @@ describe('analysisProblem (defensive: the backend now enforces these invariants 
   })
 
   it('flags a done status with no report, instead of a caller crashing on report.score', () => {
-    const problem = analysisProblem(analysisView({ status: 'done', report: null as never }))
+    const problem = analysisProblem(analysisView({ status: 'done', report: null }))
 
     expect(problem?.message).toMatch(/no report came back/i)
   })

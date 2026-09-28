@@ -91,15 +91,6 @@ export function evidenceKindLabel(kind: EvidenceKind): string {
   return EVIDENCE_KIND_LABEL[kind]
 }
 
-// Amendment 3: score:null (refusal) always carries empty requirements/recommendations/rewrites and
-// 3 zeroed breakdown rows. Named for readability at call sites that don't need TS to narrow
-// `score` afterward; a call site that does (like ReportOverview's breakdown table) keeps the plain
-// `report.score === null` check instead, since a generic type guard here narrows the true branch
-// but not the false one, and isn't worth an `as number` cast to force.
-export function isRefusal(report: Pick<MatchReport, 'score'>): boolean {
-  return report.score === null
-}
-
 export function evidenceById(report: Pick<MatchReport, 'requirements'>): Map<string, Evidence> {
   const index = new Map<string, Evidence>()
   for (const requirement of report.requirements) {

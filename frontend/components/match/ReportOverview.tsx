@@ -66,7 +66,7 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
   )
 }
 
-function RefusalBlock({ refusal }: { refusal: Refusal | null }) {
+function RefusalBlock({ refusal }: { refusal: Refusal }) {
   return (
     <div className="space-y-4">
       <p className="text-2xl font-medium">No alignment estimate</p>
@@ -74,12 +74,8 @@ function RefusalBlock({ refusal }: { refusal: Refusal | null }) {
         There wasn&apos;t enough relevant evidence to score this match fairly, so we didn&apos;t
         guess.
       </p>
-      {refusal !== null && refusal.reasons.length > 0 ? (
-        <SummaryList title="Why" items={refusal.reasons} />
-      ) : null}
-      {refusal !== null && refusal.needed.length > 0 ? (
-        <SummaryList title="What to add" items={refusal.needed} />
-      ) : null}
+      {refusal.reasons.length > 0 ? <SummaryList title="Why" items={refusal.reasons} /> : null}
+      {refusal.needed.length > 0 ? <SummaryList title="What to add" items={refusal.needed} /> : null}
     </div>
   )
 }
