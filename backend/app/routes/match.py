@@ -165,9 +165,25 @@ async def get_job(
     return _to_response(record)
 
 
+def _stored_report(record: JobRecord) -> tuple[MatchReport | None, str | None]:
+    """The stored report, or an error code when a done record has none that validates."""
+    if record.status is not JobStatus.DONE:
+        return None, None
+    try:
+        return MatchReport.model_validate((record.result or {}).get("report")), None
+    except ValidationError as exc:
+        # Type only: pydantic's message quotes the offending input, which can be CV text.
+        logger.warning(
+            "analysis report unreadable job_id=%s error_type=%s", record.id, type(exc).__name__
+        )
+        return None, "internal_error"
+
+
 def _analysis_response(view: AnalysisView) -> AnalysisStatusResponse:
     record = view.record
-    report = (record.result or {}).get("report")
+    report, report_error = _stored_report(record)
+    if report_error is not None:
+        record = record.model_copy(update={"status": JobStatus.FAILED, "error_code": report_error})
     paused = record.status is JobStatus.NEEDS_DECISION
     return AnalysisStatusResponse(
         analysis_id=record.id,
@@ -175,8 +191,8 @@ def _analysis_response(view: AnalysisView) -> AnalysisStatusResponse:
         stage=record.stage,
         queue_position=view.queue_position,
         error=(
-            describe_failure(record.error_code)
-            if record.status is JobStatus.FAILED and record.error_code
+            describe_failure(record.error_code or "internal_error")
+            if record.status is JobStatus.FAILED
             else None
         ),
         decision=(
@@ -189,11 +205,7 @@ def _analysis_response(view: AnalysisView) -> AnalysisStatusResponse:
             if paused and record.failed_source and record.error_code
             else None
         ),
-        report=(
-            MatchReport.model_validate(report)
-            if record.status is JobStatus.DONE and report is not None
-            else None
-        ),
+        report=report,
     )
 
 

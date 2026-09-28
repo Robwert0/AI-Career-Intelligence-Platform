@@ -3,7 +3,6 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.ai.match.schemas import EvidenceKind, JobPosting
-from app.core.job_store import JobStatus
 
 JobText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=50, max_length=30_000)]
 
@@ -97,12 +96,16 @@ class Summary(BaseModel):
     gaps: list[str] = Field(default_factory=list, max_length=3)
 
 
+Ratio = Annotated[float, Field(ge=0.0, le=1.0)]
+CATEGORY_ORDER = ("required", "preferred", "applied_evidence")
+
+
 class BreakdownRowOut(BaseModel):
     category: Literal["required", "preferred", "applied_evidence"]
-    weight: int
-    effective_weight: float
-    score: float
-    points: float
+    weight: int = Field(ge=0, le=100)
+    effective_weight: float = Field(ge=0.0, le=100.0)
+    score: Ratio
+    points: float = Field(ge=0.0, le=100.0)
 
 
 class GitHubCoverage(BaseModel):
@@ -116,7 +119,7 @@ class Coverage(BaseModel):
     level: Literal["high", "medium", "low"]
     cv: SourceStatus
     github: GitHubCoverage
-    requirements_with_evidence: float
+    requirements_with_evidence: Ratio
     limitations: list[str]
 
 
@@ -138,6 +141,12 @@ class RequirementOut(BaseModel):
     hard_gap: bool
     evidence: list[EvidenceOut]
 
+    @model_validator(mode="after")
+    def _hard_gap_is_a_required_unmet_item(self) -> Self:
+        if self.hard_gap != (self.importance == "required" and self.status == "unmet"):
+            raise ValueError("hard_gap is true exactly for a required, unmet requirement")
+        return self
+
 
 class RecommendationOut(BaseModel):
     requirement_id: str
@@ -158,7 +167,7 @@ class RewriteOut(BaseModel):
 
 
 class MatchReport(BaseModel):
-    score: int | None
+    score: int | None = Field(ge=0, le=100)
     refusal: Refusal | None
     summary: Summary
     breakdown: list[BreakdownRowOut]
@@ -169,17 +178,51 @@ class MatchReport(BaseModel):
     disclaimer: str
     model: str
 
+    @model_validator(mode="after")
+    def _contract_invariants(self) -> Self:
+        if (self.score is None) != (self.refusal is not None):
+            raise ValueError("a report is either scored or refused, never both or neither")
+        if tuple(row.category for row in self.breakdown) != CATEGORY_ORDER:
+            raise ValueError("breakdown must hold the 3 categories in contract order")
+        if self.refusal is not None and (
+            self.requirements
+            or self.rewrites
+            or self.recommendations.immediate
+            or self.recommendations.longer_term
+        ):
+            raise ValueError("a refusal carries no requirements, advice or rewrites")
+        return self
+
 
 class DecisionOut(BaseModel):
     failed_source: SourceName
     error: FailureOut
 
 
+AnalysisStatus = Literal["queued", "running", "needs_decision", "done", "failed"]
+AnalysisStage = Literal[
+    "reading_cv", "reading_github", "matching", "assessing", "scoring", "recommending"
+]
+
+
 class AnalysisStatusResponse(BaseModel):
     analysis_id: str
-    status: JobStatus
-    stage: str | None
-    queue_position: int | None
+    status: AnalysisStatus
+    stage: AnalysisStage | None
+    queue_position: int | None = Field(ge=0)
     error: FailureOut | None
     decision: DecisionOut | None
     report: MatchReport | None
+
+    @model_validator(mode="after")
+    def _status_carries_its_payload(self) -> Self:
+        # Violating any of these would strand the UI, so they fail loudly (500) instead.
+        if (self.status == "done") != (self.report is not None):
+            raise ValueError("report is set exactly when the analysis is done")
+        if (self.status == "needs_decision") != (self.decision is not None):
+            raise ValueError("decision is set exactly when the analysis needs one")
+        if (self.status == "failed") != (self.error is not None):
+            raise ValueError("error is set exactly when the analysis failed")
+        if self.queue_position is not None and self.status != "queued":
+            raise ValueError("queue_position is only set while queued")
+        return self

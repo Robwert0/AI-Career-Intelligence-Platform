@@ -1,3 +1,9 @@
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
 from app.ai.match.assess import AssessedRequirement, Assessment
 from app.ai.match.requirements import RequirementRef
 from app.ai.match.schemas import EvidenceItem
@@ -146,3 +152,51 @@ def test_many_unverifiable_cv_items_are_explained() -> None:
 
     assert CV_UNVERIFIED in report(dropping).coverage.limitations
     assert CV_UNVERIFIED not in report().coverage.limitations
+
+
+def _broken(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    data = report().model_dump(mode="json")
+    change(data)
+    return data
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d.update(score=None),
+        lambda d: d.update(score=101),
+        lambda d: d.update(breakdown=list(reversed(d["breakdown"]))),
+        lambda d: d.update(breakdown=d["breakdown"][:2]),
+        lambda d: d["requirements"][2].update(
+            importance="preferred", status="unmet", hard_gap=True
+        ),
+        lambda d: d["requirements"][0].update(hard_gap=True),
+        lambda d: d["coverage"].update(requirements_with_evidence=1.5),
+        lambda d: d["breakdown"][0].update(score=-0.1),
+    ],
+    ids=[
+        "score-without-refusal",
+        "score-over-100",
+        "breakdown-order",
+        "breakdown-rows",
+        "hard-gap-on-preferred",
+        "hard-gap-not-unmet",
+        "coverage-ratio",
+        "row-score",
+    ],
+)
+def test_a_report_that_breaks_the_contract_is_rejected(
+    change: Callable[[dict[str, Any]], None],
+) -> None:
+    with pytest.raises(ValidationError):
+        MatchReport.model_validate(_broken(change))
+
+
+def test_a_refusal_must_carry_empty_lists() -> None:
+    refused = refusal_report(["insufficient_evidence"], sources=BOTH_READ, model="m").model_dump(
+        mode="json"
+    )
+    refused["requirements"] = report().model_dump(mode="json")["requirements"]
+
+    with pytest.raises(ValidationError):
+        MatchReport.model_validate(refused)

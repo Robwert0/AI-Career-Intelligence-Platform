@@ -777,3 +777,72 @@ async def test_a_macro_docx_is_415_unsafe_docx(env: Env) -> None:
     assert response.status_code == 415
     assert detail_code(response) == "unsafe_docx"
     assert response.json()["detail"]["message"] == describe_failure("unsafe_docx").message
+
+
+async def test_an_unreadable_stored_report_polls_as_a_coded_failure(
+    env: Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    await env.store.mark_done(
+        analysis_id, result={"report": {"score": 70, "leaked": "Tyrell secret"}}, now=time.time()
+    )
+
+    with caplog.at_level("WARNING"):
+        response = await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["status"], body["error"]["code"], body["report"]) == (
+        "failed",
+        "internal_error",
+        None,
+    )
+    assert "ValidationError" in caplog.text
+    assert "Tyrell secret" not in caplog.text
+
+
+async def test_a_resumed_analysis_shows_no_stage_until_it_runs(env: Env) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
+
+    await env.client.post(f"/match/analyses/{analysis_id}/continue", headers=env.headers)
+
+    body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
+    assert (body["status"], body["stage"]) == ("queued", None)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"status": "done", "report": None},
+        {"status": "needs_decision", "decision": None},
+        {"status": "failed", "error": None},
+        {"status": "running", "queue_position": 2},
+        {"status": "running", "stage": "reading"},
+    ],
+    ids=[
+        "done-no-report",
+        "paused-no-decision",
+        "failed-no-error",
+        "position-not-queued",
+        "intake-stage",
+    ],
+)
+def test_a_status_response_that_breaks_the_contract_is_rejected(fields: dict[str, Any]) -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.match import AnalysisStatusResponse
+
+    base: dict[str, Any] = {
+        "analysis_id": "A" * 22,
+        "status": "queued",
+        "stage": None,
+        "queue_position": 0,
+        "error": None,
+        "decision": None,
+        "report": None,
+    }
+    with pytest.raises(ValidationError):
+        AnalysisStatusResponse.model_validate({**base, "queue_position": None, **fields})

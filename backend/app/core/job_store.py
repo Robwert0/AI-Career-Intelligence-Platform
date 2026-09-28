@@ -205,6 +205,7 @@ class JobStore:
             return record.model_copy(
                 update={
                     "status": JobStatus.QUEUED,
+                    "stage": None,
                     "resume": resume,
                     "error_code": None,
                     "reset_at": None,
