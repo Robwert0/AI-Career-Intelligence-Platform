@@ -14,11 +14,18 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.match.schemas import JobPosting
+from app.core.analysis_registry import AnalysisRegistry
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
-from app.deps import get_current_user, get_job_store, get_limiter, get_task_queue
+from app.deps import (
+    get_analysis_registry,
+    get_current_user,
+    get_job_store,
+    get_limiter,
+    get_task_queue,
+)
 from app.integrations.safe_fetch import FetchResult
 from app.main import app
 from app.models import User
@@ -62,6 +69,9 @@ async def match_client(
     app.dependency_overrides[get_limiter] = lambda: allow_all_limiter
     app.dependency_overrides[get_task_queue] = lambda: queue
     app.dependency_overrides[get_job_store] = lambda: store
+    app.dependency_overrides[get_analysis_registry] = lambda: AnalysisRegistry(
+        redis_client, ttl_seconds=settings.job_ttl_seconds
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
         headers = await _login(client, "match@test.dev")

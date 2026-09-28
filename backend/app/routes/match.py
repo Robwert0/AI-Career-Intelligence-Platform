@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from redis.exceptions import RedisError
@@ -13,9 +13,25 @@ from app.core.job_store import JobRecord, JobStatus
 from app.deps import get_current_user, get_match_service, rate_limit
 from app.integrations.errors import FetchError
 from app.models import User
-from app.schemas.match import JobIntakeRequest, JobStatusResponse, JobSubmitted
+from app.routes.match_forms import analysis_form, rejected, retry_form
+from app.schemas.match import (
+    AnalysisStatusResponse,
+    AnalysisSubmitted,
+    DecisionOut,
+    JobIntakeRequest,
+    JobStatusResponse,
+    JobSubmitted,
+    MatchReport,
+)
 from app.services.match_failures import describe_failure
-from app.services.match_service import JobInProgressError, MatchService
+from app.services.match_service import (
+    AnalysisInProgressError,
+    AnalysisView,
+    CvRequiredError,
+    JobInProgressError,
+    MatchService,
+    NotAwaitingDecisionError,
+)
 from app.workers.queue import QueueUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -135,3 +151,142 @@ async def get_job(
     if record is None:
         raise _not_found()
     return _to_response(record)
+
+
+def _analysis_response(view: AnalysisView) -> AnalysisStatusResponse:
+    record = view.record
+    report = (record.result or {}).get("report")
+    paused = record.status is JobStatus.NEEDS_DECISION
+    return AnalysisStatusResponse(
+        analysis_id=record.id,
+        status=record.status,
+        stage=record.stage,
+        queue_position=view.queue_position,
+        error=(
+            describe_failure(record.error_code)
+            if record.status is JobStatus.FAILED and record.error_code
+            else None
+        ),
+        decision=(
+            DecisionOut.model_validate(
+                {
+                    "failed_source": record.failed_source,
+                    "error": describe_failure(record.error_code, retry_at=record.reset_at),
+                }
+            )
+            if paused and record.failed_source and record.error_code
+            else None
+        ),
+        report=(
+            MatchReport.model_validate(report)
+            if record.status is JobStatus.DONE and report is not None
+            else None
+        ),
+    )
+
+
+def _analysis_in_progress(analysis_id: str) -> JSONResponse:
+    failure = describe_failure("analysis_in_progress")
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "detail": {"code": failure.code, "message": failure.message},
+            "analysis_id": analysis_id,
+        },
+    )
+
+
+@router.post(
+    "/analyses",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=AnalysisSubmitted,
+    dependencies=[Depends(rate_limit(policies.MATCH_ANALYSIS_USER))],
+)
+async def submit_analysis(
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[MatchService, Depends(get_match_service)],
+) -> AnalysisSubmitted | JSONResponse:
+    # The body is read here, not by FastAPI, so auth and the rate limit run before any upload
+    # is buffered and the size cap applies while reading (§6.2).
+    analysis, cv = await analysis_form(request)
+    try:
+        analysis_id = await service.submit_analysis(
+            str(current_user.id), analysis, cv, now=time.time()
+        )
+    except AnalysisInProgressError as exc:
+        return _analysis_in_progress(exc.analysis_id)
+    except QueueUnavailableError, RedisError:
+        raise _unavailable() from None
+    return AnalysisSubmitted(analysis_id=analysis_id)
+
+
+@router.get(
+    "/analyses/{analysis_id}",
+    dependencies=[
+        Depends(rate_limit(policies.MATCH_POLL_IP)),
+        Depends(rate_limit(policies.MATCH_POLL_USER)),
+    ],
+)
+async def get_analysis(
+    analysis_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[MatchService, Depends(get_match_service)],
+) -> AnalysisStatusResponse:
+    try:
+        view = await service.get_analysis(str(current_user.id), analysis_id, now=time.time())
+    except RedisError:
+        raise _unavailable() from None
+    if view is None:
+        raise rejected(status.HTTP_404_NOT_FOUND, "analysis_not_found")
+    return _analysis_response(view)
+
+
+@router.post(
+    "/analyses/{analysis_id}/continue",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit(policies.MATCH_POLL_USER))],
+)
+async def continue_analysis(
+    analysis_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[MatchService, Depends(get_match_service)],
+) -> AnalysisSubmitted:
+    try:
+        resumed = await service.continue_analysis(
+            str(current_user.id), analysis_id, now=time.time()
+        )
+    except NotAwaitingDecisionError:
+        raise rejected(status.HTTP_409_CONFLICT, "not_awaiting_decision") from None
+    except QueueUnavailableError, RedisError:
+        raise _unavailable() from None
+    if resumed is None:
+        raise rejected(status.HTTP_404_NOT_FOUND, "analysis_not_found")
+    return AnalysisSubmitted(analysis_id=resumed)
+
+
+@router.post(
+    "/analyses/{analysis_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit(policies.MATCH_ANALYSIS_USER))],
+)
+async def retry_analysis(
+    analysis_id: str,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[MatchService, Depends(get_match_service)],
+) -> AnalysisSubmitted:
+    cv = await retry_form(request)
+    try:
+        resumed = await service.retry_analysis(
+            str(current_user.id), analysis_id, cv, now=time.time()
+        )
+    except NotAwaitingDecisionError:
+        raise rejected(status.HTTP_409_CONFLICT, "not_awaiting_decision") from None
+    except CvRequiredError:
+        raise rejected(status.HTTP_422_UNPROCESSABLE_CONTENT, "no_candidate_source") from None
+    except QueueUnavailableError, RedisError:
+        raise _unavailable() from None
+    if resumed is None:
+        raise rejected(status.HTTP_404_NOT_FOUND, "analysis_not_found")
+    return AnalysisSubmitted(analysis_id=resumed)

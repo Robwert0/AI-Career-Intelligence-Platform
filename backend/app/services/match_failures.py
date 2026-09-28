@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from app.schemas.match import FailureOut, Recovery
 
 _PASTE: Recovery = "paste"
@@ -141,10 +143,41 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "We couldn't verify any evidence in your CV. Try again, or continue without your CV.",
         "retry_or_continue",
     ),
+    "no_candidate_source": (
+        "Add a CV file, paste your CV text, or enter your GitHub profile link.",
+        "choose_file",
+    ),
+    "cv_and_cv_text": (
+        "Send either a CV file or pasted CV text, not both.",
+        "choose_file",
+    ),
+    "consent_required": (
+        "Confirm that you agree to how your CV is processed before starting the analysis.",
+        "retry",
+    ),
+    "invalid_job": (
+        "The job details couldn't be read. Extract the posting again, then start the analysis.",
+        "retry",
+    ),
+    "analysis_in_progress": (
+        "You already have an analysis in progress. Open it, or wait for it to finish.",
+        "wait",
+    ),
+    "not_awaiting_decision": (
+        "This analysis isn't waiting for a decision any more. Refresh to see where it is.",
+        "retry",
+    ),
+    "analysis_not_found": (
+        "We couldn't find that analysis. It may have expired; start a new one.",
+        "retry",
+    ),
 }
 _FALLBACK: tuple[str, Recovery] = _FAILURES["internal_error"]
 
 
-def describe_failure(code: str) -> FailureOut:
+def describe_failure(code: str, *, retry_at: int | None = None) -> FailureOut:
     message, recovery = _FAILURES.get(code, _FALLBACK)
+    if retry_at is not None:
+        when = datetime.fromtimestamp(retry_at, tz=UTC).strftime("%H:%M UTC")
+        message = f"{message} You can retry after {when}."
     return FailureOut(code=code, message=message, recovery=recovery)
