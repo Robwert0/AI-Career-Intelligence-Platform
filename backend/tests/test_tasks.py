@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -17,7 +19,7 @@ from app.workers import tasks
 from app.workers.celery_app import celery_app
 from app.workers.tasks import JobError, execute_job, ping, run_job
 
-NOW = 1_000_000.0
+NOW = time.time()
 
 
 @pytest_asyncio.fixture
@@ -132,6 +134,44 @@ async def test_a_job_that_expires_mid_run_is_not_recreated(
     await execute_job(store, record.id, handler, stage="x")
 
     assert await redis_client.exists(f"job:{record.id}") == 0
+
+
+async def test_a_job_queued_past_the_stale_cut_off_never_runs(
+    store: JobStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create(
+        "ping", "owner", now=time.time() - settings.job_queue_stale_seconds - 5
+    )
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        raise AssertionError("the API already reported this job as unavailable")
+
+    with caplog.at_level(logging.INFO):
+        await execute_job(store, record.id, handler, stage="x")
+
+    failed = await store.load(record.id)
+    assert failed is not None
+    assert (failed.status, failed.error_code, failed.stage) == (
+        JobStatus.FAILED,
+        "queue_unavailable",
+        None,
+    )
+    assert f"job failed job_id={record.id} error_code=queue_unavailable" in caplog.text
+
+
+async def test_a_job_queued_just_inside_the_cut_off_still_runs(store: JobStore) -> None:
+    record = await store.create(
+        "ping", "owner", now=time.time() - settings.job_queue_stale_seconds + 30
+    )
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        return {"ran": True}
+
+    await execute_job(store, record.id, handler, stage="x")
+
+    done = await store.load(record.id)
+    assert done is not None
+    assert done.status is JobStatus.DONE
 
 
 # Sync tests from here on: run_job calls asyncio.run, which refuses to start inside the event loop

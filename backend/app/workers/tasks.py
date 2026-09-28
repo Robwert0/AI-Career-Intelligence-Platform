@@ -9,7 +9,14 @@ from celery.exceptions import SoftTimeLimitExceeded
 
 from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
-from app.core.job_store import TERMINAL, JobRecord, JobStateError, JobStatus, JobStore
+from app.core.job_store import (
+    TERMINAL,
+    JobRecord,
+    JobStateError,
+    JobStatus,
+    JobStore,
+    queue_is_stale,
+)
 from app.core.redis import create_redis
 from app.integrations.safe_fetch import SafeFetcher
 from app.schemas.match import JobIntakeRequest
@@ -69,6 +76,11 @@ async def execute_job(store: JobStore, job_id: str, handler: JobHandler, *, stag
         # crashed it would loop until the record expires and block every other job meanwhile.
         await fail_job(store, job_id, "worker_lost")
         logger.warning("job failed job_id=%s error_code=worker_lost", job_id)
+        return
+    if queue_is_stale(record, now=time.time(), limit_seconds=settings.job_queue_stale_seconds):
+        # The API already shows this job as queue_unavailable and has freed its slot.
+        await fail_job(store, job_id, "queue_unavailable")
+        logger.warning("job failed job_id=%s error_code=queue_unavailable", job_id)
         return
 
     running = await store.mark_running(job_id, stage=stage, now=time.time())

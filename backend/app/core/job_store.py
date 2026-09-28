@@ -152,13 +152,19 @@ class JobStore:
         return cast(bytes | None, await self._redis.getdel(self._blob_key(job_id, name)))
 
 
+def queue_is_stale(record: JobRecord, *, now: float, limit_seconds: int) -> bool:
+    # The API and the worker both judge by this, so they can never disagree. updated_at, not
+    # created_at: a resumed job is queued again long after it was created.
+    return record.status is JobStatus.QUEUED and now - record.updated_at > limit_seconds
+
+
 def effective_state(
     record: JobRecord, *, now: float, running_limit_seconds: int, queued_limit_seconds: int
 ) -> JobRecord:
     # A hard time-limit kill runs none of the worker's code, so only the reader can notice.
     if record.status is JobStatus.RUNNING and now - record.updated_at > running_limit_seconds:
         return record.model_copy(update={"status": JobStatus.FAILED, "error_code": "timeout"})
-    if record.status is JobStatus.QUEUED and now - record.created_at > queued_limit_seconds:
+    if queue_is_stale(record, now=now, limit_seconds=queued_limit_seconds):
         return record.model_copy(
             update={"status": JobStatus.FAILED, "error_code": "queue_unavailable"}
         )

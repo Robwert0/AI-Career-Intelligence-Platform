@@ -184,7 +184,7 @@ async def test_a_running_job_past_the_hard_limit_is_shown_as_timed_out(
 
     assert fresh.status is JobStatus.RUNNING
     assert (stale.status, stale.error_code) == (JobStatus.FAILED, "timeout")
-    # View-only: the stored record is untouched, so the worker stays the only writer.
+    # View-only: effective_state never writes the stale verdict back.
     stored = await store.load(record.id)
     assert stored is not None and stored.status is JobStatus.RUNNING
 
@@ -199,6 +199,19 @@ async def test_a_job_queued_too_long_is_shown_as_queue_unavailable(
     )
 
     assert (stale.status, stale.error_code) == (JobStatus.FAILED, "queue_unavailable")
+
+
+async def test_the_queue_cut_off_is_measured_from_the_last_update(
+    store: JobStore, owner: str
+) -> None:
+    record = await store.create("job_intake", owner, now=NOW)
+    requeued = record.model_copy(update={"updated_at": NOW + 800})
+
+    view = effective_state(
+        requeued, now=NOW + 901, running_limit_seconds=330, queued_limit_seconds=900
+    )
+
+    assert view.status is JobStatus.QUEUED
 
 
 async def test_finished_jobs_are_never_rewritten_by_the_view(store: JobStore, owner: str) -> None:
