@@ -233,17 +233,26 @@ async def test_a_file_that_is_neither_pdf_nor_docx_is_415(env: Env) -> None:
 
 
 async def test_an_upload_over_the_limit_is_413_and_stores_nothing(
-    env: Env, redis_client: Redis
+    env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     too_big = b"%PDF-" + b"0" * settings.max_upload_bytes
-    before = set(await redis_client.keys("job:*"))
+    writes: list[str] = []
+    # Recorded at the store, not by scanning keys: other test processes share this Redis.
+    for name in ("create", "put_blob", "attach_blob"):
+        real = getattr(env.store, name)
+
+        async def spy(*args: Any, _name: str = name, _real: Any = real, **kwargs: Any) -> Any:
+            writes.append(_name)
+            return await _real(*args, **kwargs)
+
+        monkeypatch.setattr(env.store, name, spy)
 
     response = await env.submit(files={"cv": ("cv.pdf", too_big, "application/pdf")})
 
     assert response.status_code == 413
     assert detail_code(response) == "file_too_large"
     assert env.queue.attempted == []
-    assert set(await redis_client.keys("job:*")) == before
+    assert writes == []
     assert await env.registry.holder(await env.owner()) is None
 
 
@@ -878,14 +887,19 @@ async def test_someone_elses_cv_retry_is_404_and_writes_nothing(
     await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
     enqueued = list(env.queue.enqueued)
     other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
-    before = {key: await redis_client.get(key) for key in await redis_client.keys("job:*")}
+    # Scoped to this analysis: other test processes share this Redis.
+    before = {
+        key: await redis_client.get(key) for key in await redis_client.keys(f"job:{analysis_id}*")
+    }
 
     response = await env.client.post(
         f"/match/analyses/{analysis_id}/retry", headers=other, **_paused_by_a(kind)
     )
 
     assert response.status_code == 404
-    after = {key: await redis_client.get(key) for key in await redis_client.keys("job:*")}
+    after = {
+        key: await redis_client.get(key) for key in await redis_client.keys(f"job:{analysis_id}*")
+    }
     assert after == before
     assert env.queue.enqueued == enqueued
     record = await env.store.load(analysis_id)
