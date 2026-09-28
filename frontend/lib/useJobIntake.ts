@@ -17,6 +17,7 @@ export function useJobIntake(onPosting: (view: JobView) => void) {
   const [view, setView] = useState<JobView | null>(null)
   const [problem, setProblem] = useState<Problem | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [resumed, setResumed] = useState(false)
   const deliver = useEffectEvent(onPosting)
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export function useJobIntake(onPosting: (view: JobView) => void) {
     setSubmitting(true)
     setProblem(null)
     setView(null)
+    setResumed(false)
     const result = await submitJob(intake)
     setSubmitting(false)
     if (result.ok) {
@@ -57,11 +59,16 @@ export function useJobIntake(onPosting: (view: JobView) => void) {
       sessionExpired()
       return
     }
-    // Amendment 4: one active intake per user. This is not a failure to show — resume polling
-    // the job that is already running instead.
+    // One active intake per user. This is not a failure to show — resume polling the job that
+    // is already running instead. The caller may have just typed a *different* job, so `resumed`
+    // lets the form say which posting is actually being read (jobSourceLabel).
     const already = runningJobId(result)
-    if (already !== undefined) setJobId(already)
-    else setProblem(requestProblem(result))
+    if (already !== undefined) {
+      setResumed(true)
+      setJobId(already)
+    } else {
+      setProblem(requestProblem(result))
+    }
   }
 
   return {
@@ -69,6 +76,7 @@ export function useJobIntake(onPosting: (view: JobView) => void) {
     view,
     failure: view?.status === 'failed' ? (view.error ?? UNKNOWN_FAILURE) : null,
     problem,
+    resumed,
     extract,
   }
 }

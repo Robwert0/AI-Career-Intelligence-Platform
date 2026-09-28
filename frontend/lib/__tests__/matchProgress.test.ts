@@ -13,6 +13,7 @@ import {
   analysisProblem,
   analysisStages,
   jobAnnouncement,
+  jobSourceLabel,
   jobStages,
   queueText,
   type StageItem,
@@ -223,6 +224,16 @@ describe('announcements', () => {
 
     expect(jobAnnouncement(view, jobStages('url', view))).toBe('Step 1 of 2: Reading the job page.')
     expect(jobAnnouncement(null, [])).toBe('Sending the job.')
+  })
+})
+
+describe('jobSourceLabel (409 job_in_progress: which posting is being resumed)', () => {
+  it('shows the source URL when there is one', () => {
+    expect(jobSourceLabel('https://jobs.example.com/1')).toBe('https://jobs.example.com/1')
+  })
+
+  it('falls back to "pasted text" for a text intake', () => {
+    expect(jobSourceLabel(null)).toBe('pasted text')
   })
 })
 

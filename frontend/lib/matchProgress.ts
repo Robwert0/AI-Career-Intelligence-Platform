@@ -76,6 +76,14 @@ export function analysisStages(
   return withStates(stages, ANALYSIS_STAGE_LABELS, view)
 }
 
+// A job_in_progress 409 silently resumes polling the caller's existing intake instead of showing
+// an error (see matchErrors.runningJobId) -- but if the user just typed a *different* job than the
+// one that's running, silence would leave them staring at someone else's requirements with no clue
+// why. Name what is actually being read.
+export function jobSourceLabel(sourceUrl: string | null): string {
+  return sourceUrl ?? 'pasted text'
+}
+
 export function queueText(position: number | null): string | null {
   if (position === null) return null
   if (position === 0) return "You're next in the queue."

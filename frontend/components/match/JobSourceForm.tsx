@@ -11,7 +11,7 @@ import {
   type JobInput,
   type JobTab,
 } from '@/lib/matchInputs'
-import { jobAnnouncement, jobStages } from '@/lib/matchProgress'
+import { jobAnnouncement, jobSourceLabel, jobStages } from '@/lib/matchProgress'
 import { charCount } from '@/lib/text'
 import { useFocusAfterRender } from '@/lib/useFocusAfterRender'
 import { useJobIntake } from '@/lib/useJobIntake'
@@ -168,6 +168,12 @@ export function JobSourceForm({ input, onInputChange, onExtracted }: Props) {
         </button>
       </fieldset>
 
+      {intake.resumed ? (
+        <p className="text-sm text-muted">
+          You already have a job intake in progress
+          {intake.view ? <>: {jobSourceLabel(intake.view.source_url)}</> : null}.
+        </p>
+      ) : null}
       {intake.busy ? <StageList items={stages} /> : null}
       <Announcer text={intake.busy ? jobAnnouncement(intake.view, stages) : ''} />
 
