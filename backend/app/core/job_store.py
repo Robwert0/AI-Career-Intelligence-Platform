@@ -104,3 +104,16 @@ class JobStore:
             return None
         # create_redis() never sets decode_responses, so values come back as bytes.
         return cast(bytes | None, await self._redis.getdel(self._blob_key(job_id, name)))
+
+
+def effective_state(
+    record: JobRecord, *, now: float, running_limit_seconds: int, queued_limit_seconds: int
+) -> JobRecord:
+    # A hard time-limit kill runs none of the worker's code, so only the reader can notice.
+    if record.status is JobStatus.RUNNING and now - record.updated_at > running_limit_seconds:
+        return record.model_copy(update={"status": JobStatus.FAILED, "error_code": "timeout"})
+    if record.status is JobStatus.QUEUED and now - record.created_at > queued_limit_seconds:
+        return record.model_copy(
+            update={"status": JobStatus.FAILED, "error_code": "queue_unavailable"}
+        )
+    return record

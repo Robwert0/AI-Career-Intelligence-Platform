@@ -63,3 +63,9 @@ def test_chat_policies_match_the_documented_budget() -> None:
 
 def test_chat_is_limited_more_tightly_per_user_than_per_ip() -> None:
     assert policies.CHAT_USER.capacity < policies.CHAT_IP.capacity
+
+
+def test_job_intake_is_limited_to_twenty_an_hour_per_user() -> None:
+    assert policies.MATCH_JOB_USER.capacity == 20
+    assert policies.MATCH_JOB_USER.refill_per_second == pytest.approx(20 / 3600)
+    assert policies.MATCH_JOB_USER.scope is Scope.USER

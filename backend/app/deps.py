@@ -16,11 +16,14 @@ from app.ai.rag import RagPipeline, RetrieverScope
 from app.ai.retriever import Retriever
 from app.core.config import settings
 from app.core.db import SessionLocal, get_db
+from app.core.job_store import JobStore
 from app.core.rate_limiter import Limiter, Policy, Scope
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
 from app.services import AuthService, IngestionService
 from app.services.auth_service import InvalidAccessTokenError
+from app.services.match_service import MatchService
+from app.workers.queue import TaskQueue
 
 bearer_scheme = HTTPBearer()
 
@@ -167,3 +170,19 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
         await _enforce(policy, str(user.id), limiter)
 
     return by_ip if policy.scope is Scope.IP else by_user
+
+
+def get_job_store(request: Request) -> JobStore:
+    return JobStore(request.app.state.redis, ttl_seconds=settings.job_ttl_seconds)
+
+
+def get_task_queue(request: Request) -> TaskQueue:
+    queue: TaskQueue = request.app.state.task_queue
+    return queue
+
+
+def get_match_service(
+    store: Annotated[JobStore, Depends(get_job_store)],
+    queue: Annotated[TaskQueue, Depends(get_task_queue)],
+) -> MatchService:
+    return MatchService(store, queue)

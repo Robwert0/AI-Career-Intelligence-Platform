@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from app.core.job_store import JobStateError, JobStatus, JobStore
+from app.core.job_store import JobStateError, JobStatus, JobStore, effective_state
 from app.core.redis import create_redis
 
 NOW = 1_000_000.0
@@ -166,3 +166,47 @@ async def test_an_invalid_blob_name_is_a_programming_error(
 
     with pytest.raises(ValueError):
         await store.put_blob(record.id, name, b"x", ttl_seconds=60)
+
+
+async def test_a_running_job_past_the_hard_limit_is_shown_as_timed_out(
+    store: JobStore, owner: str
+) -> None:
+    record = await store.create("job_intake", owner, now=NOW)
+    running = await store.mark_running(record.id, stage="extracting", now=NOW)
+    assert running is not None
+
+    fresh = effective_state(
+        running, now=NOW + 100, running_limit_seconds=330, queued_limit_seconds=900
+    )
+    stale = effective_state(
+        running, now=NOW + 331, running_limit_seconds=330, queued_limit_seconds=900
+    )
+
+    assert fresh.status is JobStatus.RUNNING
+    assert (stale.status, stale.error_code) == (JobStatus.FAILED, "timeout")
+    # View-only: the stored record is untouched, so the worker stays the only writer.
+    stored = await store.load(record.id)
+    assert stored is not None and stored.status is JobStatus.RUNNING
+
+
+async def test_a_job_queued_too_long_is_shown_as_queue_unavailable(
+    store: JobStore, owner: str
+) -> None:
+    record = await store.create("job_intake", owner, now=NOW)
+
+    stale = effective_state(
+        record, now=NOW + 901, running_limit_seconds=330, queued_limit_seconds=900
+    )
+
+    assert (stale.status, stale.error_code) == (JobStatus.FAILED, "queue_unavailable")
+
+
+async def test_finished_jobs_are_never_rewritten_by_the_view(store: JobStore, owner: str) -> None:
+    record = await store.create("job_intake", owner, now=NOW)
+    done = await store.mark_done(record.id, result={"x": 1}, now=NOW)
+    assert done is not None
+
+    assert (
+        effective_state(done, now=NOW + 99_999, running_limit_seconds=330, queued_limit_seconds=900)
+        == done
+    )
