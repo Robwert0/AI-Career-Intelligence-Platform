@@ -124,6 +124,15 @@ def test_the_summary_reports_every_metric_the_spec_asks_for() -> None:
     assert summary["stability"]["acme"]["status_flip_rate"] == 1.0
 
 
+def test_an_unlabelled_run_reports_no_agreement_rather_than_zero() -> None:
+    records = [RunRecord("acme", 1, 70, {"req:required:0": "demonstrated"}, 40.0, 1, 0)]
+
+    summary = summarise([template("acme", POSTING)], records, [])
+
+    assert summary["status_agreement"] is None
+    assert summary["labelled_requirement_runs"] == 0
+
+
 def test_real_unrelated_postings_join_the_built_in_set() -> None:
     postings = unrelated_postings([template("real-nurse", POSTING)])
 

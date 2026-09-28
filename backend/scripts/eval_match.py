@@ -370,7 +370,8 @@ async def _analyse_once(
 
 
 async def run_eval(args: argparse.Namespace) -> int:
-    files = [f for f in load_label_files(args.postings) if f.compared()]
+    # --unlabelled measures time, retries and citations before Robert has labelled anything.
+    files = [f for f in load_label_files(args.postings) if args.unlabelled or f.compared()]
     if not files:
         print(f"no labelled postings in {args.postings}; label the templates first")
         return 2
@@ -434,7 +435,7 @@ def summarise(
     return {
         "postings": len(files),
         "runs": len(records),
-        "status_agreement": round(tally.agreement, 3),
+        "status_agreement": round(tally.agreement, 3) if tally.labelled else None,
         "labelled_requirement_runs": tally.labelled,
         "confusion": {f"{label}->{got}": n for (label, got), n in sorted(tally.confusion.items())},
         "invalid_json_rate": round(rate(sum(g.retries for g in generators), first_attempts), 3),
@@ -474,6 +475,9 @@ def main() -> int:
         help="a directory of real off-domain postings, prepared like --postings",
     )
     commands.choices["run"].add_argument("--runs", type=int, default=3)
+    commands.choices["run"].add_argument(
+        "--unlabelled", action="store_true", help="also run postings that have no labels yet"
+    )
     commands.choices["run"].add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     args = parser.parse_args()
     handler = {"prepare": prepare, "calibrate": calibrate, "run": run_eval}[args.command]
