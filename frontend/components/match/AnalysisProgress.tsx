@@ -1,19 +1,24 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { FailureOut, MatchReport } from '@/lib/match'
+import { describedBy } from '@/lib/aria'
+import { decisionPanelKind } from '@/lib/decisionPanel'
+import type { Decision, FailureOut, MatchReport } from '@/lib/match'
 import { analysisFailureAction, type Problem } from '@/lib/matchErrors'
 import {
   buildCvRetryForm,
+  buildGithubRetryForm,
   candidateSources,
   cvRetryError,
+  githubRetryError,
   type CandidateInput,
 } from '@/lib/matchInputs'
 import { analysisAnnouncement, analysisStages, queueText } from '@/lib/matchProgress'
 import { useAnalysis } from '@/lib/useAnalysis'
 import { CvInput } from './CvInput'
+import { FieldError } from './Field'
 import { Announcer, StageList } from './StageList'
-import { ALERT, PRIMARY_BUTTON, SECONDARY_BUTTON, TEXT_BUTTON } from './styles'
+import { ALERT, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, TEXT_BUTTON } from './styles'
 
 const UNKNOWN_FAILURE: FailureOut = {
   code: 'unknown',
@@ -40,7 +45,6 @@ export function AnalysisProgress(props: Props) {
     onReport: props.onReport,
     onMoved: props.onMoved,
   })
-  const [cvRetryProblem, setCvRetryProblem] = useState<string | null>(null)
   const { view } = analysis
   const given = candidateSources(props.candidate)
   const stages = analysisStages(
@@ -60,12 +64,6 @@ export function AnalysisProgress(props: Props) {
     if (paused) document.getElementById('decision-title')?.focus()
   }, [paused])
 
-  function retryCv() {
-    const problem = cvRetryError(props.candidate)
-    setCvRetryProblem(problem)
-    if (problem === null) void analysis.retry(buildCvRetryForm(props.candidate))
-  }
-
   return (
     <div className="space-y-6">
       <StageList items={stages} />
@@ -78,40 +76,14 @@ export function AnalysisProgress(props: Props) {
       ) : null}
 
       {decision ? (
-        <section aria-labelledby="decision-title" className={ALERT}>
-          <h3 id="decision-title" tabIndex={-1} className="font-medium">
-            {decision.failed_source === 'cv'
-              ? "We couldn't read your CV"
-              : "We couldn't read your GitHub profile"}
-          </h3>
-          <p>{decision.error.message}</p>
-          {decision.failed_source === 'cv' ? (
-            <CvInput
-              idPrefix="retry"
-              candidate={props.candidate}
-              error={cvRetryProblem ?? undefined}
-              onChange={props.onCandidateChange}
-            />
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={analysis.acting}
-              onClick={decision.failed_source === 'cv' ? retryCv : () => void analysis.retry()}
-              className={PRIMARY_BUTTON}
-            >
-              {decision.failed_source === 'cv' ? 'Retry with this CV' : 'Retry'}
-            </button>
-            <button
-              type="button"
-              disabled={analysis.acting}
-              onClick={() => void analysis.continueWithout()}
-              className={SECONDARY_BUTTON}
-            >
-              Continue without {decision.failed_source === 'cv' ? 'your CV' : 'GitHub'}
-            </button>
-          </div>
-        </section>
+        <DecisionPanel
+          decision={decision}
+          candidate={props.candidate}
+          onCandidateChange={props.onCandidateChange}
+          acting={analysis.acting}
+          onRetry={analysis.retry}
+          onContinue={() => void analysis.continueWithout()}
+        />
       ) : null}
 
       {failure ? (
@@ -158,6 +130,155 @@ export function AnalysisProgress(props: Props) {
           </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+type DecisionPanelProps = {
+  decision: Decision
+  candidate: CandidateInput
+  onCandidateChange: (patch: Partial<CandidateInput>) => void
+  acting: boolean
+  onRetry: (form?: FormData) => Promise<void>
+  onContinue: () => void
+}
+
+// Follows decision.error.recovery, not failed_source alone (Amendment 5): the same CV failure can
+// need a brand new file, a pasted excerpt, or nothing at all (the model just needs another try
+// with the CV already on hand), and a GitHub failure that names the wrong user must never offer a
+// blind retry -- that would just re-fetch the same bad URL and spend another rate-limited token.
+function DecisionPanel({
+  decision,
+  candidate,
+  onCandidateChange,
+  acting,
+  onRetry,
+  onContinue,
+}: DecisionPanelProps) {
+  const kind = decisionPanelKind(decision.error.recovery)
+  const isCv = decision.failed_source === 'cv'
+
+  useEffect(() => {
+    if (!isCv) return
+    if (kind === 'paste_cv' && candidate.cvMode !== 'text') onCandidateChange({ cvMode: 'text' })
+    if (kind === 'choose_file' && candidate.cvMode !== 'file') onCandidateChange({ cvMode: 'file' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the decision itself changes
+  }, [decision, isCv, kind])
+
+  return (
+    <section aria-labelledby="decision-title" className={ALERT}>
+      <h3 id="decision-title" tabIndex={-1} className="font-medium">
+        {isCv ? "We couldn't read your CV" : "We couldn't read your GitHub profile"}
+      </h3>
+      <p>{decision.error.message}</p>
+
+      {isCv && (kind === 'choose_file' || kind === 'paste_cv') ? (
+        <CvRetryPanel
+          candidate={candidate}
+          onCandidateChange={onCandidateChange}
+          acting={acting}
+          onRetry={onRetry}
+        />
+      ) : null}
+
+      {!isCv && kind === 'fix_github_url' ? (
+        <GithubUrlRetryPanel candidate={candidate} acting={acting} onRetry={onRetry} />
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        {kind === 'retry_or_continue' ? (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={() => void onRetry(isCv ? buildCvRetryForm(candidate) : undefined)}
+            className={PRIMARY_BUTTON}
+          >
+            Retry
+          </button>
+        ) : null}
+        <button type="button" disabled={acting} onClick={onContinue} className={SECONDARY_BUTTON}>
+          Continue without {isCv ? 'your CV' : 'GitHub'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function CvRetryPanel({
+  candidate,
+  onCandidateChange,
+  acting,
+  onRetry,
+}: {
+  candidate: CandidateInput
+  onCandidateChange: (patch: Partial<CandidateInput>) => void
+  acting: boolean
+  onRetry: (form?: FormData) => Promise<void>
+}) {
+  const [problem, setProblem] = useState<string | null>(null)
+
+  function retry() {
+    const error = cvRetryError(candidate)
+    setProblem(error)
+    if (error === null) void onRetry(buildCvRetryForm(candidate))
+  }
+
+  return (
+    <>
+      <CvInput
+        idPrefix="retry"
+        candidate={candidate}
+        error={problem ?? undefined}
+        onChange={onCandidateChange}
+      />
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={acting} onClick={retry} className={PRIMARY_BUTTON}>
+          Retry with this CV
+        </button>
+      </div>
+    </>
+  )
+}
+
+function GithubUrlRetryPanel({
+  candidate,
+  acting,
+  onRetry,
+}: {
+  candidate: CandidateInput
+  acting: boolean
+  onRetry: (form?: FormData) => Promise<void>
+}) {
+  const [url, setUrl] = useState(candidate.githubUrl)
+  const [problem, setProblem] = useState<string | null>(null)
+
+  function retry() {
+    const error = githubRetryError(url)
+    setProblem(error)
+    if (error === null) void onRetry(buildGithubRetryForm(url))
+  }
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor="retry-github-url" className={LABEL}>
+        GitHub profile
+      </label>
+      <input
+        id="retry-github-url"
+        type="url"
+        inputMode="url"
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+        aria-invalid={Boolean(problem)}
+        aria-describedby={describedBy(problem && 'retry-github-url-error')}
+        className={FIELD}
+      />
+      <FieldError id="retry-github-url-error" message={problem} />
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={acting} onClick={retry} className={PRIMARY_BUTTON}>
+          Retry with this URL
+        </button>
+      </div>
     </div>
   )
 }
