@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chat, me } from '../api'
+import { authedRequest, chat, me } from '../api'
 import { getAccessToken, setAccessToken } from '../auth'
 
 function respond(status: number, body: unknown, headers: Record<string, string> = {}) {
@@ -106,5 +106,17 @@ describe('authedRequest', () => {
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.retryAfter).toBe(12)
+  })
+
+  it('sends FormData with the bearer token and no JSON content type', async () => {
+    setAccessToken('live')
+    const fetchMock = vi.fn(async () => respond(202, { analysis_id: 'a1' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await authedRequest('/match/analyses', { method: 'POST', body: new FormData() })
+
+    const headers = headersOf(fetchMock.mock.calls[0])
+    expect(headers.Authorization).toBe('Bearer live')
+    expect(headers['Content-Type']).toBeUndefined()
   })
 })
