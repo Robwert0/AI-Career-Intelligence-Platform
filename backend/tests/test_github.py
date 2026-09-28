@@ -423,7 +423,9 @@ async def test_a_failure_is_never_cached(redis_client: Redis) -> None:
     assert await redis_client.exists(f"match:gh:{user}") == 0
 
 
-async def test_a_corrupt_cache_entry_is_refetched(redis_client: Redis) -> None:
+async def test_a_corrupt_cache_entry_is_refetched(
+    redis_client: Redis, caplog: pytest.LogCaptureFixture
+) -> None:
     fetcher, cache, user = (
         CountingFetcher(),
         GitHubCache(redis_client, ttl_seconds=60),
@@ -431,10 +433,26 @@ async def test_a_corrupt_cache_entry_is_refetched(redis_client: Redis) -> None:
     )
     await redis_client.set(f"match:gh:{user}", json.dumps({"not": "a snapshot"}), ex=60)
 
-    snapshot = await load_github(user, fetcher=fetcher, cache=cache)
+    with caplog.at_level("WARNING"):
+        snapshot = await load_github(user, fetcher=fetcher, cache=cache)
 
     assert snapshot.profile.login == user
     assert fetcher.calls == [user]
+    assert "github cache entry corrupt" in caplog.text
+    assert "ValidationError" in caplog.text
+
+
+async def test_a_github_unavailable_mapping_is_logged_by_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    api = Api(routes={f"/users/{USER}": lambda _: httpx.Response(200, text="not json")})
+
+    with caplog.at_level("WARNING"):
+        error = await failure_of(api)
+
+    assert error.failure is GitHubFailure.GITHUB_UNAVAILABLE
+    assert "github_unavailable" in caplog.text
+    assert "JSONDecodeError" in caplog.text
 
 
 async def test_an_unreachable_cache_still_loads(caplog: pytest.LogCaptureFixture) -> None:

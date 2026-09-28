@@ -151,7 +151,8 @@ class GitHubClient:
             try:
                 async with asyncio.timeout(self._total_timeout):
                     return await self._snapshot(client, username)
-            except TimeoutError, httpx.HTTPError, FetchError:
+            except (TimeoutError, httpx.HTTPError, FetchError) as exc:
+                logger.warning("github_unavailable error_type=%s", type(exc).__name__)
                 raise GitHubError(GitHubFailure.GITHUB_UNAVAILABLE) from None
 
     async def _get(
@@ -171,6 +172,7 @@ class GitHubClient:
             if _is_rate_limit(response):
                 raise _rate_limited(response)
             if response.status_code != 200:
+                logger.warning("github_unavailable status=%s", response.status_code)
                 raise GitHubError(GitHubFailure.GITHUB_UNAVAILABLE)
             if raw:
                 return await read_bounded(response, MAX_README_BYTES, truncate=True)
@@ -184,7 +186,8 @@ class GitHubClient:
             return None
         try:
             return json.loads(body)
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("github_unavailable error_type=%s", type(exc).__name__)
             raise GitHubError(GitHubFailure.GITHUB_UNAVAILABLE) from None
 
     async def _snapshot(self, client: httpx.AsyncClient, username: str) -> GitHubSnapshot:
@@ -199,9 +202,11 @@ class GitHubClient:
         try:
             profile = GitHubProfile.model_validate(user)
             listed = [_ApiRepo.model_validate(item) for item in listing or []]
-        except ValidationError:
+        except ValidationError as exc:
+            logger.warning("github_unavailable error_type=%s", type(exc).__name__)
             raise GitHubError(GitHubFailure.GITHUB_UNAVAILABLE) from None
         if profile.login.lower() != username.lower():
+            logger.warning("github_unavailable reason=login_mismatch")
             raise GitHubError(GitHubFailure.GITHUB_UNAVAILABLE)
 
         candidates = [
@@ -212,15 +217,25 @@ class GitHubClient:
             and repo.name not in (".", "..")
         ]
         limit = asyncio.Semaphore(_CONCURRENCY)
+        ordered = candidates[:MAX_REPOS]
+        results: list[GitHubRepo | None] = [None] * len(ordered)
 
-        async def detail(repo: _ApiRepo) -> GitHubRepo:
+        async def detail(index: int, repo: _ApiRepo) -> None:
             async with limit:
-                return await self._repo(client, profile.login, repo)
+                results[index] = await self._repo(client, profile.login, repo)
 
-        repos = await asyncio.gather(*(detail(repo) for repo in candidates[:MAX_REPOS]))
+        try:
+            # TaskGroup, not gather: one repo failing cancels its still-running siblings
+            # instead of leaving them to finish in the background for nothing.
+            async with asyncio.TaskGroup() as tg:
+                for index, repo in enumerate(ordered):
+                    tg.create_task(detail(index, repo))
+        except ExceptionGroup as eg:
+            raise eg.exceptions[0] from None
+        repos = [repo for repo in results if repo is not None]
         return GitHubSnapshot(
             profile=profile,
-            repos=list(repos),
+            repos=repos,
             candidate_repos=len(candidates),
             fetched_at=time.time(),
         )
@@ -231,7 +246,8 @@ class GitHubClient:
         readme = await self._get(client, f"{base}/readme", raw=True)
         try:
             parsed_languages = _LANGUAGES.validate_python(languages or {})
-        except ValidationError:
+        except ValidationError as exc:
+            logger.warning("github_unavailable error_type=%s", type(exc).__name__)
             raise GitHubError(GitHubFailure.GITHUB_UNAVAILABLE) from None
         return GitHubRepo(
             name=repo.name,
@@ -269,7 +285,8 @@ class GitHubCache:
             return None
         try:
             return GitHubSnapshot.model_validate_json(raw)
-        except ValidationError:
+        except ValidationError as exc:
+            logger.warning("github cache entry corrupt error_type=%s", type(exc).__name__)
             return None
 
     async def put(self, username: str, snapshot: GitHubSnapshot) -> None:
