@@ -1,0 +1,170 @@
+import { describe, expect, it } from 'vitest'
+import type { ApiFailure } from '../http'
+import type { FailureOut, Recovery } from '../match'
+import { analysisFailureAction, jobRecovery, requestProblem } from '../matchErrors'
+
+function failure(patch: Partial<ApiFailure> & { status: number }): ApiFailure {
+  return { ok: false, detail: 'The server says so.', ...patch }
+}
+
+function failed(code: string, recovery: Recovery = 'retry'): FailureOut {
+  return { code, message: `message for ${code}`, recovery }
+}
+
+describe('requestProblem', () => {
+  it('reports an unreachable server', () => {
+    expect(requestProblem(failure({ status: 0 })).message).toMatch(/could not reach the server/i)
+  })
+
+  it('marks a 404 as expired so the inputs can be resubmitted', () => {
+    expect(requestProblem(failure({ status: 404 }))).toMatchObject({ expired: true })
+  })
+
+  it('keeps the running analysis id from a 409', () => {
+    const problem = requestProblem(
+      failure({ status: 409, code: 'analysis_in_progress', body: { analysis_id: 'run-1' } }),
+    )
+
+    expect(problem.runningAnalysisId).toBe('run-1')
+  })
+
+  it('still explains a 409 whose body has no id', () => {
+    const problem = requestProblem(failure({ status: 409, code: 'analysis_in_progress', body: {} }))
+
+    expect(problem.runningAnalysisId).toBeUndefined()
+    expect(problem.message).toMatch(/already have an analysis running/i)
+  })
+
+  it('turns Retry-After into a wait', () => {
+    expect(requestProblem(failure({ status: 429, retryAfter: 120 })).message).toBe(
+      'Too many requests. Try again in 2 minutes.',
+    )
+  })
+
+  it('reports a busy service with its wait', () => {
+    expect(requestProblem(failure({ status: 503, retryAfter: 30 })).message).toMatch(
+      /busy or unavailable\. Try again in 30 seconds\./,
+    )
+  })
+
+  it.each([
+    ['invalid_github_url', 422, 'github'],
+    ['consent_required', 422, 'consent'],
+    ['cv_and_cv_text', 422, 'cv'],
+    ['no_candidate_source', 422, 'sources'],
+    ['invalid_job', 422, 'job'],
+    ['invalid_url', 422, 'job'],
+    ['file_too_large', 413, 'cv'],
+    ['unsupported_type', 415, 'cv'],
+  ])('shows the server message for %s on the %s field', (code, status, field) => {
+    expect(requestProblem(failure({ status, code }))).toEqual({
+      message: 'The server says so.',
+      field,
+    })
+  })
+
+  it('shows the server message for an unknown code without guessing a field', () => {
+    expect(requestProblem(failure({ status: 422, code: 'brand_new' }))).toEqual({
+      message: 'The server says so.',
+      field: undefined,
+    })
+  })
+
+  it('does not echo raw validation errors', () => {
+    const problem = requestProblem(failure({ status: 422, detail: 'Field required' }))
+
+    expect(problem.message).toBe("Some of the input wasn't accepted. Check it and try again.")
+  })
+
+  it('treats an uncoded 413 as a CV size problem', () => {
+    expect(requestProblem(failure({ status: 413 }))).toEqual({
+      message: 'That file is larger than 5 MB.',
+      field: 'cv',
+    })
+  })
+
+  it('falls back to a generic message', () => {
+    expect(requestProblem(failure({ status: 500 })).message).toBe(
+      'Something went wrong. Please try again.',
+    )
+  })
+})
+
+describe('jobRecovery', () => {
+  it('offers paste, not retry, when a site blocks us', () => {
+    expect(jobRecovery(failed('blocked_by_robots', 'paste'), 'url')).toEqual({
+      offerRetry: false,
+      offerPaste: true,
+    })
+  })
+
+  it('offers both for a timeout', () => {
+    expect(jobRecovery(failed('fetch_timeout', 'paste'), 'url')).toEqual({
+      offerRetry: true,
+      offerPaste: true,
+    })
+  })
+
+  it('offers retry for a model failure on pasted text, with nothing to switch to', () => {
+    expect(jobRecovery(failed('ai_unavailable', 'retry'), 'text')).toEqual({
+      offerRetry: true,
+      offerPaste: false,
+    })
+  })
+
+  it('offers retry when the queue says wait', () => {
+    expect(jobRecovery(failed('queue_unavailable', 'wait'), 'url').offerRetry).toBe(true)
+  })
+
+  it('asks for a fixed URL rather than a retry', () => {
+    expect(jobRecovery(failed('invalid_url', 'fix_url'), 'url')).toEqual({
+      offerRetry: false,
+      offerPaste: true,
+    })
+  })
+})
+
+describe('analysisFailureAction', () => {
+  it.each([
+    ['file_too_large', 'edit_candidate'],
+    ['unsupported_type', 'edit_candidate'],
+    ['encrypted_pdf', 'edit_candidate'],
+    ['too_many_pages', 'edit_candidate'],
+    ['unsafe_docx', 'edit_candidate'],
+    ['github_user_not_found', 'edit_candidate'],
+    ['scanned_pdf_suspected', 'paste_cv'],
+    ['unreadable_document', 'paste_cv'],
+    ['invalid_job', 'edit_job'],
+    ['ai_timeout', 'retry'],
+    ['something_new', 'retry'],
+  ])('%s → %s', (code, action) => {
+    expect(analysisFailureAction(failed(code))).toBe(action)
+  })
+
+  it('waits when the backend says so', () => {
+    expect(analysisFailureAction(failed('queue_unavailable', 'wait'))).toBe('wait')
+  })
+
+  it.each([
+    ['not_a_cv', 'paste_cv', 'paste_cv'],
+    ['invalid_github_url', 'fix_github_url', 'edit_candidate'],
+  ] as const)('%s (recovery %s) → %s', (code, recovery, action) => {
+    expect(analysisFailureAction(failed(code, recovery))).toBe(action)
+  })
+
+  it.each([
+    ['choose_file', 'edit_candidate'],
+    ['paste_cv', 'paste_cv'],
+    ['fix_github_url', 'edit_candidate'],
+    ['retry_or_continue', 'retry'],
+  ] as const)('an unknown code with recovery %s → %s', (recovery, action) => {
+    expect(analysisFailureAction(failed('brand_new_code', recovery))).toBe(action)
+  })
+
+  it('degrades an unknown future recovery value to a plain message, never throwing', () => {
+    const exotic = failed('brand_new_code', 'something_not_yet_invented' as Recovery)
+
+    expect(() => analysisFailureAction(exotic)).not.toThrow()
+    expect(analysisFailureAction(exotic)).toBe('retry')
+  })
+})

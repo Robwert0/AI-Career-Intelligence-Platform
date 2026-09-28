@@ -1,0 +1,107 @@
+import type { ApiFailure } from './http'
+import type { FailureOut, Recovery } from './match'
+import type { JobTab } from './matchInputs'
+import { waitPhrase } from './messages'
+
+export type MatchField = 'job' | 'sources' | 'cv' | 'github' | 'consent'
+export type Problem = {
+  message: string
+  field?: MatchField
+  runningAnalysisId?: string
+  expired?: boolean
+}
+export type JobRecovery = { offerRetry: boolean; offerPaste: boolean }
+export type FailureAction = 'retry' | 'wait' | 'edit_candidate' | 'paste_cv' | 'edit_job'
+
+const FIELD_BY_CODE: Record<string, MatchField> = {
+  invalid_url: 'job',
+  invalid_job: 'job',
+  no_candidate_source: 'sources',
+  cv_and_cv_text: 'cv',
+  file_too_large: 'cv',
+  unsupported_type: 'cv',
+  invalid_github_url: 'github',
+  consent_required: 'consent',
+}
+
+const RETRYABLE_FETCH_CODES = new Set(['fetch_timeout', 'site_unavailable'])
+const CANDIDATE_INPUT_CODES = new Set([
+  'file_too_large',
+  'unsupported_type',
+  'encrypted_pdf',
+  'too_many_pages',
+  'unsafe_docx',
+  'github_user_not_found',
+  'github_rate_limited',
+  'github_unavailable',
+  'invalid_github_url',
+])
+const PASTE_CV_CODES = new Set(['scanned_pdf_suspected', 'unreadable_document', 'not_a_cv'])
+const JOB_CODES = new Set(['invalid_job', 'not_a_job_posting'])
+
+// Contract amendment (2026-09-28): recovery gained 4 candidate-source values. A code this map
+// doesn't know yet still resolves through recovery; a recovery value neither map knows falls back
+// to 'retry' rather than throwing, so a future backend addition degrades instead of crashing.
+const ACTION_BY_RECOVERY: Partial<Record<Recovery, FailureAction>> = {
+  choose_file: 'edit_candidate',
+  paste_cv: 'paste_cv',
+  fix_github_url: 'edit_candidate',
+  retry_or_continue: 'retry',
+  wait: 'wait',
+}
+
+function runningAnalysisId(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined
+  const id = (body as { analysis_id?: unknown }).analysis_id
+  return typeof id === 'string' && id !== '' ? id : undefined
+}
+
+export function requestProblem(failure: ApiFailure): Problem {
+  if (failure.code === 'analysis_in_progress') {
+    return {
+      message: 'You already have an analysis running. Open it, or wait for it to finish.',
+      runningAnalysisId: runningAnalysisId(failure.body),
+    }
+  }
+  switch (failure.status) {
+    case 0:
+      return { message: 'Could not reach the server. Check your connection and try again.' }
+    case 401:
+      return { message: 'Your session ended. Sign in again.' }
+    case 404:
+      return {
+        message:
+          'This request has expired or no longer exists. Start it again; your inputs are kept.',
+        expired: true,
+      }
+    case 429:
+      return { message: `Too many requests. ${waitPhrase(failure.retryAfter)}` }
+    case 503:
+      return { message: `The service is busy or unavailable. ${waitPhrase(failure.retryAfter)}` }
+  }
+  if (failure.code !== undefined) {
+    return { message: failure.detail, field: FIELD_BY_CODE[failure.code] }
+  }
+  if (failure.status === 413) return { message: 'That file is larger than 5 MB.', field: 'cv' }
+  if (failure.status === 422) {
+    return { message: "Some of the input wasn't accepted. Check it and try again." }
+  }
+  return { message: 'Something went wrong. Please try again.' }
+}
+
+export function jobRecovery(error: FailureOut, tab: JobTab): JobRecovery {
+  return {
+    offerRetry:
+      error.recovery === 'retry' ||
+      error.recovery === 'wait' ||
+      RETRYABLE_FETCH_CODES.has(error.code),
+    offerPaste: tab === 'url',
+  }
+}
+
+export function analysisFailureAction(error: FailureOut): FailureAction {
+  if (CANDIDATE_INPUT_CODES.has(error.code)) return 'edit_candidate'
+  if (PASTE_CV_CODES.has(error.code)) return 'paste_cv'
+  if (JOB_CODES.has(error.code)) return 'edit_job'
+  return ACTION_BY_RECOVERY[error.recovery] ?? 'retry'
+}

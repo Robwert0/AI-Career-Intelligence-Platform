@@ -3,7 +3,7 @@ import type { ApiResult } from './http'
 
 type Failure = Extract<ApiResult<unknown>, { ok: false }>
 
-function waitPhrase(retryAfter?: number): string {
+export function waitPhrase(retryAfter?: number): string {
   if (retryAfter === undefined) return 'Try again shortly.'
   return `Try again in ${formatWait(retryAfter)}.`
 }

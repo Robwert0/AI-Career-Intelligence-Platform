@@ -1,7 +1,15 @@
 import { authedRequest } from './api'
 import type { ApiResult } from './http'
 
-export type Recovery = 'paste' | 'retry' | 'fix_url' | 'wait'
+export type Recovery =
+  | 'paste'
+  | 'retry'
+  | 'fix_url'
+  | 'wait'
+  | 'choose_file'
+  | 'paste_cv'
+  | 'fix_github_url'
+  | 'retry_or_continue'
 export type FailureOut = { code: string; message: string; recovery: Recovery }
 
 export type Requirement = { text: string; sensitive: boolean }
