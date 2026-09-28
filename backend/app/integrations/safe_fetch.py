@@ -46,6 +46,10 @@ _UNSAFE_V6 = tuple(
 )
 _ALLOW_ALL: list[str] = []
 _DISALLOW_ALL = ["User-agent: *", "Disallow: /"]
+# httpx 0.28 _client.py:526 (_redirect_url) raises RemoteProtocolError with this exact prefix
+# for a malformed Location header; any other RemoteProtocolError is a genuine broken-server
+# wire-protocol failure (disconnect, bad status line, ...), not a URL problem.
+_INVALID_LOCATION_PREFIX = "Invalid URL in location header"
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,8 +327,12 @@ class SafeFetcher:
             # response.next_request, even though follow_redirects=False means it never
             # sends it — so a malformed Location can raise here, before we ever read it.
             return await client.send(request, stream=True)
-        except httpx.InvalidURL, httpx.RemoteProtocolError:
+        except httpx.InvalidURL:
             raise FetchError(FetchFailure.INVALID_URL) from None
+        except httpx.RemoteProtocolError as exc:
+            if str(exc).startswith(_INVALID_LOCATION_PREFIX):
+                raise FetchError(FetchFailure.INVALID_URL) from None
+            raise
 
     async def _robots_allow(self, client: httpx.AsyncClient, url: PublicUrl) -> bool:
         now = time.monotonic()

@@ -459,6 +459,26 @@ async def test_a_connection_failure_is_site_unavailable() -> None:
     )
 
 
+async def test_a_broken_server_response_is_site_unavailable() -> None:
+    def page(request: httpx.Request) -> httpx.Response:
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    handler, _ = site(page)
+
+    assert await failure(fetcher(handler).fetch("https://jobs.example.com/")) is (
+        FetchFailure.SITE_UNAVAILABLE
+    )
+
+
+async def test_a_broken_robots_response_is_site_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    assert await failure(fetcher(handler).fetch("https://jobs.example.com/")) is (
+        FetchFailure.SITE_UNAVAILABLE
+    )
+
+
 # --- robots.txt --------------------------------------------------------------------------
 
 
