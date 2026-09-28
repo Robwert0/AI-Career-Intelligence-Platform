@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 # About 8k tokens at a conservative 3 characters per token: with the prompt and a 6k-token
 # reply it stays inside the 16k context window. Longer CVs are cut and the cut is reported.
 MAX_CV_PROMPT_CHARS = 24_000
+# Same 2x ratio as job_extract's own byte cap (30_000 chars / 60_000 bytes): characters alone
+# don't bound tokens, since a multibyte-heavy CV can pack several tokens into 4 bytes each.
+MAX_CV_PROMPT_BYTES = 48_000
 MAX_CV_ITEMS = 40
 EVIDENCE_EXTRACT_SAMPLING = SamplingSettings(temperature=0.0, seed=0, max_output_tokens=6144)
 MIN_GROUNDED_SHARE = 0.7
@@ -112,9 +115,15 @@ def _entry_name(label: str) -> str | None:
     return _short_field(name.strip()) if separator else None
 
 
+def _cap(text: str) -> tuple[str, bool]:
+    # Characters alone don't bound tokens: an emoji is 4 bytes and several tokens.
+    encoded = text[:MAX_CV_PROMPT_CHARS].encode()
+    capped = encoded[:MAX_CV_PROMPT_BYTES].decode(errors="ignore")
+    return capped, len(capped) < len(text)
+
+
 async def extract_cv_evidence(generator: Generator, cv_text: str) -> CvEvidence:
-    truncated = len(cv_text) > MAX_CV_PROMPT_CHARS
-    text = cv_text[:MAX_CV_PROMPT_CHARS]
+    text, truncated = _cap(cv_text)
     flagged = detect_injection_phrases(text)
     if flagged:
         logger.warning("cv injection phrasing detected patterns=%s", ",".join(flagged))

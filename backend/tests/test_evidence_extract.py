@@ -2,12 +2,13 @@ import json
 from typing import Any
 
 import pytest
-from fakes import RejectingGenerator, ScriptedGenerator, UnavailableGenerator
+from fakes import OverflowingGenerator, RejectingGenerator, ScriptedGenerator, UnavailableGenerator
 
 from app.ai.generation import Role
 from app.ai.match.evidence_extract import (
     EVIDENCE_EXTRACT_SAMPLING,
     MAX_CV_ITEMS,
+    MAX_CV_PROMPT_BYTES,
     MAX_CV_PROMPT_CHARS,
     extract_cv_evidence,
     repo_link,
@@ -250,6 +251,55 @@ async def test_a_long_cv_is_cut_and_the_cut_reported() -> None:
 
     assert evidence.input_truncated is True
     assert len(generator.calls[0][1].content) < MAX_CV_PROMPT_CHARS + 100
+
+
+async def test_multibyte_cv_text_is_capped_by_bytes_as_well_as_characters() -> None:
+    generator = ScriptedGenerator([reply(WORK)])
+    emoji = "\U0001f600"
+
+    evidence = await extract_cv_evidence(generator, emoji * MAX_CV_PROMPT_CHARS)
+
+    assert evidence.input_truncated is True
+    assert generator.calls[0][1].content.count(emoji) == MAX_CV_PROMPT_BYTES // 4
+
+
+async def test_a_cv_cut_never_splits_a_multibyte_character() -> None:
+    generator = ScriptedGenerator([reply(WORK)])
+
+    await extract_cv_evidence(generator, "a" + "é" * MAX_CV_PROMPT_CHARS)
+
+    assert "�" not in generator.calls[0][1].content
+
+
+# --- carried from slice 2's structured-output fixes: shared by every caller of structured.py --
+
+
+async def test_a_unicode_escaped_canary_is_caught_after_decoding_without_retry() -> None:
+    # The replace runs on the already-serialised JSON text, so r... survives as a real
+    # escape for json.loads to decode — building it into the dict first would have json.dumps
+    # escape the literal backslash instead, defeating the point of the test.
+    leaky = entry("work", "Experience · Acme", "Reference PLACEHOLDER")
+    escaped_canary = "".join(f"\\u{ord(char):04x}" for char in CANARY)
+    raw = reply(leaky).replace("PLACEHOLDER", escaped_canary)
+    generator = ScriptedGenerator([raw, reply(WORK)])
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_cv_evidence(generator, CV)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
+
+
+async def test_cv_extraction_maps_context_overflow_to_input_too_long() -> None:
+    generator = OverflowingGenerator()
+
+    with pytest.raises(ExtractionError) as caught:
+        await extract_cv_evidence(generator, CV)
+
+    assert caught.value.code == "input_too_long"
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+    assert generator.calls == 1
 
 
 async def test_a_document_that_is_not_a_cv_is_reported() -> None:
