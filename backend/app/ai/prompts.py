@@ -7,13 +7,14 @@ from app.models import Chunk
 CV_EXTRACTS_TAG = "cv_extracts"
 EXTRACT_TAG = "extract"
 QUESTION_TAG = "question"
+JOB_POSTING_TAG = "job_posting"
 
 _SPECIAL_TOKEN = re.compile(r"<[|｜]([^|｜>]*)[|｜]>")
 _SENTENCE_MARKERS = re.compile(r"</?s>", re.IGNORECASE)
 _INSTRUCTION_MARKERS = re.compile(r"\[/?INST\]", re.IGNORECASE)
 _TURN_MARKERS = re.compile(r"<(?:start|end)_of_turn>|</?<?SYS>?>|<(?:bos|eos)>", re.IGNORECASE)
 _OWN_TAGS = re.compile(
-    rf"</?(?:{CV_EXTRACTS_TAG}|{EXTRACT_TAG}|{QUESTION_TAG})\b[^>]*>",
+    rf"</?(?:{CV_EXTRACTS_TAG}|{EXTRACT_TAG}|{QUESTION_TAG}|{JOB_POSTING_TAG})\b[^>]*>",
     re.IGNORECASE,
 )
 
