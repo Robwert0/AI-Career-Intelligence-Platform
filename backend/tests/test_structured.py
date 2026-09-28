@@ -1,8 +1,16 @@
+from typing import Any
+
 import pytest
 from fakes import RejectingGenerator, ScriptedGenerator, UnavailableGenerator
 from pydantic import BaseModel, ConfigDict
 
-from app.ai.generation import FinishReason, Message, Role, SamplingSettings
+from app.ai.generation import (
+    FinishReason,
+    GenerationRequestError,
+    Message,
+    Role,
+    SamplingSettings,
+)
 from app.ai.match.structured import ExtractionError, generate_validated
 from app.ai.prompts import CANARY
 
@@ -95,3 +103,50 @@ async def test_provider_failures_map_to_codes_without_chaining(
 
     assert caught.value.code == code
     assert caught.value.__suppress_context__ is True
+
+
+class _StatusFailingGenerator:
+    model_name = "status-failing-generator"
+
+    async def generate(self, messages: list[Message], **kwargs: Any) -> Any:
+        raise GenerationRequestError("the fake provider said no thanks", status_code=503)
+
+
+async def test_a_provider_failure_logs_its_type_and_status_but_not_its_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"), pytest.raises(ExtractionError):
+        await generate_validated(_StatusFailingGenerator(), MESSAGES, Answer, SAMPLING)
+
+    assert "GenerationRequestError" in caplog.text
+    assert "503" in caplog.text
+    assert "no thanks" not in caplog.text
+
+
+async def test_two_invalid_replies_are_logged_with_finish_reason_and_problems_not_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    generator = ScriptedGenerator(
+        ['{"value": "SECRET-CV-TEXT"}', '{"value": "STILL-SECRET"}'],
+        finish_reasons=[FinishReason.STOP, FinishReason.LENGTH],
+    )
+
+    with caplog.at_level("WARNING"), pytest.raises(ExtractionError):
+        await generate_validated(generator, MESSAGES, Answer, SAMPLING)
+
+    assert "length" in caplog.text
+    assert "value: int_parsing" in caplog.text or "truncated" in caplog.text
+    assert "SECRET-CV-TEXT" not in caplog.text
+    assert "STILL-SECRET" not in caplog.text
+
+
+async def test_a_leak_check_failure_is_logged_without_the_reply_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    generator = ScriptedGenerator([f'{{"value": 1, "note": "{CANARY}"}}'])
+
+    with caplog.at_level("WARNING"), pytest.raises(ExtractionError):
+        await generate_validated(generator, MESSAGES, Answer, SAMPLING)
+
+    assert "canary" in caplog.text
+    assert CANARY not in caplog.text

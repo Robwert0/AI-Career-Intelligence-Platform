@@ -56,9 +56,17 @@ class GenerationResult:
 class GeneratorUnavailableError(Exception):
     """Provider unreachable or failing; the same request may succeed on a later retry."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class GenerationRequestError(Exception):
     """Provider rejected the request itself; retrying it unchanged will fail identically."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ContextOverflowError(GenerationRequestError):

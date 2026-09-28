@@ -1,3 +1,4 @@
+import logging
 from dataclasses import replace
 from typing import Any
 
@@ -16,6 +17,8 @@ from app.ai.generation import (
 from app.ai.match.prompts import correction_message
 from app.ai.output_guard import Verdict, validate_output
 
+logger = logging.getLogger(__name__)
+
 _LEAK_CHECKS = frozenset({"canary", "ngram"})
 
 
@@ -23,6 +26,17 @@ class ExtractionError(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def _log_provider_failure(
+    exc: GeneratorUnavailableError | GenerationRequestError, code: str
+) -> None:
+    logger.warning(
+        "structured extraction provider failure error_type=%s status=%s code=%s",
+        type(exc).__name__,
+        exc.status_code,
+        code,
+    )
 
 
 async def _generate(
@@ -33,11 +47,14 @@ async def _generate(
 ) -> GenerationResult:
     try:
         return await generator.generate(messages, sampling=sampling, response_schema=schema)
-    except GeneratorUnavailableError:
+    except GeneratorUnavailableError as exc:
+        _log_provider_failure(exc, "ai_unavailable")
         raise ExtractionError("ai_unavailable") from None
-    except ContextOverflowError:
+    except ContextOverflowError as exc:
+        _log_provider_failure(exc, "input_too_long")
         raise ExtractionError("input_too_long") from None
-    except GenerationRequestError:
+    except GenerationRequestError as exc:
+        _log_provider_failure(exc, "internal_error")
         raise ExtractionError("internal_error") from None
 
 
@@ -54,6 +71,11 @@ def _strings(value: Any) -> list[str]:
 def _checked(result: GenerationResult, system_prompt: str) -> Verdict:
     verdict = validate_output(result, protected_prompt=system_prompt)
     if verdict.failed_check in _LEAK_CHECKS:
+        logger.warning(
+            "structured extraction leak check failed failed_check=%s finish_reason=%s",
+            verdict.failed_check,
+            result.finish_reason.value,
+        )
         raise ExtractionError("ai_invalid_output")
     return verdict
 
@@ -95,7 +117,14 @@ async def generate_validated[T: BaseModel](
     if parsed is None:
         retry = [*messages, correction_message(problems)]
         second = await _generate(generator, retry, sampling, schema)
-        parsed, _ = _parse(second, model, system_prompt)
+        parsed, problems = _parse(second, model, system_prompt)
+        if parsed is None:
+            # `problems` is already codes and loc paths only (built in _parse), never the reply.
+            logger.warning(
+                "structured extraction failed after retry finish_reason=%s problems=%s",
+                second.finish_reason.value,
+                problems,
+            )
     if parsed is None:
         raise ExtractionError("ai_invalid_output")
     return parsed
