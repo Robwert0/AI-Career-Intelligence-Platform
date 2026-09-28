@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+import redis.exceptions
 from celery.exceptions import SoftTimeLimitExceeded
 from redis.asyncio import Redis
 
@@ -204,3 +205,79 @@ def test_the_celery_app_is_configured_for_id_only_json_tasks() -> None:
     assert conf.task_soft_time_limit == settings.job_soft_time_limit_seconds
     assert conf.task_time_limit > conf.task_soft_time_limit
     assert "jobs.ping" in celery_app.tasks
+
+
+async def test_a_job_found_running_was_orphaned_by_a_crash_and_is_not_rerun(
+    store: JobStore,
+) -> None:
+    record = await store.create("ping", "owner", now=NOW)
+    await store.mark_running(record.id, stage="parsing", now=NOW + 1)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        raise AssertionError("an input that crashed the worker must not run again")
+
+    await execute_job(store, record.id, handler, stage="parsing")
+
+    failed = await store.load(record.id)
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "worker_lost")
+
+
+async def test_an_unserializable_result_fails_the_job_instead_of_leaving_it_running(
+    store: JobStore,
+) -> None:
+    record = await store.create("ping", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        return {"score": object()}
+
+    await execute_job(store, record.id, handler, stage="scoring")
+
+    failed = await store.load(record.id)
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "internal_error")
+
+
+async def test_a_job_finished_elsewhere_during_the_run_keeps_the_first_outcome(
+    store: JobStore,
+) -> None:
+    record = await store.create("ping", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        await store.mark_failed(current.id, error_code="worker_lost", now=NOW + 1)
+        return {"late": True}
+
+    await execute_job(store, record.id, handler, stage="x")
+
+    finished = await store.load(record.id)
+    assert finished is not None
+    assert finished.error_code == "worker_lost"
+
+
+class _StoreThatCannotRecordFailure(JobStore):
+    async def mark_failed(self, job_id: str, *, error_code: str, now: float) -> JobRecord | None:
+        raise redis.exceptions.TimeoutError("redis blip")
+
+
+async def _leaks_pii(store: JobStore, record: JobRecord) -> dict[str, Any]:
+    raise RuntimeError("Jane Doe, CNP 1960101223344")
+
+
+@celery_app.task(name="tests.leaks_pii")
+def _leaky_task(job_id: str) -> None:
+    run_job(job_id, _leaks_pii, stage="parsing")
+
+
+def test_a_store_failure_after_a_handler_error_never_chains_the_handler_message(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    job_id = _create_job()
+    monkeypatch.setattr(tasks, "JobStore", _StoreThatCannotRecordFailure)
+
+    with caplog.at_level("DEBUG"):
+        outcome = _leaky_task.apply(args=(job_id,))
+
+    # Celery logs the full chained traceback of whatever escapes the task.
+    assert outcome.traceback is not None
+    assert "Jane Doe" not in str(outcome.traceback)
+    assert "Jane Doe" not in caplog.text

@@ -8,7 +8,7 @@ from typing import Any
 from celery.exceptions import SoftTimeLimitExceeded
 
 from app.core.config import settings
-from app.core.job_store import TERMINAL, JobRecord, JobStateError, JobStore
+from app.core.job_store import TERMINAL, JobRecord, JobStateError, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.workers.celery_app import celery_app
 
@@ -29,6 +29,29 @@ async def fail_job(store: JobStore, job_id: str, error_code: str) -> None:
         await store.mark_failed(job_id, error_code=error_code, now=time.time())
 
 
+async def _run_handler(
+    store: JobStore, record: JobRecord, handler: JobHandler
+) -> tuple[str | None, str | None]:
+    # Returns (error_code, error_type); None, None means done. Every store call stays outside the
+    # except blocks: a store failure raised inside one would chain the handler's exception, whose
+    # message can carry CV text, into Celery's logged traceback.
+    try:
+        result = await handler(store, record)
+    except JobError as exc:
+        return exc.code, None
+    except SoftTimeLimitExceeded:
+        return "timeout", None
+    except Exception as exc:
+        return "internal_error", type(exc).__name__
+
+    try:
+        with contextlib.suppress(JobStateError):
+            await store.mark_done(record.id, result=result, now=time.time())
+    except Exception as exc:
+        return "internal_error", type(exc).__name__
+    return None, None
+
+
 async def execute_job(store: JobStore, job_id: str, handler: JobHandler, *, stage: str) -> None:
     record = await store.load(job_id)
     if record is None:
@@ -37,33 +60,26 @@ async def execute_job(store: JobStore, job_id: str, handler: JobHandler, *, stag
     if record.status in TERMINAL:
         logger.info("job skipped job_id=%s reason=redelivered status=%s", job_id, record.status)
         return
+    if record.status is JobStatus.RUNNING:
+        # Only a crashed or killed worker leaves a job running; re-running the input that
+        # crashed it would loop until the record expires and block every other job meanwhile.
+        await fail_job(store, job_id, "worker_lost")
+        logger.warning("job failed job_id=%s error_code=worker_lost", job_id)
+        return
 
     running = await store.mark_running(job_id, stage=stage, now=time.time())
     if running is None:
         return
 
     started = time.monotonic()
-    try:
-        result = await handler(store, running)
-    except JobError as exc:
-        await fail_job(store, job_id, exc.code)
-        logger.warning("job failed job_id=%s error_code=%s", job_id, exc.code)
-        return
-    except SoftTimeLimitExceeded:
-        await fail_job(store, job_id, "timeout")
-        logger.warning("job failed job_id=%s error_code=timeout", job_id)
-        return
-    except Exception as exc:
-        # Type name only: exception messages can carry CV or job text.
-        await fail_job(store, job_id, "internal_error")
-        logger.error(
-            "job failed job_id=%s error_code=internal_error error_type=%s",
-            job_id,
-            type(exc).__name__,
+    error_code, error_type = await _run_handler(store, running, handler)
+    if error_code is not None:
+        await fail_job(store, job_id, error_code)
+        logger.warning(
+            "job failed job_id=%s error_code=%s error_type=%s", job_id, error_code, error_type
         )
         return
 
-    await store.mark_done(job_id, result=result, now=time.time())
     logger.info(
         "job done job_id=%s kind=%s duration_ms=%d",
         job_id,
@@ -82,10 +98,13 @@ async def _with_store(work: Callable[[JobStore], Awaitable[None]]) -> None:
 
 
 def run_job(job_id: str, handler: JobHandler, *, stage: str) -> None:
+    timed_out = False
     try:
         asyncio.run(_with_store(lambda store: execute_job(store, job_id, handler, stage=stage)))
     except SoftTimeLimitExceeded:
         # The signal can land outside the handler, e.g. inside the event loop itself.
+        timed_out = True
+    if timed_out:
         asyncio.run(_with_store(lambda store: fail_job(store, job_id, "timeout")))
         logger.warning("job failed job_id=%s error_code=timeout", job_id)
 
