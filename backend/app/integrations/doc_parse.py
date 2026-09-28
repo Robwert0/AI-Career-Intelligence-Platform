@@ -10,6 +10,7 @@ import pdfplumber
 from pdfminer.pdfdocument import PDFEncryptionError
 from pdfplumber.utils.exceptions import PdfminerException
 
+from app.core.text_hygiene import strip_invisible_unicode
 from app.integrations.cv_parser import markdown_from_pdf
 from app.integrations.errors import DocumentError, DocumentFailure
 
@@ -69,6 +70,7 @@ def sniff_type(data: bytes) -> Literal["pdf", "docx"]:
 
 
 def _clean(text: str) -> tuple[str, bool]:
+    text = strip_invisible_unicode(text)
     text = _CONTROL.sub("", text.replace("\r\n", "\n").replace("\xa0", " "))
     text = _BLANK_RUNS.sub("\n\n", text).strip()
     return text[:MAX_TEXT_CHARS], len(text) > MAX_TEXT_CHARS

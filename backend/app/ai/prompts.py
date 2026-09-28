@@ -2,6 +2,7 @@ import re
 import secrets
 
 from app.ai.generation import Message, Role
+from app.core.text_hygiene import strip_invisible_unicode
 from app.models import Chunk
 
 CV_EXTRACTS_TAG = "cv_extracts"
@@ -26,6 +27,7 @@ def _bracket(match: re.Match[str]) -> str:
 
 
 def escape_untrusted(text: str) -> str:
+    text = strip_invisible_unicode(text)
     text = _SPECIAL_TOKEN.sub(r"[\1]", text)
     text = _TURN_MARKERS.sub(_bracket, text)
     text = _SENTENCE_MARKERS.sub(_bracket, text)

@@ -1,6 +1,7 @@
 import re
 
 from app.ai.redaction import redact_phone_numbers
+from app.core.text_hygiene import strip_invisible_unicode
 
 EMAIL_PLACEHOLDER = "[email redacted]"
 URL_PLACEHOLDER = "[profile link redacted]"
@@ -68,6 +69,7 @@ def mask_contacts(text: str) -> str:
 
 def scrub_evidence_text(text: str) -> str:
     """Drops sentences naming a sensitive characteristic and masks emails and phone numbers."""
+    text = strip_invisible_unicode(text)
     kept = (piece.strip() for piece in _PIECES.split(text))
     return mask_contacts(
         " ".join(

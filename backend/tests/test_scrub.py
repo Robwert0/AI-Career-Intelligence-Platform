@@ -146,3 +146,14 @@ def test_an_email_embedded_in_a_url_is_still_masked() -> None:
 
     assert EMAIL_PLACEHOLDER in scrubbed
     assert "jane@x.com" not in scrubbed
+
+
+# --- M6: invisible unicode, closing the last untrusted channel (github readme/bio) --------
+
+
+def test_invisible_unicode_is_stripped_from_github_text() -> None:
+    hostile = "Built Go services.​Led a team of 4."
+
+    scrubbed = scrub_evidence_text(hostile)
+
+    assert "​" not in scrubbed
