@@ -14,14 +14,18 @@ _MIN_PHONE_DIGITS = 9
 _MIN_SPACED_PHONE_DIGITS = 8
 _MIN_YEAR, _MAX_YEAR = 1950, 2035
 _NUMBER_RUN = re.compile(r"(?<![\w/])\(?\+?\d[\d \t().-]*\d(?!\w)")
+# A clean two-group shape only: "2345-6789" or "2021 - 2025", not a date bumped up against an
+# unrelated later number by the dot-bridging that lets phone groups like "0700.000.000" match
+# ("Last pushed 2026-08. 12 stars" must never become one run).
 _HYPHENATED_PAIR = re.compile(r"^\(?\+?\s*(\d{4})\s*-\s*(\d{4})\s*\)?$")
 
 
-def _is_year_range(run: str) -> bool:
-    match = _HYPHENATED_PAIR.fullmatch(run.strip())
-    if match is None:
-        return False
-    first, second = int(match.group(1)), int(match.group(2))
+def _hyphenated_pair(run: str) -> re.Match[str] | None:
+    return _HYPHENATED_PAIR.fullmatch(run.strip())
+
+
+def _is_year_range(pair: re.Match[str]) -> bool:
+    first, second = int(pair.group(1)), int(pair.group(2))
     return _MIN_YEAR <= first <= _MAX_YEAR and _MIN_YEAR <= second <= _MAX_YEAR
 
 
@@ -33,12 +37,15 @@ def _redact(match: re.Match[str]) -> str:
     if digits >= _MIN_SPACED_PHONE_DIGITS:
         if " " in run and "-" not in run:
             return PHONE_PLACEHOLDER
-        if "-" in run and not _is_year_range(run):
-            # Neither half reads as a plausible year, so a hyphen here is how a Hong Kong
-            # number is grouped, not a date range. A real 8-digit number whose first half
-            # happens to fall in 1950-2035 (rare, but possible) still slips through: that gap
-            # is the trade-off of a punctuation heuristic instead of a numbering-plan library.
-            return PHONE_PLACEHOLDER
+        if "-" in run:
+            pair = _hyphenated_pair(run)
+            if pair is not None and not _is_year_range(pair):
+                # Neither half reads as a plausible year, so a hyphen here is how a Hong Kong
+                # number is grouped, not a date range. A real 8-digit number whose first half
+                # happens to fall in 1950-2035 (rare, but possible) still slips through: that
+                # gap is the trade-off of a punctuation heuristic instead of a numbering-plan
+                # library.
+                return PHONE_PLACEHOLDER
     return run
 
 

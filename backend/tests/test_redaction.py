@@ -74,6 +74,14 @@ def test_a_hyphenated_eight_digit_run_still_survives_as_a_date_range(text: str) 
     assert redact_phone_numbers(text) == text
 
 
+def test_a_date_followed_by_an_unrelated_number_is_not_swept_into_one_run() -> None:
+    # "Last pushed 2026-08. 12 stars": the period-space bridge that lets dot-separated phone
+    # groups match ("0700.000.000") must not pull an unrelated later number into the same run.
+    text = "Last pushed 2026-08. 12 stars"
+
+    assert redact_phone_numbers(text) == text
+
+
 def test_a_hyphenated_hong_kong_phone_number_is_redacted() -> None:
     # "2345-6789" is structurally identical to "2021-2025" (two hyphenated 4-digit groups);
     # what tells them apart is that neither half of a real phone number is a plausible year.
