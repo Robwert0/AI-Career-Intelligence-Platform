@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 import { getJob, submitJob, type FailureOut, type JobIntake, type JobView } from '@/lib/match'
-import { requestProblem, type Problem } from '@/lib/matchErrors'
+import { requestProblem, runningJobId, type Problem } from '@/lib/matchErrors'
 import { poll } from '@/lib/poll'
 
 const NO_POSTING: Problem = { message: 'The job was read, but no details came back. Try again.' }
@@ -49,8 +49,18 @@ export function useJobIntake(onPosting: (view: JobView) => void) {
     setView(null)
     const result = await submitJob(intake)
     setSubmitting(false)
-    if (result.ok) setJobId(result.data.job_id)
-    else if (result.status === 401) sessionExpired()
+    if (result.ok) {
+      setJobId(result.data.job_id)
+      return
+    }
+    if (result.status === 401) {
+      sessionExpired()
+      return
+    }
+    // Amendment 4: one active intake per user. This is not a failure to show — resume polling
+    // the job that is already running instead.
+    const already = runningJobId(result)
+    if (already !== undefined) setJobId(already)
     else setProblem(requestProblem(result))
   }
 

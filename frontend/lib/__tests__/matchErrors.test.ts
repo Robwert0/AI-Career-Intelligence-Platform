@@ -6,6 +6,7 @@ import {
   jobRecovery,
   requestProblem,
   retryLimitProblem,
+  runningJobId,
 } from '../matchErrors'
 
 function failure(patch: Partial<ApiFailure> & { status: number }): ApiFailure {
@@ -167,6 +168,20 @@ describe('jobRecovery', () => {
       offerPaste: true,
     })
   })
+
+  it('offers the paste tab for input_too_long from a fetched url, never a pointless retry (amendment 4)', () => {
+    expect(jobRecovery(failed('input_too_long', 'paste'), 'url')).toEqual({
+      offerRetry: false,
+      offerPaste: true,
+    })
+  })
+
+  it('offers neither button for input_too_long when already on the paste tab (amendment 4)', () => {
+    expect(jobRecovery(failed('input_too_long', 'paste'), 'text')).toEqual({
+      offerRetry: false,
+      offerPaste: false,
+    })
+  })
 })
 
 describe('analysisFailureAction', () => {
@@ -229,5 +244,47 @@ describe('retryLimitProblem (amendment 3: retry spends a 5/hour analysis token)'
     expect(retryLimitProblem(failure({ status: 401 })).message).toBe(
       'Your session ended. Sign in again.',
     )
+  })
+})
+
+describe('runningJobId (amendment 4: one active intake per user)', () => {
+  it('reads the running job id from a job_in_progress 409', () => {
+    const running = failure({
+      status: 409,
+      code: 'job_in_progress',
+      body: { job_id: 'job-9' },
+    })
+
+    expect(runningJobId(running)).toBe('job-9')
+  })
+
+  it('is undefined for any other code, even if the body happens to carry a job_id', () => {
+    const other = failure({
+      status: 409,
+      code: 'analysis_in_progress',
+      body: { job_id: 'job-9' },
+    })
+
+    expect(runningJobId(other)).toBeUndefined()
+  })
+
+  it('is undefined when the body has no job_id', () => {
+    expect(
+      runningJobId(failure({ status: 409, code: 'job_in_progress', body: {} })),
+    ).toBeUndefined()
+  })
+
+  it('never surfaces as a requestProblem error message (it is not an error state)', () => {
+    const running = failure({
+      status: 409,
+      code: 'job_in_progress',
+      detail: 'A job intake is already running.',
+      body: { job_id: 'job-9' },
+    })
+
+    // requestProblem is the generic error mapper; job_in_progress is deliberately not special-
+    // cased there because the caller (useJobIntake) resumes polling instead of showing an error.
+    // The natural fallthrough still returns a sane message if something calls it by mistake.
+    expect(requestProblem(running).message).toBe('A job intake is already running.')
   })
 })

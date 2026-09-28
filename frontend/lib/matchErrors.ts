@@ -50,17 +50,24 @@ const ACTION_BY_RECOVERY: Partial<Record<Recovery, FailureAction>> = {
   wait: 'wait',
 }
 
-function runningAnalysisId(body: unknown): string | undefined {
+function idFromBody(body: unknown, field: 'analysis_id' | 'job_id'): string | undefined {
   if (typeof body !== 'object' || body === null) return undefined
-  const id = (body as { analysis_id?: unknown }).analysis_id
+  const id = (body as Record<string, unknown>)[field]
   return typeof id === 'string' && id !== '' ? id : undefined
+}
+
+// Amendment 4: one active job intake per user. Unlike analysis_in_progress, this is not an error
+// state — the caller (useJobIntake) resumes polling the running job instead of showing anything,
+// so this stays a standalone extractor rather than a requestProblem branch.
+export function runningJobId(failure: ApiFailure): string | undefined {
+  return failure.code === 'job_in_progress' ? idFromBody(failure.body, 'job_id') : undefined
 }
 
 export function requestProblem(failure: ApiFailure): Problem {
   if (failure.code === 'analysis_in_progress') {
     return {
       message: 'You already have an analysis running. Open it, or wait for it to finish.',
-      runningAnalysisId: runningAnalysisId(failure.body),
+      runningAnalysisId: idFromBody(failure.body, 'analysis_id'),
     }
   }
   switch (failure.status) {
