@@ -197,3 +197,39 @@ def test_a_soft_time_limit_under_ten_seconds_is_rejected(monkeypatch: pytest.Mon
 
     with pytest.raises(ValidationError, match="job_soft_time_limit_seconds"):
         Settings()
+
+
+def test_generation_and_intake_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "GENERATION_CONTEXT_TOKENS",
+        "JOB_EXTRACT_GENERATION_TIMEOUT_SECONDS",
+        "JOB_QUEUE_STALE_SECONDS",
+        "JOB_SOFT_TIME_LIMIT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.generation_context_tokens == 16384
+    assert settings.job_extract_generation_timeout_seconds == 120
+    assert settings.job_queue_stale_seconds == 900
+    assert settings.job_hard_time_limit_seconds == settings.job_soft_time_limit_seconds + 30
+
+
+def test_a_context_window_too_small_for_a_posting_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GENERATION_CONTEXT_TOKENS", "4096")
+
+    with pytest.raises(ValidationError, match="generation_context_tokens"):
+        Settings()
+
+
+def test_two_extraction_attempts_must_fit_inside_the_soft_time_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JOB_SOFT_TIME_LIMIT_SECONDS", "200")
+    monkeypatch.setenv("JOB_EXTRACT_GENERATION_TIMEOUT_SECONDS", "100")
+
+    with pytest.raises(ValidationError, match="soft time limit"):
+        Settings()

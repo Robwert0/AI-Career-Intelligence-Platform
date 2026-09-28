@@ -164,7 +164,9 @@ async def test_the_retriever_scope_closes_before_the_generator_is_called() -> No
     witness: list[tuple[int, int]] = []
 
     class WatchingGenerator(FakeGenerator):
-        async def generate(self, messages, *, sampling=None, top_logprobs=None):  # type: ignore[no-untyped-def]
+        async def generate(  # type: ignore[no-untyped-def]
+            self, messages, *, sampling=None, top_logprobs=None, response_schema=None
+        ):
             witness.append((retriever.entered, retriever.exited))
             return await super().generate(messages, sampling=sampling)
 
@@ -184,7 +186,9 @@ async def test_concurrent_generations_are_capped_by_the_semaphore() -> None:
     release = asyncio.Event()
 
     class BlockingGenerator(FakeGenerator):
-        async def generate(self, messages, *, sampling=None, top_logprobs=None):  # type: ignore[no-untyped-def]
+        async def generate(  # type: ignore[no-untyped-def]
+            self, messages, *, sampling=None, top_logprobs=None, response_schema=None
+        ):
             nonlocal in_flight, peak
             in_flight += 1
             peak = max(peak, in_flight)

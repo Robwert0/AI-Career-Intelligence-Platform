@@ -1,6 +1,7 @@
 import hashlib
 import math
 import random
+from typing import Any
 
 from redis.exceptions import RedisError
 
@@ -58,6 +59,7 @@ class FakeGenerator:
         self._finish_reason = finish_reason
         self.calls: list[list[Message]] = []
         self.sampling: list[SamplingSettings] = []
+        self.response_schemas: list[dict[str, Any] | None] = []
 
     @property
     def model_name(self) -> str:
@@ -69,10 +71,12 @@ class FakeGenerator:
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         self.calls.append(messages)
         settings_used = sampling or SamplingSettings()
         self.sampling.append(settings_used)
+        self.response_schemas.append(response_schema)
         return GenerationResult(
             text=self._text,
             finish_reason=self._finish_reason,
@@ -84,6 +88,9 @@ class FakeGenerator:
             latency_ms=0,
             sampling=settings_used,
         )
+
+    async def aclose(self) -> None:
+        return None
 
 
 class UnavailableGenerator:
@@ -97,6 +104,7 @@ class UnavailableGenerator:
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         raise GeneratorUnavailableError("the fake provider is down")
 
@@ -112,6 +120,7 @@ class RejectingGenerator:
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         raise GenerationRequestError("the fake provider rejected the request")
 
@@ -128,3 +137,58 @@ class AllowAllLimiter:
 class UnavailableLimiter:
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
         raise RedisError("redis is down")
+
+
+class ScriptedGenerator:
+    """Returns one scripted reply per call, in order; the retry path needs distinct answers."""
+
+    def __init__(self, texts: list[str], finish_reasons: list[FinishReason] | None = None) -> None:
+        self._texts = list(texts)
+        self._finish_reasons = list(finish_reasons or [FinishReason.STOP] * len(texts))
+        self.calls: list[list[Message]] = []
+        self.response_schemas: list[dict[str, Any] | None] = []
+        self.sampling: list[SamplingSettings] = []
+
+    @property
+    def model_name(self) -> str:
+        return "scripted-generator"
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> GenerationResult:
+        index = len(self.calls)
+        self.calls.append(messages)
+        self.response_schemas.append(response_schema)
+        used = sampling or SamplingSettings()
+        self.sampling.append(used)
+        return GenerationResult(
+            text=self._texts[index],
+            finish_reason=self._finish_reasons[index],
+            model=self.model_name,
+            usage=Usage(prompt_tokens=0, completion_tokens=0),
+            latency_ms=0,
+            sampling=used,
+        )
+
+    async def aclose(self) -> None:
+        return None
+
+
+class FakeTaskQueue:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.attempted: list[tuple[str, str]] = []
+        self.enqueued: list[tuple[str, str]] = []
+
+    async def enqueue(self, task_name: str, job_id: str) -> None:
+        from app.workers.queue import QueueUnavailableError
+
+        self.attempted.append((task_name, job_id))
+        if self.fail:
+            raise QueueUnavailableError(task_name)
+        self.enqueued.append((task_name, job_id))

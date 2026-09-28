@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,4 +71,5 @@ class Generator(Protocol):
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult: ...

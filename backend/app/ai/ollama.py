@@ -24,6 +24,7 @@ def _finish_reason(done_reason: str | None) -> FinishReason:
 
 def _options(sampling: SamplingSettings) -> dict[str, Any]:
     options: dict[str, Any] = {
+        "num_ctx": settings.generation_context_tokens,
         "temperature": sampling.temperature,
         "top_p": sampling.top_p,
         "num_predict": sampling.max_output_tokens,
@@ -80,6 +81,7 @@ class OllamaGenerator:
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         if not messages:
             raise ValueError("cannot generate without at least one message")
@@ -95,6 +97,8 @@ class OllamaGenerator:
         if top_logprobs is not None:
             payload["logprobs"] = True
             payload["top_logprobs"] = top_logprobs
+        if response_schema is not None:
+            payload["format"] = response_schema
 
         started = time.perf_counter()
         try:

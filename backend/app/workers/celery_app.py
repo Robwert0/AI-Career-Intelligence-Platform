@@ -18,7 +18,7 @@ def create_celery_app(broker_url: str) -> Celery:
         worker_prefetch_multiplier=1,
         worker_concurrency=1,
         task_soft_time_limit=settings.job_soft_time_limit_seconds,
-        task_time_limit=settings.job_soft_time_limit_seconds + 30,
+        task_time_limit=settings.job_hard_time_limit_seconds,
         broker_connection_retry_on_startup=True,
         broker_transport_options={"socket_connect_timeout": 2, "socket_timeout": 2},
         # Bounded so a dead broker fails the HTTP request in seconds instead of hanging it.
