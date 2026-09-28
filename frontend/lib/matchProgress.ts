@@ -1,5 +1,24 @@
+import type { Problem } from './matchErrors'
 import type { AnalysisStage, AnalysisView, JobStage, JobView } from './match'
 import type { JobTab } from './matchInputs'
+
+const NO_REPORT_PROBLEM: Problem = {
+  message: 'The analysis finished, but no report came back. Try again.',
+}
+const NO_DECISION_PROBLEM: Problem = {
+  message: 'The analysis paused, but we could not tell why. Start over and try again.',
+}
+
+// The backend now enforces status↔payload invariants server-side (a violation is its own 500,
+// never a 200 with a hole in it) -- but the browser only ever casts the parsed JSON to our TS
+// type (lib/http.ts), so a stale build or a future backend regression could still hand us one.
+// Truthiness, not `=== null`, sidesteps TS flagging the comparison as unreachable now that the
+// type says these fields can't be null for these statuses.
+export function analysisProblem(view: AnalysisView): Problem | null {
+  if (view.status === 'done' && !view.report) return NO_REPORT_PROBLEM
+  if (view.status === 'needs_decision' && !view.decision) return NO_DECISION_PROBLEM
+  return null
+}
 
 export type StageState = 'done' | 'current' | 'pending'
 export type StageItem = { stage: string; label: string; state: StageState }
@@ -24,10 +43,11 @@ function withStates<S extends string>(
   progress: { status: string; stage: S | null } | null,
 ): StageItem[] {
   const finished = progress?.status === 'done'
-  const current =
-    progress === null || progress.status === 'queued' || progress.stage === null
-      ? -1
-      : stages.indexOf(progress.stage)
+  // stage: null means "not started" only before or during the queue; once work has begun
+  // (running, or a resumed job/analysis whose stage briefly lags a Redis round-trip) it means
+  // "the first stage, not yet reported" rather than "nothing in progress".
+  const notStarted = progress === null || progress.status === 'queued'
+  const current = notStarted ? -1 : progress.stage === null ? 0 : stages.indexOf(progress.stage)
   return stages.map((stage, index) => ({
     stage,
     label: labels[stage],

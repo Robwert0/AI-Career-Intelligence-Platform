@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AnalysisView, JobView } from '../match'
 import {
   analysisAnnouncement,
+  analysisProblem,
   analysisStages,
   jobAnnouncement,
   jobStages,
@@ -57,6 +58,13 @@ describe('jobStages', () => {
   it('skips reading a page for pasted text', () => {
     expect(states(jobStages('text', jobView({ status: 'queued' })))).toEqual(['extracting:pending'])
   })
+
+  it('shows the first stage as current while running with no stage yet, not every stage pending', () => {
+    expect(states(jobStages('url', jobView({ status: 'running', stage: null })))).toEqual([
+      'reading:current',
+      'extracting:pending',
+    ])
+  })
 })
 
 describe('analysisStages', () => {
@@ -89,6 +97,25 @@ describe('analysisStages', () => {
 
   it('marks nothing current for a stage outside the list', () => {
     const items = analysisStages(CV_ONLY, analysisView({ stage: 'reading_github' }))
+
+    expect(items.every((item) => item.state === 'pending')).toBe(true)
+  })
+
+  it('shows the first stage as current while running with no stage yet (a resumed analysis, or right after dequeue), not every stage pending', () => {
+    const items = analysisStages(BOTH, analysisView({ status: 'running', stage: null }))
+
+    expect(states(items)).toEqual([
+      'reading_cv:current',
+      'reading_github:pending',
+      'matching:pending',
+      'assessing:pending',
+      'scoring:pending',
+      'recommending:pending',
+    ])
+  })
+
+  it('still shows everything pending while queued, even though queued also carries stage: null', () => {
+    const items = analysisStages(CV_ONLY, analysisView({ status: 'queued', stage: null }))
 
     expect(items.every((item) => item.state === 'pending')).toBe(true)
   })
@@ -174,5 +201,48 @@ describe('announcements', () => {
 
     expect(jobAnnouncement(view, jobStages('url', view))).toBe('Step 1 of 2: Reading the job page.')
     expect(jobAnnouncement(null, [])).toBe('Sending the job.')
+  })
+})
+
+describe('analysisProblem (defensive: the backend now enforces these invariants and 500s instead of violating them, but a parsed JSON body is never actually checked against the TS type at runtime)', () => {
+  it('is null for an ordinary done report', () => {
+    expect(analysisProblem(analysisView({ status: 'done', report: {} as never }))).toBeNull()
+  })
+
+  it('is null while queued, running, or failed with an error', () => {
+    expect(analysisProblem(analysisView({ status: 'queued' }))).toBeNull()
+    expect(analysisProblem(analysisView({ status: 'running' }))).toBeNull()
+    expect(
+      analysisProblem(
+        analysisView({
+          status: 'failed',
+          error: { code: 'internal_error', message: 'x', recovery: 'retry' },
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('is null for a well-formed needs_decision', () => {
+    const view = analysisView({
+      status: 'needs_decision',
+      decision: {
+        failed_source: 'cv',
+        error: { code: 'not_a_cv', message: 'x', recovery: 'paste_cv' },
+      },
+    })
+
+    expect(analysisProblem(view)).toBeNull()
+  })
+
+  it('flags a done status with no report, instead of a caller crashing on report.score', () => {
+    const problem = analysisProblem(analysisView({ status: 'done', report: null as never }))
+
+    expect(problem?.message).toMatch(/no report came back/i)
+  })
+
+  it('flags a needs_decision with no decision, instead of a dead-end screen with no buttons', () => {
+    const problem = analysisProblem(analysisView({ status: 'needs_decision', decision: null }))
+
+    expect(problem?.message).toMatch(/paused/i)
   })
 })

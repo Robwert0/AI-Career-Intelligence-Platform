@@ -10,10 +10,10 @@ import {
   type MatchReport,
 } from '@/lib/match'
 import { requestProblem, retryLimitProblem, type Problem } from '@/lib/matchErrors'
+import { analysisProblem } from '@/lib/matchProgress'
 import { poll } from '@/lib/poll'
 
 const FINAL = new Set<AnalysisStatus>(['done', 'failed', 'needs_decision'])
-const NO_REPORT: Problem = { message: 'The analysis finished, but no report came back. Try again.' }
 
 type Handlers = {
   onReport: (report: MatchReport) => void
@@ -36,9 +36,12 @@ export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers)
       isFinal: (next) => FINAL.has(next.status),
       onValue: (next) => {
         setView(next)
-        if (next.status !== 'done') return
-        if (next.report === null) setProblem(NO_REPORT)
-        else deliver(next.report)
+        const problem = analysisProblem(next)
+        if (problem !== null) {
+          setProblem(problem)
+          return
+        }
+        if (next.status === 'done' && next.report) deliver(next.report)
       },
       onFailure: (failure) => {
         if (failure.status === 401) sessionExpired()
