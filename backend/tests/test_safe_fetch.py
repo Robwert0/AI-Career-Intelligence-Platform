@@ -1,6 +1,7 @@
 import asyncio
 import gzip
 import socket
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
@@ -434,6 +435,51 @@ async def test_the_declared_charset_is_honoured() -> None:
     result = await fetcher(handler).fetch("https://jobs.example.com/")
 
     assert result.text == "Développeur"
+
+
+def charset_page(charset: str, body: bytes) -> Handler:
+    handler, _ = site(
+        lambda request: httpx.Response(
+            200, headers={"content-type": f"text/plain; charset={charset}"}, content=body
+        )
+    )
+    return handler
+
+
+async def test_a_punycode_charset_is_decoded_as_utf8_without_the_quadratic_decoder() -> None:
+    n = 160 * 1024
+    body = b"a" * n + b"-" + b"z" * n
+
+    started = time.perf_counter()
+    result = await fetcher(charset_page("punycode", body)).fetch("https://jobs.example.com/")
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.5
+    assert result.text == body.decode("utf-8")
+
+
+@pytest.mark.parametrize(
+    "charset",
+    ["rot13", "base64", "zlib", "hex", "uu", "idna", "unicode_escape", "raw_unicode_escape"],
+)
+async def test_a_non_text_charset_falls_back_to_utf8(charset: str) -> None:
+    body = "Développeur \\u0041 cafe".encode()
+
+    result = await fetcher(charset_page(charset, body)).fetch("https://jobs.example.com/")
+
+    assert result.text == body.decode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("charset", "text"),
+    [("latin-1", "Développeur"), ("windows-1252", "Café €"), ("shift_jis", "開発者")],
+)
+async def test_real_text_charsets_are_still_honoured(charset: str, text: str) -> None:
+    result = await fetcher(charset_page(charset, text.encode(charset))).fetch(
+        "https://jobs.example.com/"
+    )
+
+    assert result.text == text
 
 
 async def test_a_slow_site_times_out() -> None:

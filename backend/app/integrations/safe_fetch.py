@@ -27,6 +27,36 @@ MAX_ROBOTS_BYTES = 512 * 1024
 MAX_PEEK_BYTES = 64 * 1024
 MAX_REDIRECTS = 3
 TEXT_TYPES = frozenset({"text/html", "text/plain"})
+# Canonical codecs.lookup() names. Anything else (punycode's quadratic pure-Python decoder,
+# rot13/base64/zlib bytes-to-bytes codecs, idna) is attacker-selectable CPU or a crash.
+TEXT_CHARSETS = frozenset(
+    {
+        "utf-8",
+        "utf-8-sig",
+        "utf-16",
+        "utf-16-le",
+        "utf-16-be",
+        "utf-32",
+        "utf-32-le",
+        "utf-32-be",
+        "ascii",
+        *(f"iso8859-{part}" for part in (*range(1, 12), *range(13, 17))),
+        *(f"cp{page}" for page in range(1250, 1259)),
+        "koi8-r",
+        "koi8-u",
+        "shift_jis",
+        "cp932",
+        "euc_jp",
+        "iso2022_jp",
+        "euc_kr",
+        "cp949",
+        "gb2312",
+        "gbk",
+        "gb18030",
+        "big5",
+        "big5hkscs",
+    }
+)
 _PORTS = {"http": 80, "https": 443}
 _TIMEOUT = httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=3.0)
 # IPv6 ranges "global" alone doesn't make reachable-safe: most carry an IPv4 address inside
@@ -161,10 +191,11 @@ def _rules(lines: list[str]) -> RobotFileParser:
 
 
 def _decode(body: bytes, response: httpx.Response) -> str:
-    charset = response.charset_encoding or "utf-8"
     try:
-        codecs.lookup(charset)
+        charset = codecs.lookup(response.charset_encoding or "utf-8").name
     except LookupError:
+        charset = "utf-8"
+    if charset not in TEXT_CHARSETS:
         charset = "utf-8"
     return body.decode(charset, errors="replace")
 
