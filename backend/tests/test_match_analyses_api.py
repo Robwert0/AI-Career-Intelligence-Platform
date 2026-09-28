@@ -3,13 +3,14 @@ import json
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 import pytest_asyncio
 from documents import make_docx
-from fakes import AllowAllLimiter, FakeTaskQueue
+from fakes import AllowAllLimiter, DenyAllLimiter, FakeTaskQueue
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,10 +21,13 @@ from app.core.job_store import JobStateError, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.deps import get_analysis_registry, get_job_store, get_limiter, get_task_queue
 from app.main import app
+from app.schemas.match import MatchReport
 from app.services.match_failures import describe_failure
 from app.services.match_service import CvUpload, MatchService
 
 PASSWORD = "supersecret1"
+# Shared with the frontend's report tests, so both sides agree on one realistic report.
+GOLDEN_REPORT = Path(__file__).parents[2] / "frontend/lib/__tests__/fixtures/match-report.full.json"
 POSTING = {
     "title": "Backend Engineer",
     "company": "Acme",
@@ -235,18 +239,21 @@ async def test_an_upload_over_the_limit_is_413_and_stores_nothing(
     env: Env, redis_client: Redis
 ) -> None:
     too_big = b"%PDF-" + b"0" * settings.max_upload_bytes
+    before = set(await redis_client.keys("job:*"))
 
     response = await env.submit(files={"cv": ("cv.pdf", too_big, "application/pdf")})
 
     assert response.status_code == 413
     assert detail_code(response) == "file_too_large"
     assert env.queue.attempted == []
+    assert set(await redis_client.keys("job:*")) == before
+    assert await env.registry.holder(await env.owner()) is None
 
 
 async def test_a_declared_body_over_the_limit_is_413_before_the_body_is_read(env: Env) -> None:
     async def endless() -> AsyncGenerator[bytes]:
-        for _ in range(64):
-            yield b"0" * (1024 * 1024)
+        raise AssertionError("the body was read")
+        yield b""  # pragma: no cover - makes this an async generator
 
     response = await env.client.post(
         "/match/analyses",
@@ -862,3 +869,88 @@ async def test_the_upload_limits_are_published_without_auth(
         "cv_text_max_chars": 40_000,
     }
     assert [name for name, _ in env.limiter.calls] == ["match_poll_ip"]
+
+
+def _paused_by_a(kind: str) -> dict[str, Any]:
+    if kind == "text":
+        return {"data": {"cv_text": CV_TEXT}, "files": NO_FILE}
+    return {"files": {"cv": ("cv.pdf", PDF, "application/pdf")}}
+
+
+@pytest.mark.parametrize("kind", ["text", "file"])
+async def test_someone_elses_cv_retry_is_404_and_writes_nothing(
+    env: Env, redis_client: Redis, kind: str
+) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
+    enqueued = list(env.queue.enqueued)
+    other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
+    before = {key: await redis_client.get(key) for key in await redis_client.keys("job:*")}
+
+    response = await env.client.post(
+        f"/match/analyses/{analysis_id}/retry", headers=other, **_paused_by_a(kind)
+    )
+
+    assert response.status_code == 404
+    after = {key: await redis_client.get(key) for key in await redis_client.keys("job:*")}
+    assert after == before
+    assert env.queue.enqueued == enqueued
+    record = await env.store.load(analysis_id)
+    assert record is not None and record.status is JobStatus.NEEDS_DECISION
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix"),
+    [("GET", ""), ("POST", "/continue"), ("POST", "/retry"), ("POST", "/discard")],
+)
+async def test_every_analysis_route_requires_authentication(
+    env: Env, method: str, suffix: str
+) -> None:
+    response = await env.client.request(method, f"/match/analyses/{'A' * 22}{suffix}")
+
+    assert response.status_code == 401
+
+
+async def _never_read() -> AsyncGenerator[bytes]:
+    raise AssertionError("the body was read")
+    yield b""  # pragma: no cover - makes this an async generator
+
+
+async def test_an_unauthenticated_upload_is_refused_before_its_body_is_read(env: Env) -> None:
+    response = await env.client.post(
+        "/match/analyses",
+        content=_never_read(),
+        headers={"content-type": "multipart/form-data; boundary=x"},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_a_rate_limited_upload_is_refused_before_its_body_is_read(env: Env) -> None:
+    app.dependency_overrides[get_limiter] = DenyAllLimiter
+
+    response = await env.client.post(
+        "/match/analyses",
+        content=_never_read(),
+        headers={**env.headers, "content-type": "multipart/form-data; boundary=x"},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"]
+
+
+async def test_the_golden_full_report_round_trips_through_the_api(env: Env) -> None:
+    golden = json.loads(GOLDEN_REPORT.read_text())
+    MatchReport.model_validate(golden)
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    await env.store.mark_done(analysis_id, result={"report": golden}, now=time.time())
+
+    body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
+
+    assert body["status"] == "done"
+    assert body["report"] == golden
+    statuses = {requirement["status"] for requirement in golden["requirements"]}
+    assert statuses == {"demonstrated", "partial", "unmet", "not_demonstrated", "not_assessed"}
+    assert golden["rewrites"] and golden["recommendations"]["immediate"]

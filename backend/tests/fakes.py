@@ -246,3 +246,12 @@ class KeywordEmbedder:
     def embed_query(self, text: str) -> list[float]:
         self.queries.append(text)
         return self._vector(text)
+
+
+class DenyAllLimiter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        self.calls.append((policy.name, identity))
+        return Decision(allowed=False, remaining=0.0, retry_after_seconds=30.0)

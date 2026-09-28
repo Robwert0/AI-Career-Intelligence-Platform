@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded
 from documents import CV_LINE, make_pdf, text_page
 from fakes import NearEmbedder, ScriptedGenerator
 
@@ -360,3 +361,21 @@ def test_a_github_retry_with_a_corrected_url_reads_the_new_profile(
 )
 def test_assessment_failures_get_analysis_specific_codes(code: str, expected: str) -> None:
     assert tasks.analysis_failure_code(code) == expected
+
+
+def test_a_timed_out_analysis_fails_as_timeout_and_forgets_its_inputs(
+    monkeypatch: pytest.MonkeyPatch, fetcher: Fetcher
+) -> None:
+    use_models(monkeypatch, evidence=[CV_REPLY])
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        raise SoftTimeLimitExceeded
+
+    monkeypatch.setattr(tasks, "analyse", slow)
+    job_id = submit(cv_text=CV_TEXT)
+
+    run(job_id)
+
+    assert load(job_id).error_code == "timeout"
+    for name in tasks.ANALYSIS_BLOBS:
+        assert blob(job_id, name) is None
