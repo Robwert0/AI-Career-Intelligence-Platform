@@ -41,3 +41,21 @@ class DocumentError(Exception):
     def __init__(self, failure: DocumentFailure) -> None:
         super().__init__(failure.value)
         self.failure = failure
+
+
+GitHubFailure = StrEnum(
+    "GitHubFailure",
+    (
+        "INVALID_GITHUB_URL",
+        "GITHUB_USER_NOT_FOUND",
+        "GITHUB_RATE_LIMITED",
+        "GITHUB_UNAVAILABLE",
+    ),
+)
+
+
+class GitHubError(Exception):
+    def __init__(self, failure: GitHubFailure, *, reset_at: int | None = None) -> None:
+        super().__init__(failure.value)
+        self.failure = failure
+        self.reset_at = reset_at
