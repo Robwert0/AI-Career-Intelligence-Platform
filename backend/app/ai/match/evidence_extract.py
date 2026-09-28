@@ -19,6 +19,11 @@ MAX_CV_PROMPT_CHARS = 24_000
 MAX_CV_ITEMS = 40
 EVIDENCE_EXTRACT_SAMPLING = SamplingSettings(temperature=0.0, seed=0, max_output_tokens=6144)
 MIN_GROUNDED_SHARE = 0.7
+# Bag-of-words grounding alone accepts a fabrication that recombines real CV words into a new
+# claim (audit M1): every word of "principal engineer led team of 5 people for 2 months" can be
+# a real CV word without the CV ever saying that. Contiguous bigrams, built per sentence so a
+# splice can't bridge two unrelated ones, catch the seam the recombination leaves behind.
+MIN_GROUNDED_NGRAM_SHARE = 0.7
 EVIDENCE_TEXT_CHARS = 600
 
 _ID_SEGMENT: dict[CvEntryKind, str] = {
@@ -39,6 +44,8 @@ _WORD = re.compile(r"[a-z0-9][a-z0-9+#]*")
 _REPO_LINK = re.compile(
     r"(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9-]{1,39})/([A-Za-z0-9._-]{1,100})"
 )
+# Mirrors scrub.py's own sentence split: a bigram never bridges two of the CV's own sentences.
+_SEGMENT_BOUNDARY = re.compile(r"(?<=[.!?;])\s+|\s+[·|•]\s+|\n+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,12 +59,31 @@ def _words(text: str) -> list[str]:
     return [word for word in _WORD.findall(text.lower()) if len(word) >= 2 or word.isdigit()]
 
 
-def _grounded(entry: CvEntry, vocabulary: set[str]) -> bool:
-    # The model may shorten an entry but not invent one: most of its words must be in the CV.
+def _bigrams(words: list[str]) -> list[tuple[str, str]]:
+    return list(zip(words, words[1:], strict=False))
+
+
+def _cv_bigrams(cv_text: str) -> set[tuple[str, str]]:
+    grams: set[tuple[str, str]] = set()
+    for segment in _SEGMENT_BOUNDARY.split(cv_text):
+        grams.update(_bigrams(_words(segment)))
+    return grams
+
+
+def _grounded(entry: CvEntry, vocabulary: set[str], cv_bigrams: set[tuple[str, str]]) -> bool:
+    # The model may shorten an entry but not invent one: most of its words must be in the CV,
+    # and (when there are enough of them) most of its adjacent word pairs must be adjacent in
+    # the CV too — a fabrication built from real CV words in a new order breaks that adjacency
+    # at the seam, even though every individual word is genuine.
     words = _words(entry.text)
     if not words:
         return False
-    return sum(word in vocabulary for word in words) / len(words) >= MIN_GROUNDED_SHARE
+    if sum(word in vocabulary for word in words) / len(words) < MIN_GROUNDED_SHARE:
+        return False
+    grams = _bigrams(words)
+    if not grams:
+        return True
+    return sum(gram in cv_bigrams for gram in grams) / len(grams) >= MIN_GROUNDED_NGRAM_SHARE
 
 
 def repo_link(raw: str) -> str | None:
@@ -98,11 +124,12 @@ async def extract_cv_evidence(generator: Generator, cv_text: str) -> CvEvidence:
         raise ExtractionError("not_a_cv")
 
     vocabulary = set(_words(text))
+    cv_bigrams = _cv_bigrams(text)
     counters: Counter[str] = Counter()
     items: list[EvidenceItem] = []
     for entry in parsed.items[:MAX_CV_ITEMS]:
         body = scrub_evidence_text(entry.text)[:EVIDENCE_TEXT_CHARS]
-        if not body or not _grounded(entry, vocabulary):
+        if not body or not _grounded(entry, vocabulary, cv_bigrams):
             continue
         segment = _ID_SEGMENT[entry.kind]
         items.append(

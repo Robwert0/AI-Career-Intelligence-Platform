@@ -136,6 +136,36 @@ async def test_an_item_not_found_in_the_cv_is_dropped() -> None:
     assert evidence.dropped == 1
 
 
+# --- M1: grounding must reject a fabrication that recombines real cv words ----------------
+
+RECOMBINATION_CV = (
+    "## Experience\n"
+    "Intern at Google for 2 months, focused on internal tooling.\n"
+    "Led a team at Acme of 5 people building payment infrastructure.\n"
+    "Worked in a senior staff principal engineer role on internal documents.\n"
+    "Did not use Kubernetes on this project.\n"
+)
+
+
+@pytest.mark.parametrize(
+    "fabricated_text",
+    [
+        "Principal engineer at Google led team of 5 people for 2 months",
+        "Senior staff engineer at Google, expert in Kubernetes and Go",
+    ],
+)
+async def test_a_fabrication_recombining_real_cv_words_is_not_grounded(
+    fabricated_text: str,
+) -> None:
+    fabricated = entry("work", "Experience · Google", fabricated_text)
+    generator = ScriptedGenerator([reply(fabricated)])
+
+    evidence = await extract_cv_evidence(generator, RECOMBINATION_CV)
+
+    assert evidence.items == ()
+    assert evidence.dropped == 1
+
+
 async def test_personal_details_the_model_copies_are_scrubbed() -> None:
     leaky = entry(
         "work",
