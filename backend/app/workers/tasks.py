@@ -7,9 +7,13 @@ from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
 
+from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
 from app.core.job_store import TERMINAL, JobRecord, JobStateError, JobStatus, JobStore
 from app.core.redis import create_redis
+from app.integrations.safe_fetch import SafeFetcher
+from app.schemas.match import JobIntakeRequest
+from app.services.job_intake_service import IntakeError, run_job_intake
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -116,3 +120,28 @@ async def _pong(store: JobStore, record: JobRecord) -> dict[str, Any]:
 @celery_app.task(name="jobs.ping")
 def ping(job_id: str) -> None:
     run_job(job_id, _pong, stage="ping")
+
+
+async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
+    raw = await store.take_blob(record.id, "input")
+    if raw is None:
+        raise JobError("input_expired")
+    intake = JobIntakeRequest.model_validate_json(raw)
+
+    async def on_stage(stage: str) -> None:
+        await store.mark_running(record.id, stage=stage, now=time.time())
+
+    generator = OllamaGenerator(timeout_seconds=settings.job_extract_generation_timeout_seconds)
+    try:
+        return await run_job_intake(
+            intake, fetcher=SafeFetcher(), generator=generator, on_stage=on_stage
+        )
+    except IntakeError as exc:
+        raise JobError(exc.code) from None
+    finally:
+        await generator.aclose()
+
+
+@celery_app.task(name="jobs.extract_job")
+def extract_job_task(job_id: str) -> None:
+    run_job(job_id, _extract_job, stage="reading")

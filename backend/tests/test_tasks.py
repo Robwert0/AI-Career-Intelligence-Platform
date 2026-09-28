@@ -6,11 +6,13 @@ import pytest
 import pytest_asyncio
 import redis.exceptions
 from celery.exceptions import SoftTimeLimitExceeded
+from fakes import ScriptedGenerator
 from redis.asyncio import Redis
 
 from app.core.config import settings
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
+from app.schemas.match import JobIntakeRequest
 from app.workers import tasks
 from app.workers.celery_app import celery_app
 from app.workers.tasks import JobError, execute_job, ping, run_job
@@ -281,3 +283,73 @@ def test_a_store_failure_after_a_handler_error_never_chains_the_handler_message(
     assert outcome.traceback is not None
     assert "Jane Doe" not in str(outcome.traceback)
     assert "Jane Doe" not in caplog.text
+
+
+_POSTING_REPLY = (
+    '{"is_job_posting": true, "title": "Backend Engineer", "company": null, '
+    '"responsibilities": [], "required": [{"text": "Go", "sensitive": false}], "preferred": []}'
+)
+
+
+def _create_intake_job(intake: JobIntakeRequest | None) -> str:
+    async def create() -> str:
+        redis = create_redis()
+        try:
+            store = JobStore(redis, ttl_seconds=600)
+            record = await store.create("job_intake", "owner", now=NOW)
+            if intake is not None:
+                await store.put_blob(
+                    record.id, "input", intake.model_dump_json().encode(), ttl_seconds=600
+                )
+            return record.id
+        finally:
+            await redis.aclose()
+
+    return asyncio.run(create())
+
+
+def test_the_extract_task_turns_pasted_text_into_a_posting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    done = _load(job_id)
+    assert done is not None
+    assert done.status is JobStatus.DONE
+    assert done.result is not None
+    assert done.result["posting"]["title"] == "Backend Engineer"
+    assert done.stage == "extracting"
+
+
+def test_the_extract_task_consumes_its_input_blob(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    async def blob() -> bytes | None:
+        redis = create_redis()
+        try:
+            return await JobStore(redis, ttl_seconds=600).take_blob(job_id, "input")
+        finally:
+            await redis.aclose()
+
+    assert asyncio.run(blob()) is None
+
+
+def test_an_intake_job_without_its_input_fails_as_input_expired() -> None:
+    # Distinct from "expired", which means the posting itself was taken down.
+    job_id = _create_intake_job(None)
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    failed = _load(job_id)
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "input_expired")
+
+
+def test_the_extract_task_is_registered() -> None:
+    assert "jobs.extract_job" in celery_app.tasks
