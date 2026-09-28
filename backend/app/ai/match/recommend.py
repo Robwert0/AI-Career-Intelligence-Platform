@@ -92,8 +92,94 @@ def _recommendations(
     return kept, len(items) - len(kept)
 
 
-def _adds_numbers(before: str, after: str) -> bool:
-    return not set(_NUMBER.findall(after)) <= set(_NUMBER.findall(before))
+_MAGNITUDE = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:k|m|bn|b|x|%)(?![a-z])", re.IGNORECASE)
+_QUANTITY_WORDS = frozenset(
+    [
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
+        "nineteen",
+        "twenty",
+        "thirty",
+        "forty",
+        "fifty",
+        "sixty",
+        "seventy",
+        "eighty",
+        "ninety",
+        "hundred",
+        "hundreds",
+        "thousand",
+        "thousands",
+        "million",
+        "millions",
+        "billion",
+        "billions",
+        "dozen",
+        "dozens",
+        "half",
+        "twice",
+        "thrice",
+        "double",
+        "doubled",
+        "doubling",
+        "triple",
+        "tripled",
+        "tripling",
+        "quadrupled",
+        "tenfold",
+    ]
+)
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#.]*[A-Za-z0-9+#]|[A-Za-z]")
+_SENTENCE_START = re.compile(r"(?:^|[.!?;:]\s+)$")
+
+
+def _names(text: str) -> list[tuple[str, bool]]:
+    """Every word with whether it opens a sentence (where any word is capitalised)."""
+    return [
+        (match.group(), bool(_SENTENCE_START.search(text[: match.start()])))
+        for match in _WORD.finditer(text)
+    ]
+
+
+def _is_name(word: str, opens_sentence: bool) -> bool:
+    # A capital mid-sentence is a name; at a sentence start only an inner capital or a digit
+    # ("PostgreSQL", "GraphQL", "AWS", "S3") marks one, since any first word is capitalised.
+    if any(char.isdigit() for char in word) or sum(char.isupper() for char in word) > 1:
+        return True
+    return word[0].isupper() and not opens_sentence
+
+
+def invents_facts(before: str, after: str) -> bool:
+    """True when `after` states a number, quantity or name that `before` does not contain."""
+    if not set(_NUMBER.findall(after)) <= set(_NUMBER.findall(before)):
+        return True
+    magnitude = {m.lower().replace(" ", "") for m in _MAGNITUDE.findall(after)}
+    if not magnitude <= {m.lower().replace(" ", "") for m in _MAGNITUDE.findall(before)}:
+        return True
+    known = {word.lower() for word, _ in _names(before)}
+    for word, opens_sentence in _names(after):
+        lowered = word.lower()
+        if lowered in known:
+            continue
+        if lowered in _QUANTITY_WORDS or _is_name(word, opens_sentence):
+            return True
+    return False
 
 
 def _rewrites(
@@ -105,11 +191,12 @@ def _rewrites(
         after = item.after.strip()
         if source is not None:
             # The model sometimes echoes the prompt's entry header; the reader never wrote it.
+            after = after.removeprefix(f"[{source.id}]").strip()
             after = after.removeprefix(f"{source.section_label} ({source.kind})").strip()
         if source is None or item.evidence_id in kept or not after or after == source.text:
             continue
-        # A number the evidence doesn't contain is an invented fact; it must be asked instead.
-        if _adds_numbers(source.text, after):
+        # A number, quantity or name the evidence doesn't contain is invented; ask instead.
+        if invents_facts(source.text, after):
             continue
         questions = tuple(q.strip() for q in item.questions if q.strip())
         kept[item.evidence_id] = Rewrite(item.evidence_id, source.text, after, questions)

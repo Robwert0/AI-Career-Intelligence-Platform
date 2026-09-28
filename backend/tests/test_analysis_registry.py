@@ -135,4 +135,3 @@ async def test_the_queue_index_expires_when_nothing_is_queued_any_more(
 
     assert 0 < await redis_client.ttl(QUEUE_KEY) <= TTL
     await registry.forget(analysis)
-

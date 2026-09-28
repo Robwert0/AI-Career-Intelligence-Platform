@@ -159,8 +159,37 @@ async def test_advice_for_an_unknown_requirement_is_dropped() -> None:
         rewrite("cv:experience:0", "Built Go services for 3 teams, cutting latency by 40%."),
         rewrite("cv:experience:0", WORK.text),
         rewrite("cv:experience:0", "   "),
+        rewrite("cv:experience:0", "Built Go services for 3 teams, serving two million users."),
+        rewrite(
+            "cv:experience:0", "Built Go services for 3 teams on PostgreSQL, cutting cost by half."
+        ),
+        rewrite("cv:experience:0", "Built Go services for 3 teams on PostgreSQL at 3k requests/s."),
+        rewrite(
+            "cv:experience:0", "Built Go services for 3 teams on PostgreSQL, serving 3M users."
+        ),
+        rewrite("cv:experience:0", "Doubled throughput of Go services for 3 teams on PostgreSQL."),
+        rewrite("cv:experience:0", "Built Go services for 3 teams at Google on PostgreSQL."),
+        rewrite("cv:experience:0", "Built Go services for 3 teams on PostgreSQL and AWS."),
+        rewrite("cv:experience:0", "Built Go and Kubernetes services for 3 teams on PostgreSQL."),
+        rewrite("cv:experience:0", "GraphQL APIs and Go services for 3 teams on PostgreSQL."),
     ],
-    ids=["github-only", "not-cited", "unknown", "new-number", "unchanged", "blank"],
+    ids=[
+        "github-only",
+        "not-cited",
+        "unknown",
+        "new-number",
+        "unchanged",
+        "blank",
+        "spelled-number",
+        "by-half",
+        "magnitude-k",
+        "magnitude-m",
+        "doubled",
+        "new-employer",
+        "new-acronym",
+        "new-technology",
+        "new-technology-first-word",
+    ],
 )
 async def test_a_rewrite_that_is_not_grounded_in_cited_cv_evidence_is_dropped(
     bad: dict[str, Any],
@@ -244,3 +273,33 @@ async def test_a_unicode_escaped_canary_in_advice_is_a_leak() -> None:
 
     assert caught.value.code == "ai_invalid_output"
     assert len(generator.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        "Designed and built Go services for 3 teams on PostgreSQL.",
+        "Led the build of Go services on PostgreSQL for 3 teams. Owned their reliability.",
+        "Built and maintained Go services for 3 product teams, backed by PostgreSQL.",
+    ],
+)
+async def test_a_legitimate_rewrite_survives_the_fact_guard(after: str) -> None:
+    generator = ScriptedGenerator([reply(rewrites=[rewrite("cv:experience:0", after)])])
+
+    out = await recommend(generator, "Backend Engineer", ASSESSMENT, EVIDENCE)
+
+    assert [r.after for r in out.rewrites] == [after]
+
+
+async def test_a_rewrite_that_echoes_the_prompt_entry_id_loses_it() -> None:
+    echoed = (
+        "[cv:experience:0] Experience · Acme (work) "
+        "Built Go services for 3 teams on PostgreSQL, end to end."
+    )
+    generator = ScriptedGenerator([reply(rewrites=[rewrite("cv:experience:0", echoed)])])
+
+    out = await recommend(generator, "Backend Engineer", ASSESSMENT, EVIDENCE)
+
+    assert [r.after for r in out.rewrites] == [
+        "Built Go services for 3 teams on PostgreSQL, end to end."
+    ]
