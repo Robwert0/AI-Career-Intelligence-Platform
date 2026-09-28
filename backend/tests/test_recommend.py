@@ -7,9 +7,14 @@ from fakes import ScriptedGenerator
 from app.ai.generation import Role
 from app.ai.match.assess import AssessedRequirement, Assessment
 from app.ai.match.prompts import RECOMMEND_PROMPT
-from app.ai.match.recommend import RECOMMEND_SAMPLING, recommend, rewritable_evidence
+from app.ai.match.recommend import (
+    RECOMMEND_SAMPLING,
+    recommend,
+    reply_model,
+    rewritable_evidence,
+)
 from app.ai.match.requirements import RequirementRef
-from app.ai.match.schemas import AssessStatus, EvidenceItem, RecommendReply
+from app.ai.match.schemas import AssessStatus, EvidenceItem
 from app.ai.match.structured import ExtractionError
 from app.ai.prompts import ASSESSMENT_TAG, CANARY
 
@@ -95,7 +100,43 @@ async def test_recommendations_and_rewrites_come_back_grounded() -> None:
     assert only.questions == ("How many requests a day did they serve?",)
     assert out.dropped == 0
     assert generator.sampling == [RECOMMEND_SAMPLING]
-    assert generator.response_schemas == [RecommendReply.model_json_schema()]
+    assert generator.response_schemas == [
+        reply_model(("req:required:0", "req:required:1"), ("cv:experience:0",)).model_json_schema()
+    ]
+
+
+def test_the_schema_offers_the_model_only_the_ids_it_may_name() -> None:
+    # A local model given a free string answers "0" for "req:required:0"; an enum grammar can't.
+    schema = json.dumps(reply_model(("req:required:0",), ("cv:experience:0",)).model_json_schema())
+
+    assert '"enum": ["req:required:0"]' in schema
+    assert '"enum": ["cv:experience:0"]' in schema
+
+
+def test_with_nothing_rewritable_the_schema_allows_no_rewrites() -> None:
+    schema = reply_model(("req:required:0",), ()).model_json_schema()
+
+    assert schema["properties"]["rewrites"]["maxItems"] == 0
+
+
+async def test_a_rewrite_that_echoes_the_prompt_entry_header_loses_the_header() -> None:
+    echoed = "Experience · Acme (work) Built Go services for 3 teams on PostgreSQL, end to end."
+    generator = ScriptedGenerator([reply(rewrites=[rewrite("cv:experience:0", echoed)])])
+
+    out = await recommend(generator, "Backend Engineer", ASSESSMENT, EVIDENCE)
+
+    [only] = out.rewrites
+    assert only.after == "Built Go services for 3 teams on PostgreSQL, end to end."
+
+
+async def test_a_header_only_echo_of_the_original_is_dropped_as_unchanged() -> None:
+    generator = ScriptedGenerator(
+        [reply(rewrites=[rewrite("cv:experience:0", f"Experience · Acme (work) {WORK.text}")])]
+    )
+
+    out = await recommend(generator, "Backend Engineer", ASSESSMENT, EVIDENCE)
+
+    assert (out.rewrites, out.dropped) == ((), 1)
 
 
 async def test_advice_for_an_unknown_requirement_is_dropped() -> None:

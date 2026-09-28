@@ -1,6 +1,10 @@
+import functools
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
+
+from pydantic import Field, JsonValue, create_model
 
 from app.ai.generation import Generator, SamplingSettings
 from app.ai.match.assess import Assessment
@@ -10,6 +14,34 @@ from app.ai.match.structured import generate_validated
 
 RECOMMEND_SAMPLING = SamplingSettings(temperature=0.0, seed=0, max_output_tokens=2048)
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _choice(ids: tuple[str, ...]) -> Any:
+    # Validation stays a plain id, so a bad one is dropped by code; the enum only steers
+    # the model's grammar. A local model given a free string answers "0" for "req:required:0".
+    # An empty enum is not a valid grammar; with no ids the list itself is capped at 0.
+    extra: dict[str, JsonValue] | None = {"enum": list(ids)} if ids else None
+    return (str, Field(max_length=120, json_schema_extra=extra))
+
+
+@functools.cache
+def reply_model(
+    requirement_ids: tuple[str, ...], evidence_ids: tuple[str, ...]
+) -> type[RecommendReply]:
+    advice = create_model(
+        "RecommendationChoice", __base__=RecommendationItem, requirement_id=_choice(requirement_ids)
+    )
+    rewrite = create_model("RewriteChoice", __base__=RewriteItem, evidence_id=_choice(evidence_ids))
+    return create_model(
+        "ScopedRecommendReply",
+        __base__=RecommendReply,
+        immediate=(list[advice], Field(default_factory=list, max_length=5)),
+        longer_term=(list[advice], Field(default_factory=list, max_length=5)),
+        rewrites=(
+            list[rewrite],
+            Field(default_factory=list, max_length=5 if evidence_ids else 0),
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +77,10 @@ def rewritable_evidence(
     return tuple(evidence[i] for i in cited if i in evidence and "cv" in evidence[i].sources)
 
 
+def allowed_ids(assessment: Assessment) -> list[str]:
+    return list(dict.fromkeys(result.requirement.id for result in assessment.results))
+
+
 def _recommendations(
     items: list[RecommendationItem], allowed: set[str]
 ) -> tuple[tuple[Recommendation, ...], int]:
@@ -67,6 +103,9 @@ def _rewrites(
     for item in items:
         source = sources.get(item.evidence_id)
         after = item.after.strip()
+        if source is not None:
+            # The model sometimes echoes the prompt's entry header; the reader never wrote it.
+            after = after.removeprefix(f"{source.section_label} ({source.kind})").strip()
         if source is None or item.evidence_id in kept or not after or after == source.text:
             continue
         # A number the evidence doesn't contain is an invented fact; it must be asked instead.
@@ -98,8 +137,9 @@ async def recommend(
         ],
         sources,
     )
-    reply = await generate_validated(generator, messages, RecommendReply, RECOMMEND_SAMPLING)
     allowed = {result.requirement.id for result in assessment.results}
+    schema = reply_model(tuple(allowed_ids(assessment)), tuple(item.id for item in sources))
+    reply = await generate_validated(generator, messages, schema, RECOMMEND_SAMPLING)
     immediate, dropped_now = _recommendations(reply.immediate, allowed)
     longer_term, dropped_later = _recommendations(reply.longer_term, allowed)
     rewrites, dropped_rewrites = _rewrites(reply.rewrites, {item.id: item for item in sources})
