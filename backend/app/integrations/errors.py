@@ -21,3 +21,23 @@ class FetchError(Exception):
     def __init__(self, failure: FetchFailure) -> None:
         super().__init__(failure.value)
         self.failure = failure
+
+
+DocumentFailure = StrEnum(
+    "DocumentFailure",
+    (
+        "FILE_TOO_LARGE",
+        "UNSUPPORTED_TYPE",
+        "ENCRYPTED_PDF",
+        "TOO_MANY_PAGES",
+        "UNSAFE_DOCX",
+        "SCANNED_PDF_SUSPECTED",
+        "UNREADABLE_DOCUMENT",
+    ),
+)
+
+
+class DocumentError(Exception):
+    def __init__(self, failure: DocumentFailure) -> None:
+        super().__init__(failure.value)
+        self.failure = failure
