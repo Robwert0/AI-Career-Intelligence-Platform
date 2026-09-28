@@ -358,3 +358,9 @@ def test_the_fixed_budget_matches_the_limits_enforced_in_code() -> None:
 
     assert config.PARSE_BUDGET_SECONDS == PARSE_TIMEOUT_SECONDS
     assert total_timeout == config.GITHUB_BUDGET_SECONDS
+
+
+def test_the_assess_call_cap_matches_the_budget() -> None:
+    from app.ai.match.assess import MAX_ASSESS_BATCHES
+
+    assert config.MAX_ASSESS_CALLS == MAX_ASSESS_BATCHES

@@ -107,3 +107,23 @@ class ExtractedCv(BaseModel):
 
     is_cv: bool
     items: list[CvEntry] = Field(default_factory=list)
+
+
+AssessStatus = Literal["demonstrated", "partial", "not_demonstrated", "unmet"]
+AssessRef = Annotated[str, StringConstraints(pattern=r"^R[1-9][0-9]?$")]
+CitedId = Annotated[str, StringConstraints(max_length=120)]
+
+
+class AssessedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ref: AssessRef
+    status: AssessStatus
+    evidence_ids: list[CitedId] = Field(default_factory=list, max_length=20)
+    rationale: Annotated[str, _clipped(300)] = ""
+
+
+class AssessReply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assessments: list[AssessedItem] = Field(max_length=20)
