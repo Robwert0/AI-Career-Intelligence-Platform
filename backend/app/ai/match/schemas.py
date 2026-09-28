@@ -1,6 +1,13 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -61,6 +68,24 @@ class EvidenceItem(BaseModel):
     text: EvidenceText
     url: RepoLink | None = None
     repo_links: tuple[RepoLink, ...] = ()
+
+    @model_validator(mode="after")
+    def _id_matches_its_sources_and_kind(self) -> Self:
+        if len(set(self.sources)) != len(self.sources):
+            raise ValueError("sources must not repeat")
+        if self.id == "gh:profile":
+            if self.kind != "profile" or self.sources != ("github",):
+                raise ValueError("gh:profile must be kind=profile with sources=(github,)")
+        elif self.id.startswith("gh:repo:"):
+            if self.kind != "repo" or "github" not in self.sources:
+                raise ValueError("a gh:repo: id must be kind=repo with github in sources")
+        elif self.id.startswith("cv:") and "cv" not in self.sources:
+            raise ValueError("a cv: id must have cv in sources")
+        if self.url is not None and self.kind not in ("repo", "project"):
+            # A bare GitHub repo item (kind=repo) carries its own url; a CV project merged with
+            # one (kind=project, dedup.py) keeps it too. No other kind ever has a repo url.
+            raise ValueError("url is only allowed for kind=repo or a merged kind=project")
+        return self
 
 
 def _clipped(limit: int) -> BeforeValidator:
