@@ -9,6 +9,7 @@ from app.ai.match.prompts import build_evidence_extract_messages
 from app.ai.match.schemas import CvEntry, CvEntryKind, EvidenceItem, ExtractedCv
 from app.ai.match.scrub import mask_contacts, mentions_sensitive, scrub_evidence_text
 from app.ai.match.structured import ExtractionError, generate_validated
+from app.integrations.github import GitHubProfile, GitHubRepo, GitHubSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +121,76 @@ async def extract_cv_evidence(generator: Generator, cv_text: str) -> CvEvidence:
     dropped = len(parsed.items) - len(items)
     logger.info("cv evidence extracted items=%d dropped=%d", len(items), dropped)
     return CvEvidence(items=tuple(items), input_truncated=truncated, dropped=dropped)
+
+
+_README_NOISE = re.compile(
+    r"```.*?```|<[^>]+>|!\[[^\]]*\]\([^)]*\)|^\s{0,3}#{1,6}\s*|^\s*[-*>]\s+",
+    re.DOTALL | re.MULTILINE,
+)
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def clip_text(text: str, limit: int = EVIDENCE_TEXT_CHARS) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _readme_summary(readme: str) -> str:
+    return " ".join(_MARKDOWN_LINK.sub(r"\1", _README_NOISE.sub(" ", readme)).split())
+
+
+def _languages(languages: dict[str, int]) -> str:
+    total = sum(languages.values())
+    if total <= 0:
+        return ""
+    shares = sorted(((100 * size / total, name) for name, size in languages.items()), reverse=True)
+    return ", ".join(f"{name} {round(share)}%" for share, name in shares[:5] if share >= 1)
+
+
+def _repo_item(repo: GitHubRepo) -> EvidenceItem:
+    parts = [f"{repo.name}: {repo.description}" if repo.description else repo.name]
+    if languages := _languages(repo.languages):
+        parts.append(f"Languages: {languages}")
+    if repo.topics:
+        parts.append(f"Topics: {', '.join(repo.topics)}")
+    if repo.pushed_at:
+        parts.append(f"Last pushed {repo.pushed_at[:7]}")
+    if repo.stars:
+        parts.append(f"{repo.stars} stars")
+    if repo.readme and (summary := _readme_summary(repo.readme)):
+        parts.append(f"README: {summary}")
+    return EvidenceItem(
+        id=f"gh:repo:{repo.name.lower()}",
+        sources=("github",),
+        kind="repo",
+        section_label=clip_text(f"GitHub · {repo.name}", 120),
+        name=repo.name[:120],
+        text=clip_text(scrub_evidence_text(". ".join(part.rstrip(". ") for part in parts))),
+        url=repo.url,
+    )
+
+
+def _profile_item(profile: GitHubProfile) -> EvidenceItem | None:
+    facts = [profile.bio, f"Company: {profile.company}" if profile.company else None]
+    about = scrub_evidence_text(". ".join(fact.rstrip(". ") for fact in facts if fact))
+    if not about:
+        return None
+    who = profile.name or profile.login
+    text = f"GitHub profile of {who}. {about}. {profile.public_repos} public repositories."
+    return EvidenceItem(
+        id="gh:profile",
+        sources=("github",),
+        kind="profile",
+        section_label="GitHub · profile",
+        name=profile.login[:120],
+        text=clip_text(mask_contacts(text)),
+    )
+
+
+def github_evidence(snapshot: GitHubSnapshot) -> tuple[EvidenceItem, ...]:
+    """Deterministic: the same snapshot always yields the same items, with no model involved."""
+    repos = [_repo_item(repo) for repo in snapshot.repos]
+    profile = _profile_item(snapshot.profile)
+    return tuple([profile, *repos] if profile is not None else repos)
