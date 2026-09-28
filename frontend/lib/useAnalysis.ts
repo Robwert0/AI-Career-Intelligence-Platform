@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
+import { decideOutcome } from '@/lib/analysisDecide'
 import {
   continueAnalysis,
   getAnalysis,
@@ -9,7 +10,7 @@ import {
   type CandidateSource,
   type MatchReport,
 } from '@/lib/match'
-import { requestProblem, retryLimitProblem, type Problem } from '@/lib/matchErrors'
+import { requestProblem, type Problem } from '@/lib/matchErrors'
 import { analysisProblem } from '@/lib/matchProgress'
 import { poll } from '@/lib/poll'
 
@@ -67,25 +68,29 @@ export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers)
         : await retryAnalysis(analysisId, form)
     setActing(false)
 
-    if (result.ok) {
-      if (action === 'continue' && source !== undefined) {
-        setSkipped((current) => [...current, source])
-      }
-      if (result.data.analysis_id !== analysisId) {
-        onMoved(result.data.analysis_id)
+    if (action === 'continue' && result.ok && source !== undefined) {
+      setSkipped((current) => [...current, source])
+    }
+
+    const outcome = decideOutcome(action, analysisId, result)
+    switch (outcome.type) {
+      case 'moved':
+        onMoved(outcome.analysisId)
         return
-      }
-      setView(null)
-      setRound((current) => current + 1)
-      return
+      case 'succeeded':
+        setView(null)
+        setRound((current) => current + 1)
+        return
+      case 'stale':
+        resume()
+        return
+      case 'session_ended':
+        sessionExpired()
+        return
+      case 'problem':
+        setProblem(outcome.problem)
+        return
     }
-    if (result.code === 'not_awaiting_decision') {
-      resume()
-      return
-    }
-    if (result.status === 401) sessionExpired()
-    // retry spends a 5/hour analysis token; continue only spends the poll limit.
-    else setProblem(action === 'retry' ? retryLimitProblem(result) : requestProblem(result))
   }
 
   return {

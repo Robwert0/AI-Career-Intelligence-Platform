@@ -119,4 +119,25 @@ describe('authedRequest', () => {
     expect(headers.Authorization).toBe('Bearer live')
     expect(headers['Content-Type']).toBeUndefined()
   })
+
+  it('resends the same FormData body, with no Content-Type and the refreshed bearer, after a 401', async () => {
+    setAccessToken('stale')
+    const form = new FormData()
+    form.append('cv_text', 'x'.repeat(60))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond(401, { detail: 'Not authenticated' }))
+      .mockResolvedValueOnce(respond(200, { access_token: 'fresh' }))
+      .mockResolvedValueOnce(respond(202, { analysis_id: 'a1' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await authedRequest('/match/analyses', { method: 'POST', body: form })
+
+    expect(result).toEqual({ ok: true, data: { analysis_id: 'a1' } })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const [, resendInit] = fetchMock.mock.calls[2] as [string, RequestInit]
+    expect(resendInit.body).toBe(form)
+    expect(headersOf(fetchMock.mock.calls[2]).Authorization).toBe('Bearer fresh')
+    expect(headersOf(fetchMock.mock.calls[2])['Content-Type']).toBeUndefined()
+  })
 })

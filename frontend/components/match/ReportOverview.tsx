@@ -75,7 +75,9 @@ function RefusalBlock({ refusal }: { refusal: Refusal }) {
         guess.
       </p>
       {refusal.reasons.length > 0 ? <SummaryList title="Why" items={refusal.reasons} /> : null}
-      {refusal.needed.length > 0 ? <SummaryList title="What to add" items={refusal.needed} /> : null}
+      {refusal.needed.length > 0 ? (
+        <SummaryList title="What to add" items={refusal.needed} />
+      ) : null}
     </div>
   )
 }

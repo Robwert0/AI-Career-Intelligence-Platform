@@ -234,9 +234,12 @@ describe('analysisFailureAction', () => {
     ['analysis_ai_invalid_output', 'retry', 'retry'],
     ['analysis_input_too_long', 'edit_job', 'edit_job'],
     ['internal_error', 'retry', 'retry'],
-  ] as const)('amendment 5: %s (recovery %s) → %s, never a futile "Try again" for edit_job', (code, recovery, action) => {
-    expect(analysisFailureAction(failed(code, recovery))).toBe(action)
-  })
+  ] as const)(
+    'amendment 5: %s (recovery %s) → %s, never a futile "Try again" for edit_job',
+    (code, recovery, action) => {
+      expect(analysisFailureAction(failed(code, recovery))).toBe(action)
+    },
+  )
 
   it('degrades an unknown future recovery value to a plain message, never throwing', () => {
     const exotic = failed('brand_new_code', 'something_not_yet_invented' as Recovery)
