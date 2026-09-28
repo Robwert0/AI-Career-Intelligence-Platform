@@ -65,7 +65,7 @@ def test_a_repo_whose_scrubbed_text_is_empty_falls_back_to_its_name() -> None:
     repo = gh_repo(
         "toolkit",
         description="Nationality checker",
-        readme="Passport scanner. ID number parser",
+        readme="Passport number confidential. National ID number required.",
         languages={},
         topics=[],
         stars=0,

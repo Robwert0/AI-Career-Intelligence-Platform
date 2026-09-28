@@ -107,6 +107,11 @@ def test_every_5_4_category_from_the_audit_probe_is_dropped(sentence: str) -> No
         "Race condition in the scheduler was diagnosed and fixed",
         "Integrated Visa and Mastercard payment APIs",
         "Embraced test-driven development for the whole team",
+        "Built auth with Passport.js",
+        "Separated the monolith into services",
+        "Built WCAG forms for users with disabilities",
+        "Built a children's education app",
+        "Gender classification model",
     ],
 )
 def test_the_wider_5_4_coverage_still_keeps_ordinary_text(text: str) -> None:
