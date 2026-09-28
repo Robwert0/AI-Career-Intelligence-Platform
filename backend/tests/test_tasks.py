@@ -471,3 +471,5 @@ def test_intake_and_analyses_are_routed_to_their_own_queues() -> None:
     assert routes["jobs.run_analysis"] == {"queue": "analysis"}
     # A worker started without -Q consumes every declared queue, so one worker still serves all.
     assert {queue.name for queue in celery_app.conf.task_queues} >= {"celery", "intake", "analysis"}
+    # A shared routing key would copy every task into every queue on a direct exchange.
+    assert all(queue.routing_key == queue.name for queue in celery_app.conf.task_queues)

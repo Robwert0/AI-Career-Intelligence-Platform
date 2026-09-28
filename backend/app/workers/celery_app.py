@@ -24,7 +24,9 @@ def create_celery_app(broker_url: str) -> Celery:
         # Separate queues, so a backlog of 30-minute analyses never starves job intake when
         # two workers run (`-Q intake` and `-Q analysis`). A worker started without -Q consumes
         # every queue declared here, so a single dev worker still serves everything.
-        task_queues=(Queue("celery"), Queue("intake"), Queue("analysis")),
+        task_queues=tuple(
+            Queue(name, routing_key=name) for name in ("celery", "intake", "analysis")
+        ),
         task_routes={
             "jobs.extract_job": {"queue": "intake"},
             "jobs.run_analysis": {"queue": "analysis"},
