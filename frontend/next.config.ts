@@ -7,7 +7,9 @@ const backendOrigin = process.env.BACKEND_ORIGIN ?? 'http://localhost:8000'
 // to loopback inside the container.
 const PHASE_PRODUCTION_SERVER = 'phase-production-server'
 
-const PROXIED_PREFIXES = ['auth', 'users', 'chat']
+// No proxy.ts exists, so rewrites stream request bodies: a 5 MB CV upload is never buffered or
+// truncated (proxyClientMaxBodySize only applies when proxy.ts is present).
+const PROXIED_PREFIXES = ['auth', 'users', 'chat', 'match']
 
 const isDevelopment = process.env.NODE_ENV !== 'production'
 
