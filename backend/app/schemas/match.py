@@ -3,7 +3,6 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.ai.match.schemas import JobPosting
-from app.core.job_store import JobStatus
 
 JobText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=50, max_length=30_000)]
 
@@ -34,11 +33,23 @@ class FailureOut(BaseModel):
     recovery: Recovery
 
 
+IntakeStatus = Literal["queued", "running", "done", "failed"]
+IntakeStage = Literal["reading", "extracting"]
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
-    status: JobStatus
-    stage: str | None
+    status: IntakeStatus
+    stage: IntakeStage | None
     error: FailureOut | None
     posting: JobPosting | None
     source_url: str | None
     input_truncated: bool
+
+    @model_validator(mode="after")
+    def _status_carries_its_payload(self) -> Self:
+        if self.status == "done" and self.posting is None:
+            raise ValueError("a done job must carry its posting")
+        if self.status == "failed" and self.error is None:
+            raise ValueError("a failed job must carry its error")
+        return self

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -6,20 +7,29 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
-from fakes import AllowAllLimiter, FakeTaskQueue
+from fakes import AllowAllLimiter, FakeTaskQueue, ScriptedGenerator
+from pydantic import ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.match.schemas import JobPosting
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.deps import get_current_user, get_job_store, get_limiter, get_task_queue
+from app.integrations.safe_fetch import FetchResult
 from app.main import app
 from app.models import User
+from app.schemas.match import FailureOut, JobIntakeRequest, JobStatusResponse
+from app.services.job_intake_service import run_job_intake
 
 PASSWORD = "supersecret1"
+_POSTING_REPLY = (
+    '{"is_job_posting": true, "title": "Backend Engineer", "company": null, '
+    '"responsibilities": [], "required": [{"text": "Go", "sensitive": false}], "preferred": []}'
+)
 TEXT = "Backend Engineer at Acme. We need Go, PostgreSQL and Redis experience. " * 3
 
 MatchFixture = tuple[httpx.AsyncClient, FakeTaskQueue, JobStore, dict[str, str], AllowAllLimiter]
@@ -395,3 +405,168 @@ async def test_concurrent_intakes_create_exactly_one_job(
     [accepted] = [r.json()["job_id"] for r in responses if r.status_code == 202]
     assert {r.json()["job_id"] for r in responses if r.status_code == 409} == {accepted}
     assert queue.enqueued == [("jobs.extract_job", accepted)]
+
+
+async def test_a_broken_store_logs_only_the_error_type(
+    match_client: MatchFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    client, _, _, headers, _ = match_client
+
+    class _BrokenStore:
+        async def get(self, job_id: str, owner_id: str) -> JobRecord | None:
+            raise RedisError("secret-redis-detail")
+
+    app.dependency_overrides[get_job_store] = lambda: _BrokenStore()
+
+    with caplog.at_level(logging.INFO):
+        await client.get(f"/match/jobs/{'A' * 22}", headers=headers)
+
+    assert "error_type=RedisError" in caplog.text
+    assert "secret-redis-detail" not in caplog.text
+
+
+async def test_a_broken_store_on_submit_logs_only_the_error_type(
+    match_client: MatchFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    client, _, _, headers, _ = match_client
+
+    class _BrokenStore:
+        async def create_exclusive(self, *args: object, **kwargs: object) -> None:
+            raise RedisError("secret-redis-detail")
+
+    app.dependency_overrides[get_job_store] = lambda: _BrokenStore()
+
+    with caplog.at_level(logging.INFO):
+        response = await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
+
+    assert response.status_code == 503
+    assert "error_type=RedisError" in caplog.text
+    assert "secret-redis-detail" not in caplog.text
+
+
+async def test_a_stored_posting_that_no_longer_fits_the_schema_polls_as_a_coded_failure(
+    match_client: MatchFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    client, _, store, headers, _ = match_client
+    job_id = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()[
+        "job_id"
+    ]
+    malformed = {"title": "Jane Doe secret posting text", "required": "not a list", "extra": 1}
+    await store.mark_done(
+        job_id,
+        result={"posting": malformed, "source": {"kind": "text"}, "input_truncated": False},
+        now=time.time(),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        response = await client.get(f"/match/jobs/{job_id}", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["status"], body["posting"]) == ("failed", None)
+    assert (body["error"]["code"], body["error"]["recovery"]) == ("internal_error", "retry")
+    assert "ValidationError" in caplog.text
+    assert "Jane Doe" not in caplog.text
+    assert "not a list" not in caplog.text
+
+
+async def test_a_done_record_without_a_posting_is_a_coded_500_that_logs_no_text(
+    match_client: MatchFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    client, _, store, headers, _ = match_client
+    job_id = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()[
+        "job_id"
+    ]
+    await store.mark_done(
+        job_id, result={"source": {"kind": "text", "note": "Jane Doe"}}, now=time.time()
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        response = await client.get(f"/match/jobs/{job_id}", headers=headers)
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "internal_error"
+    assert "Jane Doe" not in caplog.text
+
+
+async def test_a_finished_url_intake_reports_where_the_posting_came_from(
+    match_client: MatchFixture,
+) -> None:
+    client, _, store, headers, _ = match_client
+    job_id = (
+        await client.post(
+            "/match/jobs", json={"url": "https://jobs.example.com/1"}, headers=headers
+        )
+    ).json()["job_id"]
+
+    class _Fetcher:
+        async def fetch(self, raw_url: str) -> FetchResult:
+            return FetchResult(
+                url="https://jobs.example.com/final",
+                content_type="text/plain",
+                text="We build payment systems in Go and PostgreSQL. " * 20,
+            )
+
+    async def ignore(stage: str) -> None:
+        return None
+
+    result = await run_job_intake(
+        JobIntakeRequest(url="https://jobs.example.com/1"),
+        fetcher=_Fetcher(),
+        generator=ScriptedGenerator([_POSTING_REPLY]),
+        on_stage=ignore,
+    )
+    await store.mark_done(job_id, result=result, now=time.time())
+
+    body = (await client.get(f"/match/jobs/{job_id}", headers=headers)).json()
+
+    assert body["status"] == "done"
+    assert body["source_url"] == "https://jobs.example.com/final"
+    assert body["posting"]["title"] == "Backend Engineer"
+
+
+_POSTING = JobPosting(title="Backend Engineer")
+_FAILURE = FailureOut(code="timeout", message="m", recovery="retry")
+
+
+def _response(**changes: object) -> JobStatusResponse:
+    fields: dict[str, object] = {
+        "job_id": "A" * 22,
+        "status": "running",
+        "stage": None,
+        "error": None,
+        "posting": None,
+        "source_url": None,
+        "input_truncated": False,
+    }
+    return JobStatusResponse.model_validate({**fields, **changes})
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"status": "done"},
+        {"status": "failed"},
+        {"status": "needs_decision"},
+        {"stage": "fetching"},
+        {"stage": "ping"},
+    ],
+)
+def test_a_status_response_refuses_to_break_the_contract(changes: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        _response(**changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"status": "queued"},
+        {"status": "running", "stage": "reading"},
+        {"status": "running", "stage": "extracting"},
+        {"status": "done", "posting": _POSTING},
+        {"status": "failed", "error": _FAILURE, "stage": "extracting"},
+        {"status": JobStatus.RUNNING},
+    ],
+)
+def test_a_status_response_accepts_every_contract_state(changes: dict[str, object]) -> None:
+    _response(**changes)
