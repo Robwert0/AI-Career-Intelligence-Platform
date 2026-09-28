@@ -9,7 +9,7 @@ import {
   type CandidateSource,
   type MatchReport,
 } from '@/lib/match'
-import { requestProblem, type Problem } from '@/lib/matchErrors'
+import { requestProblem, retryLimitProblem, type Problem } from '@/lib/matchErrors'
 import { poll } from '@/lib/poll'
 
 const FINAL = new Set<AnalysisStatus>(['done', 'failed', 'needs_decision'])
@@ -81,7 +81,8 @@ export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers)
       return
     }
     if (result.status === 401) sessionExpired()
-    else setProblem(requestProblem(result))
+    // retry spends a 5/hour analysis token; continue only spends the poll limit.
+    else setProblem(action === 'retry' ? retryLimitProblem(result) : requestProblem(result))
   }
 
   return {

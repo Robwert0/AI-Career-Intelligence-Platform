@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { AssessedRequirement, BreakdownRow, Coverage, Evidence } from '../match'
+import type { AssessedRequirement, BreakdownRow, Coverage, Evidence, MatchReport } from '../match'
 import {
   citation,
   evidenceById,
+  evidenceKindLabel,
   evidenceShare,
   formatPercent,
   formatPoints,
   formatWeight,
+  isRefusal,
   requirementTextById,
   safeRepoUrl,
   sourceSummary,
@@ -204,5 +206,50 @@ describe('coverage text', () => {
 
   it('states the evidence share', () => {
     expect(evidenceShare(coverage())).toBe('80% of assessed requirements have cited evidence.')
+  })
+
+  it('explains a skipped source as the user continuing without it (amendment 3)', () => {
+    expect(sourceSummary(coverage({ cv: 'skipped' }))[0]).toBe(
+      'CV: not used: you continued without it',
+    )
+    const github = {
+      status: 'skipped' as const,
+      inspected_repos: 0,
+      public_non_fork_repos: 0,
+      readmes_found: 0,
+    }
+    expect(sourceSummary(coverage({ github }))[1]).toBe(
+      'GitHub: not used: you continued without it',
+    )
+  })
+})
+
+describe('evidenceKindLabel (amendment 3: profile)', () => {
+  it.each([
+    ['work', 'Work experience'],
+    ['project', 'Project'],
+    ['repo', 'Repository'],
+    ['skill_list', 'Skills list'],
+    ['education', 'Education'],
+    ['accomplishment', 'Accomplishment'],
+    ['profile', 'Profile'],
+  ] as const)('%s -> %s', (kind, label) => {
+    expect(evidenceKindLabel(kind)).toBe(label)
+  })
+
+  it('never labels a profile item as applied work', () => {
+    expect(evidenceKindLabel('profile')).not.toMatch(/work|project|repo/i)
+  })
+})
+
+describe('isRefusal (amendment 3: clean refusal rendering)', () => {
+  function report(score: MatchReport['score']): Pick<MatchReport, 'score'> {
+    return { score }
+  }
+
+  it('is true only when the score is null', () => {
+    expect(isRefusal(report(null))).toBe(true)
+    expect(isRefusal(report(67))).toBe(false)
+    expect(isRefusal(report(0))).toBe(false)
   })
 })

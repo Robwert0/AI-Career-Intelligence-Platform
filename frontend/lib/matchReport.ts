@@ -4,6 +4,7 @@ import type {
   BreakdownRow,
   Coverage,
   Evidence,
+  EvidenceKind,
   Importance,
   MatchReport,
   RequirementStatus,
@@ -41,7 +42,21 @@ const SOURCE_STATUS_TEXT: Record<SourceStatus, string> = {
   read: 'read',
   not_provided: 'not provided',
   failed: 'could not be read',
-  skipped: 'skipped',
+  // A done report never actually carries "failed" here (amendment 3): a source that errored mid-
+  // analysis and was skipped by the user's "continue without it" choice shows as "skipped".
+  skipped: 'not used: you continued without it',
+}
+
+// Amendment 3 adds "profile" (a GitHub bio/profile item): it must read as distinct from applied
+// work (work/project/repo), never as though the candidate did that work.
+export const EVIDENCE_KIND_LABEL: Record<EvidenceKind, string> = {
+  work: 'Work experience',
+  project: 'Project',
+  repo: 'Repository',
+  skill_list: 'Skills list',
+  education: 'Education',
+  accomplishment: 'Accomplishment',
+  profile: 'Profile',
 }
 
 export type Citation = { label: string; href: string | null }
@@ -70,6 +85,19 @@ export function safeRepoUrl(url: string | null): string | null {
 export function citation(evidence: Pick<Evidence, 'source' | 'section_label' | 'url'>): Citation {
   const origin = evidence.source === 'cv' ? 'CV' : 'GitHub'
   return { label: `${origin} · ${evidence.section_label}`, href: safeRepoUrl(evidence.url) }
+}
+
+export function evidenceKindLabel(kind: EvidenceKind): string {
+  return EVIDENCE_KIND_LABEL[kind]
+}
+
+// Amendment 3: score:null (refusal) always carries empty requirements/recommendations/rewrites and
+// 3 zeroed breakdown rows. Named for readability at call sites that don't need TS to narrow
+// `score` afterward; a call site that does (like ReportOverview's breakdown table) keeps the plain
+// `report.score === null` check instead, since a generic type guard here narrows the true branch
+// but not the false one, and isn't worth an `as number` cast to force.
+export function isRefusal(report: Pick<MatchReport, 'score'>): boolean {
+  return report.score === null
 }
 
 export function evidenceById(report: Pick<MatchReport, 'requirements'>): Map<string, Evidence> {

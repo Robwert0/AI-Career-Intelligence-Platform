@@ -138,6 +138,24 @@ describe('announcements', () => {
     expect(analysisAnnouncement(view, [])).toBe('Paused: GitHub is rate limited.')
   })
 
+  it('shows a github_rate_limited message with its own UTC retry time verbatim, appending nothing (amendment 3)', () => {
+    const view = analysisView({
+      status: 'needs_decision',
+      decision: {
+        failed_source: 'github',
+        error: {
+          code: 'github_rate_limited',
+          message: 'GitHub rate limit reached. Try again after 14:32 UTC.',
+          recovery: 'retry',
+        },
+      },
+    })
+
+    expect(analysisAnnouncement(view, [])).toBe(
+      'Paused: GitHub rate limit reached. Try again after 14:32 UTC.',
+    )
+  })
+
   it('announces a failure and completion', () => {
     const failed = analysisView({
       status: 'failed',

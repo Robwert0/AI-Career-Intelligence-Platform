@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { ApiFailure } from '../http'
 import type { FailureOut, Recovery } from '../match'
-import { analysisFailureAction, jobRecovery, requestProblem } from '../matchErrors'
+import {
+  analysisFailureAction,
+  jobRecovery,
+  requestProblem,
+  retryLimitProblem,
+} from '../matchErrors'
 
 function failure(patch: Partial<ApiFailure> & { status: number }): ApiFailure {
   return { ok: false, detail: 'The server says so.', ...patch }
@@ -111,6 +116,23 @@ describe('requestProblem', () => {
 
     expect(coded.message).toMatch(/busy or unavailable\. Try again in 30 seconds\./)
   })
+
+  it("treats a coded analysis_not_found 404 the same as job intake's not_found (amendment 3)", () => {
+    const coded = requestProblem(failure({ status: 404, code: 'analysis_not_found', body: {} }))
+
+    expect(coded).toMatchObject({ expired: true })
+    expect(coded.message).toMatch(/start it again/i)
+  })
+
+  it('shows the generic message for a FastAPI validation list, not the raw cv_text detail (amendment 3)', () => {
+    const problem = requestProblem(
+      failure({ status: 422, detail: 'cv_text: String should have at most 40000 characters' }),
+    )
+
+    expect(problem).toEqual({
+      message: "Some of the input wasn't accepted. Check it and try again.",
+    })
+  })
 })
 
 describe('jobRecovery', () => {
@@ -189,5 +211,23 @@ describe('analysisFailureAction', () => {
 
     expect(() => analysisFailureAction(exotic)).not.toThrow()
     expect(analysisFailureAction(exotic)).toBe('retry')
+  })
+})
+
+describe('retryLimitProblem (amendment 3: retry spends a 5/hour analysis token)', () => {
+  it('gives a specific analysis-limit message for a 429, not the generic rate-limit one', () => {
+    const problem = retryLimitProblem(failure({ status: 429, retryAfter: 900 }))
+
+    expect(problem.message).toBe(
+      "You've used all your analysis retries for this hour. Try again in 15 minutes.",
+    )
+    expect(problem.message).not.toMatch(/^Too many requests\./)
+  })
+
+  it('falls back to the ordinary mapping for anything that is not a 429', () => {
+    expect(retryLimitProblem(failure({ status: 404 }))).toMatchObject({ expired: true })
+    expect(retryLimitProblem(failure({ status: 401 })).message).toBe(
+      'Your session ended. Sign in again.',
+    )
   })
 })

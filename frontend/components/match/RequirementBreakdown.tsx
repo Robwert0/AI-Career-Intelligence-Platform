@@ -1,5 +1,11 @@
 import type { AssessedRequirement, Evidence } from '@/lib/match'
-import { citation, IMPORTANCE_LABEL, NOT_ASSESSED_NOTE, statusLabel } from '@/lib/matchReport'
+import {
+  citation,
+  evidenceKindLabel,
+  IMPORTANCE_LABEL,
+  NOT_ASSESSED_NOTE,
+  statusLabel,
+} from '@/lib/matchReport'
 import { StatusIcon } from './StatusIcon'
 import { SECTION_TITLE } from './styles'
 
@@ -115,7 +121,7 @@ function EvidenceLine({ evidence }: { evidence: Evidence }) {
   const { label, href } = citation(evidence)
   return (
     <li className="space-y-0.5">
-      <p className="font-mono text-xs text-accent">
+      <p className="flex flex-wrap items-baseline gap-x-2 font-mono text-xs text-accent">
         {href ? (
           <a
             href={href}
@@ -129,6 +135,7 @@ function EvidenceLine({ evidence }: { evidence: Evidence }) {
         ) : (
           label
         )}
+        <span className="text-subtle">{evidenceKindLabel(evidence.kind)}</span>
       </p>
       <p className="line-clamp-3 text-xs break-words text-muted">{evidence.text}</p>
     </li>

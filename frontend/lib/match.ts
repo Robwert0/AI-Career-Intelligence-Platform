@@ -55,7 +55,7 @@ export type RequirementStatus =
   'demonstrated' | 'partial' | 'not_demonstrated' | 'unmet' | 'not_assessed'
 export type Importance = 'required' | 'preferred'
 export type EvidenceKind =
-  'work' | 'project' | 'repo' | 'skill_list' | 'education' | 'accomplishment'
+  'work' | 'project' | 'repo' | 'skill_list' | 'education' | 'accomplishment' | 'profile'
 export type Evidence = {
   id: string
   source: CandidateSource
