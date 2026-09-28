@@ -20,6 +20,7 @@ const FIELD_BY_CODE: Record<string, MatchField> = {
   cv_and_cv_text: 'cv',
   file_too_large: 'cv',
   unsupported_type: 'cv',
+  unsafe_docx: 'cv',
   invalid_github_url: 'github',
   consent_required: 'consent',
 }
@@ -39,15 +40,20 @@ const CANDIDATE_INPUT_CODES = new Set([
 const PASTE_CV_CODES = new Set(['scanned_pdf_suspected', 'unreadable_document', 'not_a_cv'])
 const JOB_CODES = new Set(['invalid_job', 'not_a_job_posting'])
 
-// Contract amendment (2026-09-28): recovery gained 4 candidate-source values. A code this map
-// doesn't know yet still resolves through recovery; a recovery value neither map knows falls back
-// to 'retry' rather than throwing, so a future backend addition degrades instead of crashing.
+// A code this map doesn't know yet still resolves through recovery; a recovery value neither map
+// knows falls back to 'retry' rather than throwing, so a future backend addition degrades instead
+// of crashing. Every recovery value maps to *something other than a blind retry* except 'retry'
+// itself, so an unmapped code never surfaces as a futile "Try again" when the server told us what
+// to do instead (§ analysisFailureAction).
 const ACTION_BY_RECOVERY: Partial<Record<Recovery, FailureAction>> = {
   choose_file: 'edit_candidate',
   paste_cv: 'paste_cv',
   fix_github_url: 'edit_candidate',
   retry_or_continue: 'retry',
   wait: 'wait',
+  edit_job: 'edit_job',
+  paste: 'paste_cv',
+  fix_url: 'edit_job',
 }
 
 function idFromBody(body: unknown, field: 'analysis_id' | 'job_id'): string | undefined {
@@ -56,9 +62,9 @@ function idFromBody(body: unknown, field: 'analysis_id' | 'job_id'): string | un
   return typeof id === 'string' && id !== '' ? id : undefined
 }
 
-// Amendment 4: one active job intake per user. Unlike analysis_in_progress, this is not an error
-// state — the caller (useJobIntake) resumes polling the running job instead of showing anything,
-// so this stays a standalone extractor rather than a requestProblem branch.
+// One active job intake per user is not an error state, unlike analysis_in_progress -- the caller
+// (useJobIntake) resumes polling the running job instead of showing anything, so this stays a
+// standalone extractor rather than a requestProblem branch.
 export function runningJobId(failure: ApiFailure): string | undefined {
   return failure.code === 'job_in_progress' ? idFromBody(failure.body, 'job_id') : undefined
 }
@@ -90,15 +96,16 @@ export function requestProblem(failure: ApiFailure): Problem {
     return { message: failure.detail, field: FIELD_BY_CODE[failure.code] }
   }
   if (failure.status === 413) return { message: 'That file is larger than 5 MB.', field: 'cv' }
-  if (failure.status === 422) {
-    return { message: "Some of the input wasn't accepted. Check it and try again." }
-  }
+  // FastAPI's own 422 list has no {code, message} (the one shape our API doesn't wrap, per the
+  // contract), but http.ts already reduces it to the validators' own .msg text, which is safe and
+  // meaningful to show as-is rather than discarding it for a one-size-fits-all message.
+  if (failure.status === 422) return { message: failure.detail }
   return { message: 'Something went wrong. Please try again.' }
 }
 
-// Amendment 3: retry spends a MATCH_ANALYSIS_USER token (5/hour); continue uses the poll limit and
-// keeps the ordinary requestProblem mapping. A 429 from retry needs its own wording so it doesn't
-// read like a transient "too many requests" — the user actually used up a scarce resource.
+// Retry spends a MATCH_ANALYSIS_USER token (5/hour); continue uses the poll limit and keeps the
+// ordinary requestProblem mapping. A 429 from retry needs its own wording so it doesn't read like
+// a transient "too many requests" — the user actually used up a scarce resource.
 export function retryLimitProblem(failure: ApiFailure): Problem {
   if (failure.status !== 429) return requestProblem(failure)
   return {

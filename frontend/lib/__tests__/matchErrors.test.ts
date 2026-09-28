@@ -68,6 +68,7 @@ describe('requestProblem', () => {
     ['invalid_url', 422, 'job'],
     ['file_too_large', 413, 'cv'],
     ['unsupported_type', 415, 'cv'],
+    ['unsafe_docx', 415, 'cv'],
   ])('shows the server message for %s on the %s field', (code, status, field) => {
     expect(requestProblem(failure({ status, code }))).toEqual({
       message: 'The server says so.',
@@ -82,10 +83,10 @@ describe('requestProblem', () => {
     })
   })
 
-  it('does not echo raw validation errors', () => {
+  it('shows the field message an uncoded 422 carries, instead of discarding it for a generic one', () => {
     const problem = requestProblem(failure({ status: 422, detail: 'Field required' }))
 
-    expect(problem.message).toBe("Some of the input wasn't accepted. Check it and try again.")
+    expect(problem.message).toBe('Field required')
   })
 
   it('treats an uncoded 413 as a CV size problem', () => {
@@ -125,13 +126,13 @@ describe('requestProblem', () => {
     expect(coded.message).toMatch(/start it again/i)
   })
 
-  it('shows the generic message for a FastAPI validation list, not the raw cv_text detail (amendment 3)', () => {
+  it("shows FastAPI's own field message for its 422 validation list, uncoded but still meaningful", () => {
     const problem = requestProblem(
-      failure({ status: 422, detail: 'cv_text: String should have at most 40000 characters' }),
+      failure({ status: 422, detail: 'String should have at most 40000 characters' }),
     )
 
     expect(problem).toEqual({
-      message: "Some of the input wasn't accepted. Check it and try again.",
+      message: 'String should have at most 40000 characters',
     })
   })
 })
@@ -217,8 +218,22 @@ describe('analysisFailureAction', () => {
     ['paste_cv', 'paste_cv'],
     ['fix_github_url', 'edit_candidate'],
     ['retry_or_continue', 'retry'],
+    ['edit_job', 'edit_job'],
+    ['paste', 'paste_cv'],
+    ['fix_url', 'edit_job'],
   ] as const)('an unknown code with recovery %s → %s', (recovery, action) => {
     expect(analysisFailureAction(failed('brand_new_code', recovery))).toBe(action)
+  })
+
+  it.each([
+    ['cv_ai_invalid_output', 'retry_or_continue', 'retry'],
+    ['cv_input_too_long', 'paste_cv', 'paste_cv'],
+    ['cv_no_evidence', 'retry_or_continue', 'retry'],
+    ['analysis_ai_invalid_output', 'retry', 'retry'],
+    ['analysis_input_too_long', 'edit_job', 'edit_job'],
+    ['internal_error', 'retry', 'retry'],
+  ] as const)('amendment 5: %s (recovery %s) → %s, never a futile "Try again" for edit_job', (code, recovery, action) => {
+    expect(analysisFailureAction(failed(code, recovery))).toBe(action)
   })
 
   it('degrades an unknown future recovery value to a plain message, never throwing', () => {
