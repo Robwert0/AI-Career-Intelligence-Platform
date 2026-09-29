@@ -75,7 +75,7 @@ export function Hero() {
             width={160}
             height={160}
             loading="eager"
-            className="mb-6 size-20 rounded-md border border-line object-cover"
+            className="mb-6 size-20 rounded-full border border-line object-cover"
           />
         ) : null}
         <dl className="space-y-4">

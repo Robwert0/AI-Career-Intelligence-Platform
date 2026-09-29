@@ -20,8 +20,7 @@ export const projects: Project[] = [
   {
     slug: 'ai-career-intelligence-platform',
     name: 'AI Career Intelligence Platform',
-    tagline:
-      'This site: a RAG chat over my CV, with auth, rate limiting and prompt-injection defense',
+    tagline: 'This site: a RAG chatbot over my CV, with auth, rate limiting and LLM guardrails',
     category: 'flagship',
     context: 'Personal project',
     period: 'Jun 2026 – present',
@@ -44,11 +43,9 @@ export const projects: Project[] = [
       'Docker',
     ],
     highlights: [
-      'RAG pipeline: PDF parsing into section-aware chunks, bge-small embeddings, and hybrid retrieval that combines HNSW cosine search with Postgres full-text ranking.',
-      'Auth with short-lived JWT access tokens and rotating refresh tokens in an httpOnly, SameSite=Strict cookie; bcrypt hashing; reuse detection revokes the whole token family.',
-      'Redis rate limiting per IP and per user that fails closed, applied to login, registration and chat.',
-      'Prompt-injection defense: user text, retrieved CV text and the system prompt stay in separate channels; chat-template special tokens are escaped; answers are validated before they are returned.',
-      'Phone numbers redacted at ingestion, strict CSP and security headers, and a layered backend (routes → services → repositories) with 370+ tests.',
+      'RAG chatbot that answers questions about my CV: section-aware chunking, BGE embeddings in pgvector, hybrid retrieval (vector similarity + Postgres full-text) fused with Reciprocal Rank Fusion, and source citations in a Next.js chat UI.',
+      'LLM guardrails: calibrated similarity threshold that refuses off-topic questions before generation, prompt-injection detection, context isolation for untrusted text, output checks against system-prompt leakage, and PII redaction; bounded-concurrency generation on a local LLM (Ollama).',
+      'Async FastAPI/SQLAlchemy, JWT refresh-token rotation, Redis rate limiting, CI with ruff, mypy, pytest.',
     ],
     repos: ['https://github.com/Robwert0/AI-Career-Intelligence-Platform'],
   },
@@ -108,7 +105,7 @@ export const projects: Project[] = [
     name: 'Face Recognition Attendance',
     tagline: 'Real-time webcam face recognition that logs who is present',
     category: 'featured',
-    context: 'University project, BSc Robotics, Transilvania University of Brasov',
+    context: 'BSc thesis, Robotics, Transilvania University of Brasov',
     period: 'Dec 2024 – 2025',
     purpose:
       "Take attendance automatically: recognize registered people from a live webcam feed and log each person's presence with a time and confidence score.",
