@@ -58,7 +58,7 @@ export type Cv = {
 export const cv: Cv = {
   name: 'Robert Mirea',
   initials: 'RM',
-  title: 'Software Engineer — Backend',
+  title: 'Backend & AI Engineer',
   location: 'Bucharest, Romania',
   links: [
     { name: 'Email', label: 'mirearobert32@gmail.com', href: 'mailto:mirearobert32@gmail.com' },
@@ -69,33 +69,35 @@ export const cv: Cv = {
       href: 'https://www.linkedin.com/in/robert-mirea-413a91222',
     },
   ],
-  headline: 'I build the backend services behind a real-time conversational AI platform.',
+  headline: 'I build the backend and LLM features of a multi-tenant conversational AI platform.',
   intro:
-    'I build and maintain services that run in production, and I own what happens after they ship: alerting, incident response, and debugging failures that cross service boundaries, backed by unit, integration and end-to-end tests. Before that I interned at BearingPoint and Synergo Applications, working in Python and Java.',
+    'I own features end to end, from the database migration to the product, and the parts that have to hold up in production: LLM reliability, security and payment correctness, backed by on-call and unit, integration and end-to-end tests. Before that I interned at BearingPoint and Synergo Applications, working in Python and Java.',
   glance: [
-    { label: 'role', value: 'Software Engineer, Tyrell Corporation' },
-    { label: 'core stack', value: 'Python · RabbitMQ · PostgreSQL · Redis · Docker' },
+    { label: 'role', value: 'Junior Software Engineer, Tyrell Corporation' },
+    { label: 'core stack', value: 'Python · FastAPI · PostgreSQL · Redis · RabbitMQ · Celery' },
     { label: 'education', value: 'MSc student, Politehnica Bucharest' },
     { label: 'location', value: 'Bucharest, Romania' },
   ],
   summary:
-    'Backend-focused software engineer building Python microservices on a high-scale, event-driven conversational AI platform. Hands-on with RabbitMQ, PostgreSQL/pgvector, Redis, Docker, and CI/CD, with production reliability ownership and comprehensive testing (unit, integration, end-to-end). Also experienced with Java/Spring Boot. Currently pursuing an MSc in Computer Science.',
+    'Backend and AI engineer on a multi-tenant conversational AI platform built on Python/FastAPI microservices, RabbitMQ, Celery, PostgreSQL and Redis. Owns features end to end, plus LLM reliability (multi-provider failover, guardrails, Langfuse observability), security and payment correctness. Builds agentic developer tooling (Claude Code skills, automation pipelines) and RAG systems. Also experienced with Java/Spring Boot.',
   selectedWork: [
     {
-      title: 'Generative image pipeline',
+      title: 'LLM engine',
       employer: 'Tyrell Corporation',
       context: 'Employer work',
       period: '2025 – present',
-      summary: 'Generates images for the platform by calling ML inference services.',
+      summary: 'The layer that calls the language models behind the platform’s conversations.',
       problem:
-        'Inference calls can fail, and every generation involves user credits and transactions that have to stay correct when they do.',
+        'Generation can get stuck repeating itself or break persona, and moderation has to be traceable.',
       contribution:
-        'Developed the pipeline that integrates the ML inference services, including its failure handling.',
+        'Built a provider-agnostic AI client factory and the reliability checks around generation.',
       decisions: [
-        'Automatic recovery from failed inference requests.',
-        'Credit and transaction integrity preserved when failures happen.',
+        'Post-generation repetition-loop detection with provider failover.',
+        'Persona-break leaks suppressed.',
+        'Image guard-rail decoupled from chat.',
+        'Moderation linked to Langfuse traces and scores.',
       ],
-      stack: ['Python', 'Microservices', 'Event-driven architecture', 'ML inference services'],
+      stack: ['Python', 'FastAPI', 'Microservices', 'Langfuse'],
     },
     {
       title: 'AI Career Intelligence Platform',
@@ -107,7 +109,7 @@ export const cv: Cv = {
         'A CV cannot answer follow-up questions, and a model that answers for it must not be steerable by what visitors type.',
       contribution: 'Designed and built the backend, the retrieval pipeline and the frontend.',
       decisions: [
-        'Hybrid retrieval: pgvector HNSW similarity combined with Postgres full-text ranking.',
+        'Hybrid retrieval: pgvector similarity and Postgres full-text, fused with Reciprocal Rank Fusion.',
         'System prompt, visitor input and retrieved CV text kept in separate channels; chat-template tokens escaped.',
         'Refresh tokens rotate on every use, and reuse revokes the whole token family.',
         'Redis rate limits per IP and per user that fail closed.',
@@ -168,17 +170,19 @@ export const cv: Cv = {
   ],
   experience: [
     {
-      title: 'Software Engineer',
+      title: 'Junior Software Engineer',
       company: 'Tyrell Corporation',
       location: 'Remote',
       period: 'Nov 2025 – Present',
       context:
-        'High-scale, real-time conversational AI platform (microservices, event-driven architecture).',
+        'Multi-tenant conversational AI platform (Python/FastAPI microservices, event-driven architecture).',
       highlights: [
-        'Build and maintain Python microservices in an event-driven architecture (RabbitMQ message broker, PostgreSQL/pgvector, Redis).',
-        'Developed a generative image pipeline integrating ML inference services, with automatic failure recovery and credit/transaction integrity.',
-        'Own production reliability: alerting (New Relic), incident response, and distributed-systems debugging across services.',
-        'CI/CD, Docker, multi-service deployments; unit, integration, and end-to-end test suites.',
+        'Own features end to end, from DB migration to backoffice to product: a character builder with ComfyUI-generated portraits, ElevenLabs text-to-speech, companion discovery, and a payment-gated referral program.',
+        'LLM engine: built a provider-agnostic AI client factory; post-generation repetition-loop detection with provider failover; suppressed persona-break leaks; decoupled the image guard-rail from chat; linked moderation to Langfuse traces and scores.',
+        'Engineering enablement: built AI-agent tooling for the team — Claude Code skills, automation pipelines, and repo conventions.',
+        'Security and payments: fixed cross-user IDOR vulnerabilities; hardened the payment integration (callback amount/currency validation, pending payment persisted before the provider call).',
+        'Data and reliability: zero-downtime column rename (expand → switch readers → contract); fixed schema drift and full-table scans; durable messaging (persistent publishing, dead-letter logging, Celery retries).',
+        'On-call and incident response (New Relic, Sentry, PagerDuty); CI/CD, Docker; pytest unit, integration, and end-to-end suites.',
       ],
     },
     {
@@ -203,33 +207,65 @@ export const cv: Cv = {
   ],
   projects,
   skills: [
-    { name: 'Languages', skills: ['Python', 'Java', 'TypeScript', 'SQL', 'C++'] },
+    { name: 'Languages', skills: ['Python', 'Java', 'SQL', 'TypeScript', 'C++'] },
     {
       name: 'Backend',
       skills: [
         'Microservices',
         'Event-driven architecture',
         'FastAPI',
+        'SQLAlchemy/Alembic',
+        'RabbitMQ',
+        'Celery',
+        'Redis',
+        'PostgreSQL/pgvector',
         'Spring Boot',
         'REST APIs',
         'Pydantic',
-        'SQLAlchemy',
       ],
     },
-    { name: 'Data & messaging', skills: ['PostgreSQL', 'pgvector', 'Redis', 'RabbitMQ'] },
     {
-      name: 'Infrastructure & operations',
-      skills: ['Docker', 'CI/CD', 'New Relic alerting', 'Incident response', 'Git/GitHub'],
+      name: 'AI / LLM',
+      skills: [
+        'LLM APIs (Claude, Gemini, open-weight via Ollama)',
+        'Multi-provider failover',
+        'RAG and hybrid retrieval',
+        'Guardrails and moderation',
+        'Langfuse',
+        'ComfyUI',
+        'ElevenLabs',
+        'Claude Code',
+      ],
     },
     {
-      name: 'Testing',
-      skills: ['Unit testing', 'Integration testing', 'End-to-end testing', 'pytest'],
+      name: 'Ops & Testing',
+      skills: [
+        'Docker',
+        'CI/CD',
+        'Heroku',
+        'Cloudflare R2',
+        'New Relic',
+        'Sentry',
+        'PagerDuty',
+        'Incident response',
+        'pytest (unit, integration, e2e)',
+        'ruff',
+        'mypy/pyright',
+      ],
     },
     {
-      name: 'AI & ML',
-      skills: ['RAG pipelines', 'LLM integration', 'OpenCV', 'MediaPipe', 'scikit-learn'],
+      name: 'Tools & Other',
+      skills: [
+        'Git/GitHub',
+        'OpenCV',
+        'MediaPipe',
+        'scikit-learn',
+        'React',
+        'Next.js',
+        'MATLAB/Simulink',
+        'ROS',
+      ],
     },
-    { name: 'Also used', skills: ['Next.js', 'React', 'MATLAB/Simulink', 'ROS'] },
   ],
   education: [
     {
@@ -239,10 +275,9 @@ export const cv: Cv = {
     },
     {
       degree: 'BSc, Robotics',
-      school:
-        'Transilvania University of Brasov — Faculty of Electrical Engineering and Computer Science',
+      school: 'Transilvania University of Brasov',
       period: '2021 – 2025',
-      note: 'Thesis-level projects in robotics: 6-DOF robotic arm — CAD design (CATIA), Simulink simulation, forward/inverse kinematics control.',
+      note: 'Coursework: 6-DOF robotic arm (CATIA CAD, Simulink simulation, forward/inverse kinematics).',
     },
   ],
   languages: ['Romanian (native)', 'English (C1)'],

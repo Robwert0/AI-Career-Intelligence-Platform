@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Robert Mirea — Software Engineer',
+  title: 'Robert Mirea — Backend & AI Engineer',
   description:
-    'Backend software engineer: Python microservices, event-driven systems, PostgreSQL/pgvector. Ask my CV anything.',
+    'Backend and AI engineer: Python/FastAPI microservices, LLM reliability, RAG systems. Ask my CV anything.',
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
