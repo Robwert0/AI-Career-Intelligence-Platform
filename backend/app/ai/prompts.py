@@ -10,13 +10,17 @@ EXTRACT_TAG = "extract"
 QUESTION_TAG = "question"
 JOB_POSTING_TAG = "job_posting"
 CV_DOCUMENT_TAG = "cv_document"
+REQUIREMENTS_TAG = "requirements"
+EVIDENCE_TAG = "candidate_evidence"
+ASSESSMENT_TAG = "assessment"
 
 _SPECIAL_TOKEN = re.compile(r"<[|｜]([^|｜>]*)[|｜]>")
 _SENTENCE_MARKERS = re.compile(r"</?s>", re.IGNORECASE)
 _INSTRUCTION_MARKERS = re.compile(r"\[/?INST\]", re.IGNORECASE)
 _TURN_MARKERS = re.compile(r"<(?:start|end)_of_turn>|</?<?SYS>?>|<(?:bos|eos)>", re.IGNORECASE)
 _OWN_TAGS = re.compile(
-    rf"</?(?:{CV_EXTRACTS_TAG}|{EXTRACT_TAG}|{QUESTION_TAG}|{JOB_POSTING_TAG}|{CV_DOCUMENT_TAG})"
+    rf"</?(?:{CV_EXTRACTS_TAG}|{EXTRACT_TAG}|{QUESTION_TAG}|{JOB_POSTING_TAG}|{CV_DOCUMENT_TAG}"
+    rf"|{REQUIREMENTS_TAG}|{EVIDENCE_TAG}|{ASSESSMENT_TAG})"
     r"\b[^>]*>",
     re.IGNORECASE,
 )

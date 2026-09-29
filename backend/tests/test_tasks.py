@@ -455,3 +455,21 @@ def test_an_intake_starts_at_the_stage_its_input_kind_needs(
         assert "reading" not in shown
     done = _load(job_id)
     assert done is not None and done.status is JobStatus.DONE
+
+
+def test_the_broker_never_redelivers_a_running_analysis() -> None:
+    # Redis redelivers an unacked task after visibility_timeout; an analysis can run 1830s.
+    visibility = celery_app.conf.broker_transport_options["visibility_timeout"]
+
+    assert visibility > settings.match_analysis_hard_time_limit_seconds
+
+
+def test_intake_and_analyses_are_routed_to_their_own_queues() -> None:
+    routes = celery_app.conf.task_routes
+
+    assert routes["jobs.extract_job"] == {"queue": "intake"}
+    assert routes["jobs.run_analysis"] == {"queue": "analysis"}
+    # A worker started without -Q consumes every declared queue, so one worker still serves all.
+    assert {queue.name for queue in celery_app.conf.task_queues} >= {"celery", "intake", "analysis"}
+    # A shared routing key would copy every task into every queue on a direct exchange.
+    assert all(queue.routing_key == queue.name for queue in celery_app.conf.task_queues)

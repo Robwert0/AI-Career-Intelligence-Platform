@@ -1,7 +1,13 @@
+import inspect
+import os
+
 import pytest
 from pydantic import ValidationError
 
+from app.core import config
 from app.core.config import Settings
+from app.integrations.doc_sandbox import PARSE_TIMEOUT_SECONDS
+from app.integrations.github import GitHubClient
 
 
 def test_short_secret_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,3 +292,117 @@ def test_the_github_token_never_appears_in_the_settings_repr(
     assert settings.github_token is not None
     assert settings.github_token.get_secret_value() == "ghp_not_a_real_token_value"
     assert "ghp_not_a_real_token_value" not in repr(settings)
+
+
+def test_analysis_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "MATCH_CV_TTL_SECONDS",
+        "MATCH_PRESELECT_TOP_K",
+        "MATCH_ASSESS_GENERATION_TIMEOUT_SECONDS",
+        "MATCH_RECOMMEND_GENERATION_TIMEOUT_SECONDS",
+        "MATCH_ANALYSIS_SOFT_TIME_LIMIT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.match_cv_ttl_seconds == 1200
+    assert settings.match_preselect_top_k == 8
+    assert settings.match_assess_generation_timeout_seconds == 60
+    assert settings.match_recommend_generation_timeout_seconds == 90
+    assert settings.match_analysis_soft_time_limit_seconds == 1800
+    assert settings.match_analysis_hard_time_limit_seconds == 1830
+
+
+# Exactly what .github/workflows/ci.yml gives alembic and the worker smoke test.
+CI_ENV = {
+    "DATABASE_URL": "postgresql+asyncpg://test:test@localhost:5432/postgres",
+    "REDIS_URL": "redis://localhost:6379/0",
+    "SECRET_KEY": "ci-secret-not-real-000000000000000000",
+    "CV_DOCUMENT_ID": "44444444-4444-4444-4444-444444444444",
+}
+
+
+def test_settings_build_from_ci_env_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in list(os.environ):
+        if name.startswith(("MATCH_", "JOB_", "CELERY_", "GITHUB_", "MAX_UPLOAD")):
+            monkeypatch.delenv(name)
+    for name, value in CI_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    settings = Settings(_env_file=None)
+
+    # The calibrated refusal gates: one per source, each overridable from the environment.
+    assert settings.match_preselect_thresholds == {"cv": 0.605, "github": 0.583}
+
+
+def test_each_refusal_gate_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MATCH_PRESELECT_MIN_SIMILARITY", "0.7")
+    monkeypatch.setenv("MATCH_PRESELECT_MIN_SIMILARITY_GITHUB", "0.6")
+
+    assert Settings(_env_file=None).match_preselect_thresholds == {"cv": 0.7, "github": 0.6}
+
+
+def test_the_worst_case_analysis_is_the_documented_sum() -> None:
+    settings = Settings(_env_file=None)
+
+    # 30 parse + 2x150 evidence + 20 GitHub + 60 embeddings + 8x2x60 assess + 2x90 recommend + 30.
+    assert settings.match_analysis_budget_seconds == 1580
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("MATCH_ASSESS_GENERATION_TIMEOUT_SECONDS", "90"),
+        ("EVIDENCE_EXTRACT_GENERATION_TIMEOUT_SECONDS", "400"),
+        ("MATCH_ANALYSIS_SOFT_TIME_LIMIT_SECONDS", "1500"),
+    ],
+)
+def test_an_analysis_that_cannot_finish_inside_its_soft_limit_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match="analysis worst case"):
+        Settings(_env_file=None)
+
+
+def test_a_queued_analysis_must_be_able_to_finish_before_its_record_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JOB_TTL_SECONDS", "2400")
+
+    with pytest.raises(ValidationError, match="job_ttl_seconds"):
+        Settings(_env_file=None)
+
+
+def test_the_fixed_budget_matches_the_limits_enforced_in_code() -> None:
+    total_timeout = inspect.signature(GitHubClient).parameters["total_timeout"].default
+
+    assert config.PARSE_BUDGET_SECONDS == PARSE_TIMEOUT_SECONDS
+    assert total_timeout == config.GITHUB_BUDGET_SECONDS
+
+
+def test_the_assess_call_cap_matches_the_budget() -> None:
+    from app.ai.match.assess import MAX_ASSESS_BATCHES
+
+    assert config.MAX_ASSESS_CALLS == MAX_ASSESS_BATCHES
+
+
+def test_a_cv_blob_outlives_the_longest_a_job_can_wait_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MATCH_CV_TTL_SECONDS", raising=False)
+    assert (
+        Settings(_env_file=None).match_cv_ttl_seconds
+        > Settings(_env_file=None).job_queue_stale_seconds
+    )
+
+    monkeypatch.setenv("MATCH_CV_TTL_SECONDS", "900")
+
+    with pytest.raises(ValidationError, match="match_cv_ttl_seconds"):
+        Settings(_env_file=None)
+
+
+def test_the_queued_analysis_cap_has_a_default() -> None:
+    assert Settings(_env_file=None).match_max_queued_analyses == 20

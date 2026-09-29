@@ -78,3 +78,9 @@ def test_job_polling_matches_the_users_me_budget() -> None:
     assert policies.MATCH_POLL_USER.capacity == 60
     assert policies.MATCH_POLL_USER.refill_per_second == pytest.approx(1.0)
     assert policies.MATCH_POLL_USER.scope is Scope.USER
+
+
+def test_analyses_are_limited_to_five_an_hour_per_user() -> None:
+    assert policies.MATCH_ANALYSIS_USER.capacity == 5
+    assert policies.MATCH_ANALYSIS_USER.refill_per_second == pytest.approx(5 / 3600)
+    assert policies.MATCH_ANALYSIS_USER.scope is Scope.USER

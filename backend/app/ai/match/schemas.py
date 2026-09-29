@@ -107,3 +107,47 @@ class ExtractedCv(BaseModel):
 
     is_cv: bool
     items: list[CvEntry] = Field(default_factory=list)
+
+
+AssessStatus = Literal["demonstrated", "partial", "not_demonstrated", "unmet"]
+AssessRef = Annotated[str, StringConstraints(pattern=r"^R[1-9][0-9]?$")]
+CitedId = Annotated[str, StringConstraints(max_length=120)]
+
+
+class AssessedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ref: AssessRef
+    status: AssessStatus
+    evidence_ids: list[CitedId] = Field(default_factory=list, max_length=20)
+    rationale: Annotated[str, _clipped(300)] = ""
+
+
+class AssessReply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assessments: list[AssessedItem] = Field(max_length=20)
+
+
+class RecommendationItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: CitedId
+    title: Annotated[str, _clipped(120)]
+    detail: Annotated[str, _clipped(400)]
+
+
+class RewriteItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: CitedId
+    after: Annotated[str, _clipped(600)]
+    questions: list[Annotated[str, _clipped(200)]] = Field(default_factory=list, max_length=3)
+
+
+class RecommendReply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    immediate: list[RecommendationItem] = Field(default_factory=list, max_length=5)
+    longer_term: list[RecommendationItem] = Field(default_factory=list, max_length=5)
+    rewrites: list[RewriteItem] = Field(default_factory=list, max_length=5)

@@ -1,0 +1,202 @@
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from app.ai.match.assess import AssessedRequirement, Assessment
+from app.ai.match.requirements import RequirementRef
+from app.ai.match.schemas import EvidenceItem
+from app.match.scoring import ScoredRequirement, score
+from app.schemas.match import MatchReport
+from app.services.analysis_sources import CvSource, GitHubSource, SourcesState
+from app.services.match_report import (
+    CV_SKIPPED,
+    CV_TRUNCATED,
+    CV_UNVERIFIED,
+    DISCLAIMER,
+    GITHUB_METADATA_ONLY,
+    GITHUB_PUBLIC_ONLY,
+    NO_PREFERRED,
+    build_report,
+    refusal_report,
+)
+
+MERGED = EvidenceItem(
+    id="cv:project:0",
+    sources=("cv", "github"),
+    kind="project",
+    section_label="Projects · Jarvis",
+    text="Voice assistant in Python.",
+    url="https://github.com/jane/jarvis",
+)
+REPO = EvidenceItem(
+    id="gh:repo:ledger",
+    sources=("github",),
+    kind="repo",
+    section_label="GitHub · ledger",
+    text="Ledger in Go.",
+    url="https://github.com/jane/ledger",
+)
+EVIDENCE = {MERGED.id: MERGED, REPO.id: REPO}
+REQS = [
+    RequirementRef(f"req:required:{i}", text, "required", False)
+    for i, text in enumerate(["Python", "Go", "Rust"])
+]
+ASSESSMENT = Assessment(
+    results=(
+        AssessedRequirement(REQS[0], "demonstrated", (MERGED.id,), "Built one."),
+        AssessedRequirement(REQS[1], "demonstrated", (REPO.id,), "Has a repo."),
+        AssessedRequirement(REQS[2], "not_demonstrated", (), "Nothing found."),
+    ),
+    cited=2,
+    dropped=0,
+    downgraded=0,
+    calls=1,
+)
+BOTH_READ = SourcesState(
+    cv=CvSource(status="read", items=(MERGED,), truncated=True),
+    github=GitHubSource(
+        status="read",
+        url="https://github.com/jane",
+        items=(REPO,),
+        inspected_repos=10,
+        public_non_fork_repos=17,
+        readmes_found=8,
+    ),
+)
+
+
+def report(sources: SourcesState = BOTH_READ) -> MatchReport:
+    total = score(
+        [
+            ScoredRequirement("required", r.status, frozenset({"project"}))
+            for r in ASSESSMENT.results
+        ]
+    )
+    return build_report(
+        requirements=REQS,
+        assessment=ASSESSMENT,
+        score=total,
+        advice=None,
+        evidence=EVIDENCE,
+        sources=sources,
+        model="ollama/qwen3:8b",
+    )
+
+
+def test_a_merged_item_is_cited_as_cv_evidence_that_links_its_repo() -> None:
+    built = report()
+
+    first, second = built.requirements[0].evidence[0], built.requirements[1].evidence[0]
+    assert (first.source, first.url) == ("cv", "https://github.com/jane/jarvis")
+    assert (second.source, second.kind) == ("github", "repo")
+
+
+def test_coverage_counts_assessed_requirements_with_cited_evidence() -> None:
+    coverage = report().coverage
+
+    assert coverage.requirements_with_evidence == 0.667
+    assert coverage.level == "medium"
+    assert (
+        coverage.github.inspected_repos,
+        coverage.github.public_non_fork_repos,
+        coverage.github.readmes_found,
+    ) == (10, 17, 8)
+
+
+def test_limitations_explain_scope_truncation_and_redistribution() -> None:
+    limitations = report().coverage.limitations
+
+    assert limitations[:2] == [GITHUB_PUBLIC_ONLY, GITHUB_METADATA_ONLY]
+    assert CV_TRUNCATED in limitations
+    assert NO_PREFERRED in limitations
+
+
+def test_a_skipped_source_lowers_coverage_and_is_explained() -> None:
+    skipped = SourcesState(
+        cv=CvSource(status="skipped", error_code="scanned_pdf_suspected"), github=BOTH_READ.github
+    )
+
+    coverage = report(skipped).coverage
+
+    assert coverage.cv == "skipped"
+    assert CV_SKIPPED in coverage.limitations
+
+
+def test_the_summary_names_strengths_and_required_gaps() -> None:
+    summary = report().summary
+
+    assert (summary.strongest, summary.gaps) == (["Python", "Go"], ["Rust"])
+
+
+def test_a_refusal_report_has_no_score_and_zero_rows() -> None:
+    refused = refusal_report(["insufficient_evidence"], sources=BOTH_READ, model="m")
+
+    assert refused.score is None
+    assert (
+        refused.refusal is not None
+        and len(refused.refusal.reasons) == len(refused.refusal.needed) == 1
+    )
+    assert [(row.category, row.weight, row.points) for row in refused.breakdown] == [
+        ("required", 70, 0.0),
+        ("preferred", 20, 0.0),
+        ("applied_evidence", 10, 0.0),
+    ]
+    assert refused.coverage.level == "low"
+    assert refused.disclaimer == DISCLAIMER
+
+
+def test_many_unverifiable_cv_items_are_explained() -> None:
+    dropping = BOTH_READ.model_copy(update={"cv": BOTH_READ.cv.model_copy(update={"dropped": 2})})
+
+    assert CV_UNVERIFIED in report(dropping).coverage.limitations
+    assert CV_UNVERIFIED not in report().coverage.limitations
+
+
+def _broken(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    data = report().model_dump(mode="json")
+    change(data)
+    return data
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d.update(score=None),
+        lambda d: d.update(score=101),
+        lambda d: d.update(breakdown=list(reversed(d["breakdown"]))),
+        lambda d: d.update(breakdown=d["breakdown"][:2]),
+        lambda d: d["requirements"][2].update(
+            importance="preferred", status="unmet", hard_gap=True
+        ),
+        lambda d: d["requirements"][0].update(hard_gap=True),
+        lambda d: d["coverage"].update(requirements_with_evidence=1.5),
+        lambda d: d["breakdown"][0].update(score=-0.1),
+    ],
+    ids=[
+        "score-without-refusal",
+        "score-over-100",
+        "breakdown-order",
+        "breakdown-rows",
+        "hard-gap-on-preferred",
+        "hard-gap-not-unmet",
+        "coverage-ratio",
+        "row-score",
+    ],
+)
+def test_a_report_that_breaks_the_contract_is_rejected(
+    change: Callable[[dict[str, Any]], None],
+) -> None:
+    with pytest.raises(ValidationError):
+        MatchReport.model_validate(_broken(change))
+
+
+def test_a_refusal_must_carry_empty_lists() -> None:
+    refused = refusal_report(["insufficient_evidence"], sources=BOTH_READ, model="m").model_dump(
+        mode="json"
+    )
+    refused["requirements"] = report().model_dump(mode="json")["requirements"]
+
+    with pytest.raises(ValidationError):
+        MatchReport.model_validate(refused)

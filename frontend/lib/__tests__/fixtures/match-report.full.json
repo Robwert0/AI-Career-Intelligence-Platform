@@ -1,0 +1,208 @@
+{
+  "score": 52,
+  "refusal": null,
+  "summary": {
+    "strongest": [
+      "3+ years building Python backend services",
+      "Event-driven architecture with a message broker"
+    ],
+    "gaps": [
+      "Rust systems programming"
+    ]
+  },
+  "breakdown": [
+    {
+      "category": "required",
+      "weight": 70,
+      "effective_weight": 70.0,
+      "score": 0.5,
+      "points": 35.0
+    },
+    {
+      "category": "preferred",
+      "weight": 20,
+      "effective_weight": 20.0,
+      "score": 0.5,
+      "points": 10.0
+    },
+    {
+      "category": "applied_evidence",
+      "weight": 10,
+      "effective_weight": 10.0,
+      "score": 0.667,
+      "points": 6.7
+    }
+  ],
+  "coverage": {
+    "level": "high",
+    "cv": "read",
+    "github": {
+      "status": "read",
+      "inspected_repos": 10,
+      "public_non_fork_repos": 14,
+      "readmes_found": 7
+    },
+    "requirements_with_evidence": 0.833,
+    "limitations": [
+      "GitHub shows public repositories only; professional work is often private",
+      "GitHub was inspected via metadata and READMEs; no code was reviewed",
+      "Requirements about personal characteristics or work authorisation were not assessed"
+    ]
+  },
+  "requirements": [
+    {
+      "id": "req:required:0",
+      "text": "3+ years building Python backend services",
+      "importance": "required",
+      "status": "demonstrated",
+      "rationale": "Python services for three product teams, plus a Python ledger project.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:0",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Globex",
+          "text": "Built and maintained Python microservices on PostgreSQL and Redis for 3 product teams.",
+          "url": null
+        },
+        {
+          "id": "cv:project:0",
+          "source": "cv",
+          "kind": "project",
+          "section_label": "Projects · Ledger",
+          "text": "Double-entry ledger service in Python with a FastAPI API and pytest suite.",
+          "url": "https://github.com/jane-doe/ledger"
+        }
+      ]
+    },
+    {
+      "id": "req:required:1",
+      "text": "PostgreSQL schema design",
+      "importance": "required",
+      "status": "partial",
+      "rationale": "Uses PostgreSQL in production; schema design itself is not described.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:0",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Globex",
+          "text": "Built and maintained Python microservices on PostgreSQL and Redis for 3 product teams.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:2",
+      "text": "Kubernetes in production",
+      "importance": "required",
+      "status": "partial",
+      "rationale": "Kubernetes is listed as basic, with no production use described.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:skills:0",
+          "source": "cv",
+          "kind": "skill_list",
+          "section_label": "Skills",
+          "text": "Python, PostgreSQL, Redis, RabbitMQ, Docker, Kubernetes (basic)",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:3",
+      "text": "Rust systems programming",
+      "importance": "required",
+      "status": "unmet",
+      "rationale": "The skills list is explicit and names no Rust; the posting requires it.",
+      "hard_gap": true,
+      "evidence": [
+        {
+          "id": "cv:skills:0",
+          "source": "cv",
+          "kind": "skill_list",
+          "section_label": "Skills",
+          "text": "Python, PostgreSQL, Redis, RabbitMQ, Docker, Kubernetes (basic)",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:4",
+      "text": "EU work permit",
+      "importance": "required",
+      "status": "not_assessed",
+      "rationale": "This concerns a personal characteristic or work authorisation, so it was not assessed. Confirm it yourself.",
+      "hard_gap": false,
+      "evidence": []
+    },
+    {
+      "id": "req:preferred:0",
+      "text": "Event-driven architecture with a message broker",
+      "importance": "preferred",
+      "status": "demonstrated",
+      "rationale": "Moved order processing onto RabbitMQ with retries and dead-letter queues.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:1",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Globex",
+          "text": "Moved order processing onto RabbitMQ with retries and dead-letter queues.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:preferred:1",
+      "text": "Open-source contributions",
+      "importance": "preferred",
+      "status": "not_demonstrated",
+      "rationale": "No evidence addressing this requirement was found.",
+      "hard_gap": false,
+      "evidence": []
+    }
+  ],
+  "recommendations": {
+    "immediate": [
+      {
+        "requirement_id": "req:required:1",
+        "title": "Describe your schema work",
+        "detail": "Name a table design or migration you owned in the Globex entry."
+      },
+      {
+        "requirement_id": "req:preferred:0",
+        "title": "Lead with the RabbitMQ migration",
+        "detail": "Move the RabbitMQ work to the top of the Globex entry."
+      }
+    ],
+    "longer_term": [
+      {
+        "requirement_id": "req:required:2",
+        "title": "Run a service on Kubernetes",
+        "detail": "Deploy the ledger project to a managed cluster and write up what you learnt."
+      },
+      {
+        "requirement_id": "req:required:3",
+        "title": "Build something small in Rust",
+        "detail": "A command-line tool is enough to show the basics."
+      }
+    ]
+  },
+  "rewrites": [
+    {
+      "evidence_id": "cv:experience:0",
+      "before": "Built and maintained Python microservices on PostgreSQL and Redis for 3 product teams.",
+      "after": "Designed, built and maintained Python microservices on PostgreSQL and Redis for 3 product teams.",
+      "questions": [
+        "How many requests a day did these services handle?"
+      ]
+    }
+  ],
+  "disclaimer": "This is an alignment estimate from the evidence you supplied. It is not a hiring probability or an employer's ATS score.",
+  "model": "ollama/qwen3:8b"
+}

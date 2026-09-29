@@ -14,6 +14,7 @@ from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.generation import Generator
 from app.ai.rag import RagPipeline, RetrieverScope
 from app.ai.retriever import Retriever
+from app.core.analysis_registry import AnalysisRegistry
 from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
@@ -181,8 +182,13 @@ def get_task_queue(request: Request) -> TaskQueue:
     return queue
 
 
+def get_analysis_registry(request: Request) -> AnalysisRegistry:
+    return AnalysisRegistry(request.app.state.redis, ttl_seconds=settings.job_ttl_seconds)
+
+
 def get_match_service(
     store: Annotated[JobStore, Depends(get_job_store)],
     queue: Annotated[TaskQueue, Depends(get_task_queue)],
+    registry: Annotated[AnalysisRegistry, Depends(get_analysis_registry)],
 ) -> MatchService:
-    return MatchService(store, queue)
+    return MatchService(store, queue, registry)
