@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.core.sections import HEADING_ALIASES, SECTIONS
-from app.services.cv_parser import pdf_to_markdown
+from app.integrations.cv_parser import pdf_to_markdown
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REAL_CV = Path(__file__).parents[2] / "files/RobertMirea_CV2026.pdf"

@@ -4,7 +4,8 @@ from typing import Any, Protocol
 
 from app.ai.generation import Generator
 from app.ai.input_guard import detect_injection_phrases
-from app.ai.match.job_extract import ExtractionError, extract_job
+from app.ai.match.job_extract import extract_job
+from app.ai.match.structured import ExtractionError
 from app.integrations.errors import FetchError
 from app.integrations.html_text import extract_page, job_text, page_failure, plain_page
 from app.integrations.safe_fetch import FetchResult

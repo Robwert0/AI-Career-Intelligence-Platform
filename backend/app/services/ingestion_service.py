@@ -4,9 +4,9 @@ import uuid
 from app.ai.chunking import TextChunk, chunk_cv
 from app.ai.embeddings import Embedder
 from app.ai.redaction import redact_phone_numbers
+from app.integrations.cv_parser import pdf_to_markdown
 from app.models import Chunk
 from app.repositories import ChunkRepository
-from app.services.cv_parser import pdf_to_markdown
 
 
 def _parse(pdf_bytes: bytes) -> list[TextChunk]:

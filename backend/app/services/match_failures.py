@@ -74,6 +74,73 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
     "not_found": ("We couldn't find that job. It may have expired or already finished.", "retry"),
     "unavailable": ("This service is temporarily unavailable. Try again in a few minutes.", "wait"),
     "internal_error": ("Something went wrong on our side. Try again.", "retry"),
+    "file_too_large": (
+        "That file is larger than the upload limit. Choose a smaller file, or "
+        "paste your CV text instead.",
+        "choose_file",
+    ),
+    "unsupported_type": (
+        "Only PDF and Word (.docx) files can be read. Choose another file, or "
+        "paste your CV text instead.",
+        "choose_file",
+    ),
+    "encrypted_pdf": (
+        "That PDF is password-protected. Save an unprotected copy and upload that, "
+        "or paste your CV text instead.",
+        "choose_file",
+    ),
+    "too_many_pages": (
+        "That PDF has more than 10 pages. Upload a shorter CV, or paste the relevant part instead.",
+        "choose_file",
+    ),
+    "unsafe_docx": (
+        "That Word file contains macros or an unusual structure we don't open. Save "
+        "it as a plain .docx or PDF and upload that instead.",
+        "choose_file",
+    ),
+    "scanned_pdf_suspected": (
+        "That PDF looks like a scanned image with no readable text. Upload "
+        "a text-based PDF, or paste your CV text instead.",
+        "paste_cv",
+    ),
+    "unreadable_document": (
+        "We couldn't read text from that file. Upload a text-based PDF or "
+        ".docx, or paste your CV text instead.",
+        "paste_cv",
+    ),
+    "not_a_cv": (
+        "That document doesn't look like a CV. Check the file, or paste your CV text instead.",
+        "paste_cv",
+    ),
+    "invalid_github_url": (
+        "Enter a GitHub profile link like https://github.com/your-name.",
+        "fix_github_url",
+    ),
+    "github_user_not_found": (
+        "There's no GitHub user with that name. Check the link, or continue without GitHub.",
+        "fix_github_url",
+    ),
+    "github_rate_limited": (
+        "GitHub is limiting how often we can read profiles right now. Try "
+        "again later, or continue without GitHub.",
+        "retry_or_continue",
+    ),
+    "github_unavailable": (
+        "We couldn't reach GitHub. Try again, or continue without GitHub.",
+        "retry_or_continue",
+    ),
+    "cv_ai_invalid_output": (
+        "We couldn't read your CV reliably. Try again, or continue without your CV.",
+        "retry_or_continue",
+    ),
+    "cv_input_too_long": (
+        "Your CV is too long to analyse in full. Paste the most relevant part instead.",
+        "paste_cv",
+    ),
+    "cv_no_evidence": (
+        "We couldn't verify any evidence in your CV. Try again, or continue without your CV.",
+        "retry_or_continue",
+    ),
 }
 _FALLBACK: tuple[str, Recovery] = _FAILURES["internal_error"]
 

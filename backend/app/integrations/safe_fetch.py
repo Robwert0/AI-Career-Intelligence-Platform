@@ -224,7 +224,7 @@ async def _iter_raw(response: httpx.Response) -> AsyncIterator[bytes]:
         yield chunk
 
 
-async def _read_bounded(response: httpx.Response, limit: int, *, truncate: bool) -> bytes:
+async def read_bounded(response: httpx.Response, limit: int, *, truncate: bool) -> bytes:
     encoding = response.headers.get("content-encoding", "identity").strip().lower()
     if encoding in ("", "identity"):
         decoder = None
@@ -271,7 +271,7 @@ def _status_failure(response: httpx.Response, body: str) -> FetchFailure:
 
 async def _read_page(response: httpx.Response, url: PublicUrl) -> FetchResult:
     if not 200 <= response.status_code < 300:
-        peek = await _read_bounded(response, MAX_PEEK_BYTES, truncate=True)
+        peek = await read_bounded(response, MAX_PEEK_BYTES, truncate=True)
         raise FetchError(_status_failure(response, _decode(peek, response)))
     content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type not in TEXT_TYPES:
@@ -279,8 +279,33 @@ async def _read_page(response: httpx.Response, url: PublicUrl) -> FetchResult:
     declared = response.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
         raise FetchError(FetchFailure.TOO_LARGE)
-    body = await _read_bounded(response, MAX_BODY_BYTES, truncate=False)
+    body = await read_bounded(response, MAX_BODY_BYTES, truncate=False)
     return FetchResult(url=str(url), content_type=content_type, text=_decode(body, response))
+
+
+def hardened_client(
+    *,
+    transport: httpx.AsyncBaseTransport | None,
+    headers: dict[str, str],
+    base_url: str = "",
+) -> httpx.AsyncClient:
+    # trust_env=False: an HTTP(S)_PROXY variable would connect for us, around the pinned IP.
+    # cookies: a policy that allows no domain at all, so a Set-Cookie from robots.txt or a
+    # redirect hop can never be stored or sent back on a later, possibly different-host,
+    # request pinned to the same IP.
+    # Accept-Encoding: only what read_bounded can inflate under its cap.
+    no_cookies = http.cookiejar.CookieJar(
+        policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[])
+    )
+    return httpx.AsyncClient(
+        transport=transport,
+        trust_env=False,
+        follow_redirects=False,
+        timeout=_TIMEOUT,
+        cookies=no_cookies,
+        base_url=base_url,
+        headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate", **headers},
+    )
 
 
 class SafeFetcher:
@@ -300,24 +325,8 @@ class SafeFetcher:
         self._robots_timeout = robots_timeout
 
     def build_client(self) -> httpx.AsyncClient:
-        # trust_env=False: an HTTP(S)_PROXY variable would connect for us, around the pinned IP.
-        # cookies: a policy that allows no domain at all, so a Set-Cookie from robots.txt or a
-        # redirect hop can never be stored or sent back on a later, possibly different-host,
-        # request pinned to the same IP.
-        no_cookies = http.cookiejar.CookieJar(
-            policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[])
-        )
-        return httpx.AsyncClient(
-            transport=self._transport,
-            trust_env=False,
-            follow_redirects=False,
-            timeout=_TIMEOUT,
-            cookies=no_cookies,
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,text/plain;q=0.9",
-                "Accept-Encoding": "gzip, deflate",
-            },
+        return hardened_client(
+            transport=self._transport, headers={"Accept": "text/html,text/plain;q=0.9"}
         )
 
     async def fetch(self, raw_url: str) -> FetchResult:
@@ -407,7 +416,7 @@ class SafeFetcher:
                     if 400 <= response.status_code < 500:
                         return _rules(_ALLOW_ALL), True
                     if 200 <= response.status_code < 300:
-                        body = await _read_bounded(response, MAX_ROBOTS_BYTES, truncate=True)
+                        body = await read_bounded(response, MAX_ROBOTS_BYTES, truncate=True)
                         return _rules(_decode(body, response).splitlines()), True
                     if response.status_code >= 500:
                         # RFC 9309 still means disallow; the truthful reason is the outage.

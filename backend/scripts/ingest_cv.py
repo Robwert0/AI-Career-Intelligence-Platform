@@ -7,8 +7,8 @@ from pathlib import Path
 
 from app.ai.embeddings import BgeEmbedder
 from app.core.db import SessionLocal
+from app.integrations.cv_parser import UnreadablePdfError
 from app.repositories import ChunkRepository
-from app.services.cv_parser import UnreadablePdfError
 from app.services.ingestion_service import EmptyDocumentError, IngestionService
 
 CV_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "cv.ai-career-intelligence")

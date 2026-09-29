@@ -115,22 +115,26 @@ class OllamaGenerator:
 
         if response.status_code >= 500:
             raise GeneratorUnavailableError(
-                f"{self.model_name} failed with {response.status_code}: {response.text}"
+                f"{self.model_name} failed with {response.status_code}: {response.text}",
+                status_code=response.status_code,
             )
         if response.is_redirect:
             raise GeneratorUnavailableError(
                 f"{self.model_name} redirected to "
                 f"{response.headers.get('location', 'an unknown location')}; "
-                f"the configured base url is not a generation endpoint"
+                f"the configured base url is not a generation endpoint",
+                status_code=response.status_code,
             )
         if response.status_code == 400 and _CONTEXT_OVERFLOW in response.text:
             raise ContextOverflowError(
-                f"{self.model_name} refused a prompt larger than its context window"
+                f"{self.model_name} refused a prompt larger than its context window",
+                status_code=response.status_code,
             )
         if response.is_error:
             raise GenerationRequestError(
                 f"{self.model_name} rejected the request "
-                f"with {response.status_code}: {response.text}"
+                f"with {response.status_code}: {response.text}",
+                status_code=response.status_code,
             )
 
         try:
@@ -140,7 +144,8 @@ class OllamaGenerator:
             logprobs = _logprobs(body.get("logprobs"))
         except (ValueError, KeyError, TypeError) as exc:
             raise GeneratorUnavailableError(
-                f"{self.model_name} answered {response.status_code} with an unusable body: {exc!r}"
+                f"{self.model_name} answered {response.status_code} with an unusable body: {exc!r}",
+                status_code=response.status_code,
             ) from exc
 
         usage = Usage(body.get("prompt_eval_count", 0), body.get("eval_count", 0))
@@ -148,7 +153,8 @@ class OllamaGenerator:
         if usage.prompt_tokens >= settings.generation_context_tokens:
             raise ContextOverflowError(
                 f"{self.model_name} evaluated {usage.prompt_tokens} prompt tokens, "
-                f"the whole {settings.generation_context_tokens}-token window"
+                f"the whole {settings.generation_context_tokens}-token window",
+                status_code=response.status_code,
             )
 
         return GenerationResult(
