@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -6,16 +8,19 @@ import pytest
 import pytest_asyncio
 import redis.exceptions
 from celery.exceptions import SoftTimeLimitExceeded
+from fakes import ScriptedGenerator
 from redis.asyncio import Redis
 
 from app.core.config import settings
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
+from app.integrations.safe_fetch import FetchResult
+from app.schemas.match import JobIntakeRequest
 from app.workers import tasks
 from app.workers.celery_app import celery_app
 from app.workers.tasks import JobError, execute_job, ping, run_job
 
-NOW = 1_000_000.0
+NOW = time.time()
 
 
 @pytest_asyncio.fixture
@@ -130,6 +135,60 @@ async def test_a_job_that_expires_mid_run_is_not_recreated(
     await execute_job(store, record.id, handler, stage="x")
 
     assert await redis_client.exists(f"job:{record.id}") == 0
+
+
+async def test_a_job_that_expires_mid_run_is_logged_as_lost_not_done(
+    store: JobStore, redis_client: Redis, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create("ping", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        await redis_client.delete(f"job:{current.id}")
+        return {"late": True}
+
+    with caplog.at_level(logging.INFO):
+        await execute_job(store, record.id, handler, stage="x")
+
+    assert f"job lost job_id={record.id} reason=expired" in caplog.text
+    assert "job done" not in caplog.text
+
+
+async def test_a_job_queued_past_the_stale_cut_off_never_runs(
+    store: JobStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create(
+        "ping", "owner", now=time.time() - settings.job_queue_stale_seconds - 5
+    )
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        raise AssertionError("the API already reported this job as unavailable")
+
+    with caplog.at_level(logging.INFO):
+        await execute_job(store, record.id, handler, stage="x")
+
+    failed = await store.load(record.id)
+    assert failed is not None
+    assert (failed.status, failed.error_code, failed.stage) == (
+        JobStatus.FAILED,
+        "queue_unavailable",
+        None,
+    )
+    assert f"job failed job_id={record.id} error_code=queue_unavailable" in caplog.text
+
+
+async def test_a_job_queued_just_inside_the_cut_off_still_runs(store: JobStore) -> None:
+    record = await store.create(
+        "ping", "owner", now=time.time() - settings.job_queue_stale_seconds + 30
+    )
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        return {"ran": True}
+
+    await execute_job(store, record.id, handler, stage="x")
+
+    done = await store.load(record.id)
+    assert done is not None
+    assert done.status is JobStatus.DONE
 
 
 # Sync tests from here on: run_job calls asyncio.run, which refuses to start inside the event loop
@@ -281,3 +340,118 @@ def test_a_store_failure_after_a_handler_error_never_chains_the_handler_message(
     assert outcome.traceback is not None
     assert "Jane Doe" not in str(outcome.traceback)
     assert "Jane Doe" not in caplog.text
+
+
+_POSTING_REPLY = (
+    '{"is_job_posting": true, "title": "Backend Engineer", "company": null, '
+    '"responsibilities": [], "required": [{"text": "Go", "sensitive": false}], "preferred": []}'
+)
+
+
+def _create_intake_job(intake: JobIntakeRequest | None) -> str:
+    async def create() -> str:
+        redis = create_redis()
+        try:
+            store = JobStore(redis, ttl_seconds=600)
+            record = await store.create("job_intake", "owner", now=NOW)
+            if intake is not None:
+                await store.put_blob(
+                    record.id, "input", intake.model_dump_json().encode(), ttl_seconds=600
+                )
+            return record.id
+        finally:
+            await redis.aclose()
+
+    return asyncio.run(create())
+
+
+def test_the_extract_task_turns_pasted_text_into_a_posting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    done = _load(job_id)
+    assert done is not None
+    assert done.status is JobStatus.DONE
+    assert done.result is not None
+    assert done.result["posting"]["title"] == "Backend Engineer"
+    assert done.stage == "extracting"
+
+
+def test_the_extract_task_consumes_its_input_blob(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    async def blob() -> bytes | None:
+        redis = create_redis()
+        try:
+            return await JobStore(redis, ttl_seconds=600).take_blob(job_id, "input")
+        finally:
+            await redis.aclose()
+
+    assert asyncio.run(blob()) is None
+
+
+def test_an_intake_job_without_its_input_fails_as_input_expired() -> None:
+    # Distinct from "expired", which means the posting itself was taken down.
+    job_id = _create_intake_job(None)
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    failed = _load(job_id)
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "input_expired")
+
+
+def test_the_extract_task_is_registered() -> None:
+    assert "jobs.extract_job" in celery_app.tasks
+
+
+_STAGES: list[str | None] = []
+
+
+class _StageRecordingStore(JobStore):
+    async def mark_running(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
+        _STAGES.append(stage)
+        return await super().mark_running(job_id, stage=stage, now=now)
+
+
+class _PlainTextFetcher:
+    async def fetch(self, raw_url: str) -> FetchResult:
+        return FetchResult(
+            url=raw_url,
+            content_type="text/plain",
+            text="We build payment systems in Go and PostgreSQL. " * 20,
+        )
+
+
+@pytest.mark.parametrize(
+    ("intake", "first_stage"),
+    [
+        (JobIntakeRequest(text="We build payment systems in Go. " * 5), "extracting"),
+        (JobIntakeRequest(url="https://jobs.example.com/1"), "reading"),
+    ],
+)
+def test_an_intake_starts_at_the_stage_its_input_kind_needs(
+    monkeypatch: pytest.MonkeyPatch, intake: JobIntakeRequest, first_stage: str
+) -> None:
+    _STAGES.clear()
+    monkeypatch.setattr(tasks, "JobStore", _StageRecordingStore)
+    monkeypatch.setattr(tasks, "SafeFetcher", _PlainTextFetcher)
+    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    job_id = _create_intake_job(intake)
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    shown = [stage for stage in _STAGES if stage is not None]
+    assert shown[0] == first_stage
+    assert shown[-1] == "extracting"
+    if intake.text is not None:
+        assert "reading" not in shown
+    done = _load(job_id)
+    assert done is not None and done.status is JobStatus.DONE

@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from app.ai.generation import (
+    ContextOverflowError,
     FinishReason,
     GenerationRequestError,
     GenerationResult,
@@ -16,6 +17,7 @@ from app.ai.generation import (
 from app.core.config import settings
 
 FINISH_REASONS = {"stop": FinishReason.STOP, "length": FinishReason.LENGTH}
+_CONTEXT_OVERFLOW = "exceed_context_size_error"
 
 
 def _finish_reason(done_reason: str | None) -> FinishReason:
@@ -24,6 +26,7 @@ def _finish_reason(done_reason: str | None) -> FinishReason:
 
 def _options(sampling: SamplingSettings) -> dict[str, Any]:
     options: dict[str, Any] = {
+        "num_ctx": settings.generation_context_tokens,
         "temperature": sampling.temperature,
         "top_p": sampling.top_p,
         "num_predict": sampling.max_output_tokens,
@@ -80,6 +83,7 @@ class OllamaGenerator:
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         if not messages:
             raise ValueError("cannot generate without at least one message")
@@ -90,11 +94,17 @@ class OllamaGenerator:
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "stream": False,
             "think": False,
+            # Both default true: truncate keeps only the prompt's tail, shift evicts early context
+            # mid-generation. Either can silently drop the system prompt.
+            "truncate": False,
+            "shift": False,
             "options": _options(sampling),
         }
         if top_logprobs is not None:
             payload["logprobs"] = True
             payload["top_logprobs"] = top_logprobs
+        if response_schema is not None:
+            payload["format"] = response_schema
 
         started = time.perf_counter()
         try:
@@ -113,6 +123,10 @@ class OllamaGenerator:
                 f"{response.headers.get('location', 'an unknown location')}; "
                 f"the configured base url is not a generation endpoint"
             )
+        if response.status_code == 400 and _CONTEXT_OVERFLOW in response.text:
+            raise ContextOverflowError(
+                f"{self.model_name} refused a prompt larger than its context window"
+            )
         if response.is_error:
             raise GenerationRequestError(
                 f"{self.model_name} rejected the request "
@@ -129,14 +143,19 @@ class OllamaGenerator:
                 f"{self.model_name} answered {response.status_code} with an unusable body: {exc!r}"
             ) from exc
 
+        usage = Usage(body.get("prompt_eval_count", 0), body.get("eval_count", 0))
+        # Backstop in case an Ollama version ignores truncate=False and cuts the prompt anyway.
+        if usage.prompt_tokens >= settings.generation_context_tokens:
+            raise ContextOverflowError(
+                f"{self.model_name} evaluated {usage.prompt_tokens} prompt tokens, "
+                f"the whole {settings.generation_context_tokens}-token window"
+            )
+
         return GenerationResult(
             text=text,
             finish_reason=_finish_reason(body.get("done_reason")),
             model=self.model_name,
-            usage=Usage(
-                body.get("prompt_eval_count", 0),
-                body.get("eval_count", 0),
-            ),
+            usage=usage,
             latency_ms=latency_ms,
             sampling=sampling,
             thinking=message.get("thinking"),

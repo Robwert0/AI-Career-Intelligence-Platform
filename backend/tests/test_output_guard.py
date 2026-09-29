@@ -100,3 +100,15 @@ def test_a_disguised_canary_is_still_caught(disguise: Callable[[str], str]) -> N
 
 def test_an_answer_that_merely_shares_letters_is_not_flagged() -> None:
     assert validate_output(generated("He referenced Go and Rust in his last role.")).ok
+
+
+def test_the_ngram_check_is_scoped_to_the_protected_prompt() -> None:
+    from app.ai.match.prompts import JOB_EXTRACT_PROMPT
+
+    leaked = "sensitive: true only when a requirement concerns age, gender, ethnicity, religion"
+
+    assert validate_output(generated(leaked)).ok
+
+    verdict = validate_output(generated(leaked), protected_prompt=JOB_EXTRACT_PROMPT)
+    assert not verdict.ok
+    assert verdict.failed_check == "ngram"

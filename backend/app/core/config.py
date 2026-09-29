@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -38,6 +38,22 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     job_ttl_seconds: int = Field(default=3600, ge=60)
     job_soft_time_limit_seconds: int = Field(default=300, ge=10)
+    generation_context_tokens: int = Field(default=16384, ge=8192)
+    job_extract_generation_timeout_seconds: int = Field(default=120, ge=10)
+    job_queue_stale_seconds: int = Field(default=900, ge=60)
+
+    @property
+    def job_hard_time_limit_seconds(self) -> int:
+        return self.job_soft_time_limit_seconds + 30
+
+    @model_validator(mode="after")
+    def _extraction_fits_the_soft_time_limit(self) -> Settings:
+        # Two attempts plus the 15s fetch budget must finish before Celery's soft limit fires.
+        if 2 * self.job_extract_generation_timeout_seconds + 15 >= self.job_soft_time_limit_seconds:
+            raise ValueError(
+                "two extraction attempts plus the fetch budget exceed the soft time limit"
+            )
+        return self
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

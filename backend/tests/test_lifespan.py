@@ -40,3 +40,10 @@ async def test_the_generator_client_is_closed_on_shutdown() -> None:
         generator = app.state.generator
 
     assert generator._client.is_closed
+
+
+async def test_the_lifespan_owns_a_celery_task_queue() -> None:
+    from app.workers.queue import CeleryTaskQueue
+
+    async with lifespan(app):
+        assert isinstance(app.state.task_queue, CeleryTaskQueue)

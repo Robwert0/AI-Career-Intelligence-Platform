@@ -8,3 +8,8 @@ ME_IP = Policy("me_ip", capacity=120, refill_per_second=2.0, scope=Scope.IP)
 ME_USER = Policy("me_user", capacity=60, refill_per_second=1.0, scope=Scope.USER)
 CHAT_USER = Policy("chat_user", capacity=20, refill_per_second=20 / 60, scope=Scope.USER)
 CHAT_IP = Policy("chat_ip", capacity=30, refill_per_second=0.5, scope=Scope.IP)
+MATCH_JOB_USER = Policy(
+    "match_job_user", capacity=20, refill_per_second=20 / 3600, scope=Scope.USER
+)
+MATCH_POLL_IP = Policy("match_poll_ip", capacity=120, refill_per_second=2.0, scope=Scope.IP)
+MATCH_POLL_USER = Policy("match_poll_user", capacity=60, refill_per_second=1.0, scope=Scope.USER)

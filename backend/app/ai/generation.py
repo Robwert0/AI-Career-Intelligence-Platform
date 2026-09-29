@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,6 +61,10 @@ class GenerationRequestError(Exception):
     """Provider rejected the request itself; retrying it unchanged will fail identically."""
 
 
+class ContextOverflowError(GenerationRequestError):
+    """The prompt does not fit the context window: refused outright, or evaluated to fill it all."""
+
+
 class Generator(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -71,4 +75,5 @@ class Generator(Protocol):
         *,
         sampling: SamplingSettings | None = None,
         top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult: ...

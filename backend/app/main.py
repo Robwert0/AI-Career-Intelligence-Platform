@@ -16,7 +16,9 @@ from app.deps import verify_trusted_origin
 from app.routes.auth import router as auth_router
 from app.routes.chat import router as chat_router
 from app.routes.health import router as health_router
+from app.routes.match import router as match_router
 from app.routes.users import router as users_router
+from app.workers.queue import CeleryTaskQueue
 
 
 @asynccontextmanager
@@ -24,6 +26,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
+    app.state.task_queue = CeleryTaskQueue()
     app.state.generator = OllamaGenerator(timeout_seconds=settings.chat_timeout_seconds)
     app.state.generation_slots = asyncio.Semaphore(settings.chat_max_concurrent_generations)
     yield
@@ -47,6 +50,7 @@ app.include_router(health_router, prefix="/health")
 app.include_router(auth_router, prefix="/auth")
 app.include_router(chat_router, prefix="/chat")
 app.include_router(users_router, prefix="/users")
+app.include_router(match_router, prefix="/match")
 
 _REFLECTED_KEYS = frozenset({"input", "ctx"})
 

@@ -1,3 +1,4 @@
+import functools
 import re
 from dataclasses import dataclass
 
@@ -22,22 +23,24 @@ def _squashed(text: str) -> str:
 _SQUASHED_CANARY = _squashed(CANARY)
 
 
-def _ngrams(text: str, size: int) -> set[tuple[str, ...]]:
+def _ngrams(text: str, size: int) -> frozenset[tuple[str, ...]]:
     words = text.lower().split()
-    return {tuple(words[index : index + size]) for index in range(len(words) - size + 1)}
+    return frozenset(tuple(words[index : index + size]) for index in range(len(words) - size + 1))
 
 
-_INDEXED_NGRAMS = _ngrams(INDEXED_PROMPT, NGRAM_SIZE)
+@functools.lru_cache(maxsize=8)
+def _prompt_ngrams(prompt: str) -> frozenset[tuple[str, ...]]:
+    return _ngrams(prompt, NGRAM_SIZE)
 
 
-def validate_output(result: GenerationResult) -> Verdict:
+def validate_output(result: GenerationResult, *, protected_prompt: str = INDEXED_PROMPT) -> Verdict:
     if not result.text.strip():
         return Verdict(ok=False, failed_check="empty")
     if result.truncated:
         return Verdict(ok=False, failed_check="truncated")
     if _SQUASHED_CANARY in _squashed(result.text):
         return Verdict(ok=False, failed_check="canary")
-    if _ngrams(result.text, NGRAM_SIZE) & _INDEXED_NGRAMS:
+    if _ngrams(result.text, NGRAM_SIZE) & _prompt_ngrams(protected_prompt):
         return Verdict(ok=False, failed_check="ngram")
 
     return Verdict(ok=True)

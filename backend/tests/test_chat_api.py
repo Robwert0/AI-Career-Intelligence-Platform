@@ -10,6 +10,7 @@ from fakes import (
     FakeEmbedder,
     FakeGenerator,
     NearEmbedder,
+    OverflowingGenerator,
     RejectingGenerator,
     UnavailableGenerator,
 )
@@ -260,6 +261,16 @@ async def test_a_rejected_generation_request_does_not_escape_as_an_unhandled_err
 
     assert response.status_code == 500
     assert "Kubernetes" not in response.text
+
+
+async def test_a_context_overflow_is_a_clean_422_not_a_500(chat_client: ChatFixture) -> None:
+    client, _, headers = chat_client
+    app.dependency_overrides[get_generator] = lambda: OverflowingGenerator()
+
+    response = await client.post("/chat", json={"message": "Kubernetes"}, headers=headers)
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Question is too long"}
 
 
 async def test_no_generation_slot_returns_503(chat_client: ChatFixture) -> None:
