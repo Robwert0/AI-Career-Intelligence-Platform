@@ -11,7 +11,7 @@ import { CONTAINER } from '@/lib/layout'
 export default function Home() {
   return (
     <>
-      <SiteNav initials={cv.initials} />
+      <SiteNav initials={cv.initials} photo={cv.photo} />
       <main className={`${CONTAINER} flex-1 space-y-24 pb-24 sm:space-y-28`}>
         <Hero />
         <SelectedWork />

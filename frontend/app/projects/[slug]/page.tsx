@@ -27,7 +27,7 @@ export default async function ProjectPage({ params }: PageProps<'/projects/[slug
 
   return (
     <>
-      <SiteNav initials={cv.initials} />
+      <SiteNav initials={cv.initials} photo={cv.photo} />
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-6 pt-12 pb-24 sm:px-10">
         <Link
           href="/#work"
