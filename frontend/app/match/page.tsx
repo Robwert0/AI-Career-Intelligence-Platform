@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export default function MatchPage() {
   return (
     <>
-      <SiteNav initials={cv.initials} />
+      <SiteNav initials={cv.initials} photo={cv.photo} />
       <main className="mx-auto w-full max-w-4xl flex-1 space-y-10 px-4 pt-10 pb-24 sm:px-10">
         <header className="space-y-4">
           <p className="font-mono text-xs text-accent">tool</p>

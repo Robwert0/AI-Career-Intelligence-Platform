@@ -16,7 +16,7 @@ export default function CvPage() {
   const cvProjects = cv.projects.filter((project) => project.category !== 'learning')
   return (
     <>
-      <SiteNav initials={cv.initials} />
+      <SiteNav initials={cv.initials} photo={cv.photo} />
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-12 px-6 pt-12 pb-24 sm:px-10 print:max-w-none print:space-y-7 print:p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
           <p className="font-mono text-xs text-muted">curriculum vitae</p>

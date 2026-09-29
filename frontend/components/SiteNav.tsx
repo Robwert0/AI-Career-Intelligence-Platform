@@ -1,12 +1,19 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { CONTAINER } from '@/lib/layout'
 import { NAV_LINKS } from '@/lib/nav'
 
-export function SiteNav({ initials }: { initials: string }) {
+export function SiteNav({
+  initials,
+  photo,
+}: {
+  initials: string
+  photo?: { src: string; alt: string }
+}) {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -30,12 +37,23 @@ export function SiteNav({ initials }: { initials: string }) {
           className="flex items-center gap-2.5 font-mono text-sm tracking-tight"
           onClick={() => setOpen(false)}
         >
-          <span
-            aria-hidden="true"
-            className="flex size-8 items-center justify-center rounded-md border border-line-strong text-xs text-accent"
-          >
-            {initials}
-          </span>
+          {photo ? (
+            <Image
+              src={photo.src}
+              alt=""
+              width={64}
+              height={64}
+              loading="eager"
+              className="size-8 rounded-full border border-line-strong object-cover"
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="flex size-8 items-center justify-center rounded-md border border-line-strong text-xs text-accent"
+            >
+              {initials}
+            </span>
+          )}
           <span className="hidden sm:inline">Robert Mirea</span>
           <span className="sr-only sm:hidden">Robert Mirea, home</span>
         </Link>
