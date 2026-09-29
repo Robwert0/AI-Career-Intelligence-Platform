@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setAccessToken } from '../auth'
 import {
   continueAnalysis,
+  discardAnalysis,
   getAnalysis,
   getJob,
+  getMatchConfig,
   retryAnalysis,
   submitAnalysis,
   submitJob,
@@ -110,5 +112,29 @@ describe('match client', () => {
     const result = await submitAnalysis(new FormData())
 
     expect(result).toMatchObject({ ok: false, status: 409, code: 'analysis_in_progress', body })
+  })
+
+  it('discards an analysis with a bodyless POST', async () => {
+    const fetchMock = vi.fn(async () => respond(200, { analysis_id: 'a1' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await discardAnalysis('a/1')
+
+    const { url, init } = call(fetchMock)
+    expect(result).toEqual({ ok: true, data: { analysis_id: 'a1' } })
+    expect(url).toBe('/api/match/analyses/a%2F1/discard')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('reads the upload limits from GET /match/config', async () => {
+    const config = { max_upload_bytes: 2_097_152, cv_text_min_chars: 50, cv_text_max_chars: 40_000 }
+    const fetchMock = vi.fn(async () => respond(200, config))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getMatchConfig()
+
+    expect(call(fetchMock).url).toBe('/api/match/config')
+    expect(result).toEqual({ ok: true, data: config })
   })
 })

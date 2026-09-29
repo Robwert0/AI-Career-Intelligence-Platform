@@ -6,10 +6,10 @@ import {
   CV_ACCEPT,
   cvFileError,
   formatBytes,
-  MAX_CV_TEXT_CHARS,
   type CandidateInput,
   type CvMode,
 } from '@/lib/matchInputs'
+import type { UploadLimits } from '@/lib/matchConfig'
 import { charCount } from '@/lib/text'
 import { FieldError } from './Field'
 import { FIELD, LABEL, TEXT_BUTTON } from './styles'
@@ -22,11 +22,12 @@ const MODES: { id: CvMode; label: string }[] = [
 type Props = {
   idPrefix: string
   candidate: CandidateInput
+  limits: UploadLimits
   error?: string
   onChange: (patch: Partial<CandidateInput>) => void
 }
 
-export function CvInput({ idPrefix, candidate, error, onChange }: Props) {
+export function CvInput({ idPrefix, candidate, limits, error, onChange }: Props) {
   const [pickError, setPickError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const fileId = `${idPrefix}-cv-file`
@@ -47,7 +48,7 @@ export function CvInput({ idPrefix, candidate, error, onChange }: Props) {
   function take(files: FileList | null) {
     const file = files?.[0]
     if (file === undefined) return
-    const problem = cvFileError(file)
+    const problem = cvFileError(file, limits)
     setPickError(problem)
     onChange({ cvFile: problem === null ? file : null })
   }
@@ -115,7 +116,7 @@ export function CvInput({ idPrefix, candidate, error, onChange }: Props) {
             or drop it here
           </label>
           <p id={`${idPrefix}-cv-hint`} className="font-mono text-xs text-muted">
-            PDF or DOCX, max 5 MB, 10 pages
+            PDF or DOCX, max {formatBytes(limits.maxCvBytes)}, 10 pages
           </p>
           {candidate.cvFile ? (
             <p className="flex flex-wrap items-center justify-center gap-3 text-sm">
@@ -144,7 +145,7 @@ export function CvInput({ idPrefix, candidate, error, onChange }: Props) {
           />
           <p id={`${idPrefix}-cv-count`} className="text-right font-mono text-xs text-muted">
             {charCount(candidate.cvText.trim()).toLocaleString('en-US')} /{' '}
-            {MAX_CV_TEXT_CHARS.toLocaleString('en-US')} characters
+            {limits.maxCvTextChars.toLocaleString('en-US')} characters
           </p>
         </div>
       )}

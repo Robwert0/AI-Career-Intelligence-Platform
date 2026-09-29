@@ -15,6 +15,7 @@ import {
 } from '@/lib/matchInputs'
 import { analysisAnnouncement, analysisStages, queueText } from '@/lib/matchProgress'
 import { useAnalysis } from '@/lib/useAnalysis'
+import type { UploadLimits } from '@/lib/matchConfig'
 import { CvInput } from './CvInput'
 import { FieldError } from './Field'
 import { Announcer, StageList } from './StageList'
@@ -29,6 +30,7 @@ const UNKNOWN_FAILURE: FailureOut = {
 type Props = {
   analysisId: string
   candidate: CandidateInput
+  limits: UploadLimits
   onCandidateChange: (patch: Partial<CandidateInput>) => void
   onReport: (report: MatchReport) => void
   onMoved: (analysisId: string) => void
@@ -44,6 +46,7 @@ export function AnalysisProgress(props: Props) {
   const analysis = useAnalysis(props.analysisId, {
     onReport: props.onReport,
     onMoved: props.onMoved,
+    onDiscarded: props.onStartOver,
   })
   const { view } = analysis
   const given = candidateSources(props.candidate)
@@ -79,10 +82,12 @@ export function AnalysisProgress(props: Props) {
         <DecisionPanel
           decision={decision}
           candidate={props.candidate}
+          limits={props.limits}
           onCandidateChange={props.onCandidateChange}
           acting={analysis.acting}
           onRetry={analysis.retry}
           onContinue={() => void analysis.continueWithout()}
+          onStartOver={() => void analysis.startOver()}
         />
       ) : null}
 
@@ -98,7 +103,12 @@ export function AnalysisProgress(props: Props) {
               onEditCandidate={props.onEditCandidate}
               onEditJob={props.onEditJob}
             />
-            <button type="button" onClick={props.onStartOver} className={TEXT_BUTTON}>
+            <button
+              type="button"
+              disabled={analysis.acting}
+              onClick={() => void analysis.startOver()}
+              className={TEXT_BUTTON}
+            >
               Start over
             </button>
           </div>
@@ -124,7 +134,12 @@ export function AnalysisProgress(props: Props) {
                 Check again
               </button>
             )}
-            <button type="button" onClick={props.onStartOver} className={TEXT_BUTTON}>
+            <button
+              type="button"
+              disabled={analysis.acting}
+              onClick={() => void analysis.startOver()}
+              className={TEXT_BUTTON}
+            >
               Start over
             </button>
           </div>
@@ -137,10 +152,12 @@ export function AnalysisProgress(props: Props) {
 type DecisionPanelProps = {
   decision: Decision
   candidate: CandidateInput
+  limits: UploadLimits
   onCandidateChange: (patch: Partial<CandidateInput>) => void
   acting: boolean
   onRetry: (form?: FormData) => Promise<void>
   onContinue: () => void
+  onStartOver: () => void
 }
 
 // Follows decision.error.recovery, not failed_source alone: the same CV failure can
@@ -150,10 +167,12 @@ type DecisionPanelProps = {
 function DecisionPanel({
   decision,
   candidate,
+  limits,
   onCandidateChange,
   acting,
   onRetry,
   onContinue,
+  onStartOver,
 }: DecisionPanelProps) {
   const kind = decisionPanelKind(decision.error.recovery)
   const isCv = decision.failed_source === 'cv'
@@ -175,6 +194,7 @@ function DecisionPanel({
       {isCv && (kind === 'choose_file' || kind === 'paste_cv') ? (
         <CvRetryPanel
           candidate={candidate}
+          limits={limits}
           onCandidateChange={onCandidateChange}
           acting={acting}
           onRetry={onRetry}
@@ -199,6 +219,9 @@ function DecisionPanel({
         <button type="button" disabled={acting} onClick={onContinue} className={SECONDARY_BUTTON}>
           Continue without {isCv ? 'your CV' : 'GitHub'}
         </button>
+        <button type="button" disabled={acting} onClick={onStartOver} className={TEXT_BUTTON}>
+          Start over
+        </button>
       </div>
     </section>
   )
@@ -206,11 +229,13 @@ function DecisionPanel({
 
 function CvRetryPanel({
   candidate,
+  limits,
   onCandidateChange,
   acting,
   onRetry,
 }: {
   candidate: CandidateInput
+  limits: UploadLimits
   onCandidateChange: (patch: Partial<CandidateInput>) => void
   acting: boolean
   onRetry: (form?: FormData) => Promise<void>
@@ -218,7 +243,7 @@ function CvRetryPanel({
   const [problem, setProblem] = useState<string | null>(null)
 
   function retry() {
-    const error = cvRetryError(candidate)
+    const error = cvRetryError(candidate, limits)
     setProblem(error)
     if (error === null) void onRetry(buildCvRetryForm(candidate))
   }
@@ -228,6 +253,7 @@ function CvRetryPanel({
       <CvInput
         idPrefix="retry"
         candidate={candidate}
+        limits={limits}
         error={problem ?? undefined}
         onChange={onCandidateChange}
       />

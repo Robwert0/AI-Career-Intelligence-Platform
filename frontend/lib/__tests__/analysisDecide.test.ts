@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decideOutcome } from '../analysisDecide'
+import { decideOutcome, discardOutcome } from '../analysisDecide'
 import type { ApiResult } from '../http'
 import type { AnalysisSubmitted } from '../match'
 
@@ -58,5 +58,36 @@ describe('decideOutcome (useAnalysis.decide, pulled out for unit testing)', () =
 
     expect(outcome.type).toBe('problem')
     expect(outcome.type === 'problem' && outcome.problem.message).toMatch(/busy or unavailable/i)
+  })
+})
+
+describe('discardOutcome: Start over calls POST .../discard before resetting', () => {
+  it('resets on success', () => {
+    expect(discardOutcome(ok('a1'))).toEqual({ type: 'reset' })
+  })
+
+  it.each(['analysis_running', 'analysis_not_found'])(
+    'resets on a benign 409/404 (%s): there is nothing left to discard',
+    (code) => {
+      expect(
+        discardOutcome(fail({ status: code === 'analysis_running' ? 409 : 404, code })),
+      ).toEqual({
+        type: 'reset',
+      })
+    },
+  )
+
+  it('ends the session on a 401', () => {
+    expect(discardOutcome(fail({ status: 401 }))).toEqual({ type: 'session_ended' })
+  })
+
+  it('does not reset on a transient failure: the server lock would still block the next submit', () => {
+    const outcome = discardOutcome(fail({ status: 503, retryAfter: 5 }))
+
+    expect(outcome.type).toBe('problem')
+  })
+
+  it('does not reset on a network failure either', () => {
+    expect(discardOutcome(fail({ status: 0 })).type).toBe('problem')
   })
 })

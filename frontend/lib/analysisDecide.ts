@@ -31,3 +31,19 @@ export function decideOutcome(
     problem: action === 'retry' ? retryLimitProblem(result) : requestProblem(result),
   }
 }
+
+export type DiscardOutcome =
+  { type: 'reset' } | { type: 'session_ended' } | { type: 'problem'; problem: Problem }
+
+// analysis_running (running, or already done/failed) and analysis_not_found both mean there is
+// nothing left to release server-side, so the local reset is safe. Any other failure must not
+// reset: the one-active-analysis lock would still be held and the next submit would 409 straight
+// back to the analysis the user just tried to leave.
+const NOTHING_TO_DISCARD = new Set(['analysis_running', 'analysis_not_found'])
+
+export function discardOutcome(result: ApiResult<AnalysisSubmitted>): DiscardOutcome {
+  if (result.ok) return { type: 'reset' }
+  if (result.code !== undefined && NOTHING_TO_DISCARD.has(result.code)) return { type: 'reset' }
+  if (result.status === 401) return { type: 'session_ended' }
+  return { type: 'problem', problem: requestProblem(result) }
+}

@@ -11,12 +11,14 @@ import {
   type CandidateInput,
   type CvMode,
 } from '@/lib/matchInputs'
+import type { UploadLimits } from '@/lib/matchConfig'
 import { CvInput } from './CvInput'
 import { FieldError } from './Field'
 import { ALERT, FIELD, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 
 type Props = {
   candidate: CandidateInput
+  limits: UploadLimits
   onChange: (patch: Partial<CandidateInput>) => void
   onBack: () => void
   onAnalyze: () => void
@@ -37,6 +39,7 @@ function fieldIdFor(field: MatchField, cvMode: CvMode): string {
 
 export function CandidateStep({
   candidate,
+  limits,
   onChange,
   onBack,
   onAnalyze,
@@ -46,7 +49,7 @@ export function CandidateStep({
   onEditJob,
 }: Props) {
   const [attempted, setAttempted] = useState(false)
-  const errors = candidateErrors(candidate)
+  const errors = candidateErrors(candidate, limits)
   const general =
     problem !== null &&
     (problem.field === undefined || problem.field === 'job' || problem.field === 'sources')
@@ -92,6 +95,7 @@ export function CandidateStep({
       <CvInput
         idPrefix="candidate"
         candidate={candidate}
+        limits={limits}
         error={fieldError('cv')}
         onChange={onChange}
       />

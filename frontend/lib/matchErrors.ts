@@ -1,6 +1,7 @@
 import type { ApiFailure } from './http'
 import type { FailureOut, Recovery } from './match'
-import type { JobTab } from './matchInputs'
+import { DEFAULT_UPLOAD_LIMITS, type UploadLimits } from './matchConfig'
+import { formatBytes, type JobTab } from './matchInputs'
 import { waitPhrase } from './messages'
 
 export type MatchField = 'job' | 'sources' | 'cv' | 'github' | 'consent'
@@ -69,7 +70,10 @@ export function runningJobId(failure: ApiFailure): string | undefined {
   return failure.code === 'job_in_progress' ? idFromBody(failure.body, 'job_id') : undefined
 }
 
-export function requestProblem(failure: ApiFailure): Problem {
+export function requestProblem(
+  failure: ApiFailure,
+  limits: UploadLimits = DEFAULT_UPLOAD_LIMITS,
+): Problem {
   if (failure.code === 'analysis_in_progress') {
     return {
       message: 'You already have an analysis running. Open it, or wait for it to finish.',
@@ -95,7 +99,9 @@ export function requestProblem(failure: ApiFailure): Problem {
   if (failure.code !== undefined) {
     return { message: failure.detail, field: FIELD_BY_CODE[failure.code] }
   }
-  if (failure.status === 413) return { message: 'That file is larger than 5 MB.', field: 'cv' }
+  if (failure.status === 413) {
+    return { message: `That file is larger than ${formatBytes(limits.maxCvBytes)}.`, field: 'cv' }
+  }
   // FastAPI's own 422 list has no {code, message} (the one shape our API doesn't wrap, per the
   // contract), but http.ts already reduces it to the validators' own .msg text, which is safe and
   // meaningful to show as-is rather than discarding it for a one-size-fits-all message.

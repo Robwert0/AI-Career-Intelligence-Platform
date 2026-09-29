@@ -1,11 +1,9 @@
 import type { JobIntake, JobPosting } from './match'
+import { DEFAULT_UPLOAD_LIMITS, type UploadLimits } from './matchConfig'
 import { charCount } from './text'
 
 export const MIN_JOB_TEXT_CHARS = 50
 export const MAX_JOB_TEXT_CHARS = 30_000
-export const MIN_CV_TEXT_CHARS = 50
-export const MAX_CV_TEXT_CHARS = 40_000
-export const MAX_CV_BYTES = 5 * 1024 * 1024
 export const CV_ACCEPT =
   '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 export const DISCLOSURE =
@@ -67,13 +65,18 @@ export function jobIntake(input: JobInput): JobIntake {
   return input.tab === 'url' ? { url: input.url.trim() } : { text: input.text.trim() }
 }
 
-export function cvFileError(file: { name: string; size: number }): string | null {
+export function cvFileError(
+  file: { name: string; size: number },
+  limits: UploadLimits = DEFAULT_UPLOAD_LIMITS,
+): string | null {
   const name = file.name.toLowerCase()
   if (!CV_EXTENSIONS.some((extension) => name.endsWith(extension))) {
     return 'Choose a PDF or DOCX file.'
   }
   if (file.size === 0) return 'That file is empty.'
-  if (file.size > MAX_CV_BYTES) return 'That file is larger than 5 MB.'
+  if (file.size > limits.maxCvBytes) {
+    return `That file is larger than ${formatBytes(limits.maxCvBytes)}.`
+  }
   return null
 }
 
@@ -96,24 +99,29 @@ export function hasSource(input: CandidateInput): boolean {
   return sources.cv || sources.github
 }
 
-function cvError(input: CandidateInput): string | null {
+function cvError(input: CandidateInput, limits: UploadLimits): string | null {
   const cv = activeCv(input)
   if (cv === null) return null
-  if ('file' in cv) return cvFileError(cv.file)
+  if ('file' in cv) return cvFileError(cv.file, limits)
   const count = charCount(cv.text)
-  if (count < MIN_CV_TEXT_CHARS) return `Paste at least ${MIN_CV_TEXT_CHARS} characters of your CV.`
-  if (count > MAX_CV_TEXT_CHARS) {
-    return 'Your CV text is over 40,000 characters. Paste the main sections only.'
+  if (count < limits.minCvTextChars) {
+    return `Paste at least ${limits.minCvTextChars} characters of your CV.`
+  }
+  if (count > limits.maxCvTextChars) {
+    return `Your CV text is over ${limits.maxCvTextChars.toLocaleString('en-US')} characters. Paste the main sections only.`
   }
   return null
 }
 
-export function candidateErrors(input: CandidateInput): CandidateErrors {
+export function candidateErrors(
+  input: CandidateInput,
+  limits: UploadLimits = DEFAULT_UPLOAD_LIMITS,
+): CandidateErrors {
   const errors: CandidateErrors = {}
   if (!hasSource(input)) {
     errors.sources = 'Add a CV (a file or pasted text) or a GitHub profile to continue.'
   }
-  const cv = cvError(input)
+  const cv = cvError(input, limits)
   if (cv !== null) errors.cv = cv
   const github = input.githubUrl.trim()
   if (github !== '' && !isGithubProfileUrl(github)) {
@@ -144,9 +152,12 @@ export function buildAnalysisForm(posting: JobPosting, input: CandidateInput): F
   return form
 }
 
-export function cvRetryError(input: CandidateInput): string | null {
+export function cvRetryError(
+  input: CandidateInput,
+  limits: UploadLimits = DEFAULT_UPLOAD_LIMITS,
+): string | null {
   if (activeCv(input) === null) return 'Choose your CV file again, or paste its text.'
-  return cvError(input)
+  return cvError(input, limits)
 }
 
 export function buildCvRetryForm(input: CandidateInput): FormData {
@@ -173,5 +184,6 @@ export function buildGithubRetryForm(url: string): FormData {
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  const megabytes = bytes / (1024 * 1024)
+  return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`
 }

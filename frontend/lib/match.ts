@@ -42,6 +42,11 @@ export type AnalysisStage =
 export type CandidateSource = 'cv' | 'github'
 export type Decision = { failed_source: CandidateSource; error: FailureOut }
 export type AnalysisSubmitted = { analysis_id: string }
+export type MatchConfig = {
+  max_upload_bytes: number
+  cv_text_min_chars: number
+  cv_text_max_chars: number
+}
 
 // A discriminated union on `status`, matching the response invariants the backend enforces:
 // done => report, needs_decision => decision, failed => error, and
@@ -189,4 +194,12 @@ export function retryAnalysis(
   form?: FormData,
 ): Promise<ApiResult<AnalysisSubmitted>> {
   return authedRequest<AnalysisSubmitted>(analysisPath(analysisId, '/retry'), post(form))
+}
+
+export function discardAnalysis(analysisId: string): Promise<ApiResult<AnalysisSubmitted>> {
+  return authedRequest<AnalysisSubmitted>(analysisPath(analysisId, '/discard'), post())
+}
+
+export function getMatchConfig(): Promise<ApiResult<MatchConfig>> {
+  return authedRequest<MatchConfig>('/match/config')
 }

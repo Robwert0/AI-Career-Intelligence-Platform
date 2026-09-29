@@ -7,6 +7,7 @@ import { submitAnalysis, type JobView } from '@/lib/match'
 import { requestProblem, type Problem } from '@/lib/matchErrors'
 import { INITIAL_FLOW, matchFlow, type FlowAction, type Step } from '@/lib/matchFlow'
 import { buildAnalysisForm } from '@/lib/matchInputs'
+import { useMatchConfig } from '@/lib/useMatchConfig'
 import { AnalysisProgress } from './AnalysisProgress'
 import { CandidateStep } from './CandidateStep'
 import { JobPreview } from './JobPreview'
@@ -22,6 +23,7 @@ const STEPS: { id: Step; label: string }[] = [
 
 export function MatchAnalyzer() {
   const { sessionExpired } = useAuth()
+  const limits = useMatchConfig()
   const [state, dispatch] = useReducer(matchFlow, INITIAL_FLOW)
   const [submitting, setSubmitting] = useState(false)
   const [submitProblem, setSubmitProblem] = useState<Problem | null>(null)
@@ -56,7 +58,7 @@ export function MatchAnalyzer() {
     setSubmitting(false)
     if (result.ok) dispatch({ type: 'analysisStarted', analysisId: result.data.analysis_id })
     else if (result.status === 401) sessionExpired()
-    else setSubmitProblem(requestProblem(result))
+    else setSubmitProblem(requestProblem(result, limits))
   }
 
   const index = STEPS.findIndex((step) => step.id === state.step)
@@ -101,6 +103,7 @@ export function MatchAnalyzer() {
       {state.step === 'candidate' ? (
         <CandidateStep
           candidate={state.candidate}
+          limits={limits}
           onChange={(candidate) => dispatch({ type: 'candidateChanged', candidate })}
           onBack={() => go({ type: 'backToJob' })}
           onAnalyze={() => void analyze()}
@@ -116,6 +119,7 @@ export function MatchAnalyzer() {
           key={state.analysisId}
           analysisId={state.analysisId}
           candidate={state.candidate}
+          limits={limits}
           onCandidateChange={(candidate) => dispatch({ type: 'candidateChanged', candidate })}
           onReport={(report) => dispatch({ type: 'analysisFinished', report })}
           onMoved={(analysisId) => go({ type: 'analysisStarted', analysisId })}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JobPosting } from '../match'
+import { DEFAULT_UPLOAD_LIMITS } from '../matchConfig'
 import {
   buildAnalysisForm,
   buildCvRetryForm,
@@ -17,7 +18,6 @@ import {
   isGithubProfileUrl,
   jobInputError,
   jobIntake,
-  MAX_CV_BYTES,
   type CandidateInput,
   type JobInput,
 } from '../matchInputs'
@@ -97,8 +97,8 @@ describe('cvFileError', () => {
   })
 
   it('accepts exactly 5 MB and rejects one byte more', () => {
-    expect(cvFileError({ name: 'cv.pdf', size: MAX_CV_BYTES })).toBeNull()
-    expect(cvFileError({ name: 'cv.pdf', size: MAX_CV_BYTES + 1 })).toBe(
+    expect(cvFileError({ name: 'cv.pdf', size: DEFAULT_UPLOAD_LIMITS.maxCvBytes })).toBeNull()
+    expect(cvFileError({ name: 'cv.pdf', size: DEFAULT_UPLOAD_LIMITS.maxCvBytes + 1 })).toBe(
       'That file is larger than 5 MB.',
     )
   })
@@ -241,11 +241,32 @@ describe('buildGithubRetryForm', () => {
   })
 })
 
+describe('configurable upload limits', () => {
+  const limits = { maxCvBytes: 2 * 1024 * 1024, minCvTextChars: 80, maxCvTextChars: 1000 }
+
+  it('rejects a file over the configured limit and names that limit', () => {
+    expect(cvFileError({ name: 'cv.pdf', size: 2 * 1024 * 1024 }, limits)).toBeNull()
+    expect(cvFileError({ name: 'cv.pdf', size: 2 * 1024 * 1024 + 1 }, limits)).toBe(
+      'That file is larger than 2 MB.',
+    )
+  })
+
+  it('applies the configured pasted-CV bounds and names them', () => {
+    const short = candidate({ cvMode: 'text', cvText: CV_TEXT.slice(0, 60) })
+    const long = candidate({ cvMode: 'text', cvText: 'x'.repeat(1001) })
+
+    expect(candidateErrors(short, limits).cv).toBe('Paste at least 80 characters of your CV.')
+    expect(candidateErrors(long, limits).cv).toMatch(/over 1,000 characters/)
+    expect(cvRetryError(long, limits)).toMatch(/over 1,000 characters/)
+  })
+})
+
 describe('formatBytes', () => {
   it.each([
     [512, '512 B'],
     [2048, '2 KB'],
     [1_572_864, '1.5 MB'],
+    [5 * 1024 * 1024, '5 MB'],
   ])('%s → %s', (bytes, expected) => {
     expect(formatBytes(bytes)).toBe(expected)
   })

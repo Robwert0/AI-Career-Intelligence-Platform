@@ -1,8 +1,9 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
-import { decideOutcome } from '@/lib/analysisDecide'
+import { decideOutcome, discardOutcome } from '@/lib/analysisDecide'
 import {
   continueAnalysis,
+  discardAnalysis,
   getAnalysis,
   retryAnalysis,
   type AnalysisStatus,
@@ -19,9 +20,10 @@ const FINAL = new Set<AnalysisStatus>(['done', 'failed', 'needs_decision'])
 type Handlers = {
   onReport: (report: MatchReport) => void
   onMoved: (analysisId: string) => void
+  onDiscarded: () => void
 }
 
-export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers) {
+export function useAnalysis(analysisId: string, { onReport, onMoved, onDiscarded }: Handlers) {
   const { sessionExpired } = useAuth()
   const [view, setView] = useState<AnalysisView | null>(null)
   const [problem, setProblem] = useState<Problem | null>(null)
@@ -93,6 +95,26 @@ export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers)
     }
   }
 
+  // Start over must release the server's one-active-analysis lock first; a local reset alone
+  // leaves the next submit 409-ing straight back to this analysis.
+  async function startOver() {
+    setActing(true)
+    setProblem(null)
+    const outcome = discardOutcome(await discardAnalysis(analysisId))
+    setActing(false)
+    switch (outcome.type) {
+      case 'reset':
+        onDiscarded()
+        return
+      case 'session_ended':
+        sessionExpired()
+        return
+      case 'problem':
+        setProblem(outcome.problem)
+        return
+    }
+  }
+
   return {
     view,
     problem,
@@ -101,5 +123,6 @@ export function useAnalysis(analysisId: string, { onReport, onMoved }: Handlers)
     continueWithout: () => decide('continue'),
     retry: (form?: FormData) => decide('retry', form),
     resume,
+    startOver,
   }
 }

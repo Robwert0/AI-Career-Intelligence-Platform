@@ -96,6 +96,14 @@ describe('requestProblem', () => {
     })
   })
 
+  it('names the configured limit in an uncoded 413', () => {
+    const limits = { maxCvBytes: 2 * 1024 * 1024, minCvTextChars: 50, maxCvTextChars: 40_000 }
+
+    expect(requestProblem(failure({ status: 413 }), limits).message).toBe(
+      'That file is larger than 2 MB.',
+    )
+  })
+
   it('falls back to a generic message', () => {
     expect(requestProblem(failure({ status: 500 })).message).toBe(
       'Something went wrong. Please try again.',
@@ -134,6 +142,22 @@ describe('requestProblem', () => {
     expect(problem).toEqual({
       message: 'String should have at most 40000 characters',
     })
+  })
+})
+
+describe('queue_full', () => {
+  it('reads as a busy service with the Retry-After wait', () => {
+    const problem = requestProblem(
+      failure({ status: 503, code: 'queue_full', retryAfter: 60, body: {} }),
+    )
+
+    expect(problem.message).toBe('The service is busy or unavailable. Try again in 1 minute.')
+  })
+
+  it('keeps the busy wording through the retry mapping too', () => {
+    expect(
+      retryLimitProblem(failure({ status: 503, code: 'queue_full', retryAfter: 60 })).message,
+    ).toMatch(/busy or unavailable/)
   })
 })
 
@@ -202,6 +226,10 @@ describe('analysisFailureAction', () => {
     ['something_new', 'retry'],
   ])('%s → %s', (code, action) => {
     expect(analysisFailureAction(failed(code))).toBe(action)
+  })
+
+  it('sends an analysis_discarded failure (another tab started over) to a fresh run, not a dead end', () => {
+    expect(analysisFailureAction(failed('analysis_discarded', 'retry'))).toBe('retry')
   })
 
   it('waits when the backend says so', () => {
