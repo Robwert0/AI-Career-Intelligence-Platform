@@ -1,0 +1,281 @@
+import { describe, expect, it } from 'vitest'
+import type { JobPosting } from '../match'
+import { DEFAULT_UPLOAD_LIMITS } from '../matchConfig'
+import {
+  buildAnalysisForm,
+  buildCvRetryForm,
+  buildGithubRetryForm,
+  candidateErrors,
+  candidateSources,
+  cvFileError,
+  cvRetryError,
+  DISCLOSURE,
+  EMPTY_CANDIDATE,
+  formatBytes,
+  githubRetryError,
+  hasCandidateErrors,
+  hasSource,
+  isGithubProfileUrl,
+  jobInputError,
+  jobIntake,
+  type CandidateInput,
+  type JobInput,
+} from '../matchInputs'
+
+const POSTING: JobPosting = {
+  title: 'Backend Engineer',
+  company: null,
+  responsibilities: [],
+  required: [{ text: 'Go', sensitive: false }],
+  preferred: [],
+}
+const CV_TEXT = 'Senior backend engineer. Built Go and Python services at Tyrell for five years.'
+const PDF = new File(['%PDF-1.7'], 'cv.pdf', { type: 'application/pdf' })
+
+function job(patch: Partial<JobInput>): JobInput {
+  return { tab: 'url', url: '', text: '', ...patch }
+}
+
+function candidate(patch: Partial<CandidateInput> = {}): CandidateInput {
+  return { ...EMPTY_CANDIDATE, ...patch }
+}
+
+describe('jobInputError', () => {
+  it.each(['', '   ', 'not a link', 'ftp://jobs.example.com/1', 'jobs.example.com/1'])(
+    'rejects the URL %j',
+    (url) => {
+      expect(jobInputError(job({ url }))).not.toBeNull()
+    },
+  )
+
+  it('accepts a full https link', () => {
+    expect(jobInputError(job({ url: ' https://jobs.example.com/1 ' }))).toBeNull()
+  })
+
+  it('checks only the active tab', () => {
+    expect(jobInputError(job({ tab: 'text', url: 'nonsense', text: 'x'.repeat(50) }))).toBeNull()
+  })
+
+  it.each([
+    ['x'.repeat(49), false],
+    ['x'.repeat(50), true],
+    ['x'.repeat(30_000), true],
+    ['x'.repeat(30_001), false],
+    [`${' '.repeat(100)}x`, false],
+  ])('pasted text of %#', (text, valid) => {
+    expect(jobInputError(job({ tab: 'text', text })) === null).toBe(valid)
+  })
+
+  it('counts characters as code points, like the backend', () => {
+    expect(jobInputError(job({ tab: 'text', text: '😀'.repeat(50) }))).toBeNull()
+    expect(jobInputError(job({ tab: 'text', text: '😀'.repeat(30_000) }))).toBeNull()
+    expect(jobInputError(job({ tab: 'text', text: '😀'.repeat(25) }))).not.toBeNull()
+  })
+})
+
+describe('jobIntake', () => {
+  it('sends a trimmed URL for the URL tab', () => {
+    expect(jobIntake(job({ url: ' https://a.example/1 ', text: 'ignored' }))).toEqual({
+      url: 'https://a.example/1',
+    })
+  })
+
+  it('sends trimmed text for the paste tab', () => {
+    expect(jobIntake(job({ tab: 'text', url: 'ignored', text: '  body  ' }))).toEqual({
+      text: 'body',
+    })
+  })
+})
+
+describe('cvFileError', () => {
+  it.each(['cv.pdf', 'cv.PDF', 'cv.docx', 'My CV (final).Docx'])('accepts %s', (name) => {
+    expect(cvFileError({ name, size: 1000 })).toBeNull()
+  })
+
+  it.each(['cv.docm', 'cv.doc', 'cv.txt', 'cv.pdf.exe', 'cv'])('rejects %s', (name) => {
+    expect(cvFileError({ name, size: 1000 })).toBe('Choose a PDF or DOCX file.')
+  })
+
+  it('accepts exactly 5 MB and rejects one byte more', () => {
+    expect(cvFileError({ name: 'cv.pdf', size: DEFAULT_UPLOAD_LIMITS.maxCvBytes })).toBeNull()
+    expect(cvFileError({ name: 'cv.pdf', size: DEFAULT_UPLOAD_LIMITS.maxCvBytes + 1 })).toBe(
+      'That file is larger than 5 MB.',
+    )
+  })
+
+  it('rejects an empty file', () => {
+    expect(cvFileError({ name: 'cv.pdf', size: 0 })).toBe('That file is empty.')
+  })
+})
+
+describe('isGithubProfileUrl', () => {
+  it.each([
+    'https://github.com/octocat',
+    'https://github.com/octocat/',
+    'https://github.com/a-b',
+    `https://github.com/${'a'.repeat(39)}`,
+  ])('accepts %s', (url) => {
+    expect(isGithubProfileUrl(url)).toBe(true)
+  })
+
+  it.each([
+    'http://github.com/octocat',
+    'https://github.com/',
+    'https://github.com/octocat/repo',
+    'https://github.com/octocat?tab=repositories',
+    'https://gist.github.com/octocat',
+    'https://github.com.evil.example/octocat',
+    'https://github.com/-octocat',
+    'https://github.com/a--b',
+    `https://github.com/${'a'.repeat(40)}`,
+    'github.com/octocat',
+  ])('rejects %s', (url) => {
+    expect(isGithubProfileUrl(url)).toBe(false)
+  })
+})
+
+describe('candidate validation', () => {
+  it('asks for a source until one is given', () => {
+    expect(candidateErrors(candidate()).sources).toBeDefined()
+    expect(candidateErrors(candidate({ cvFile: PDF })).sources).toBeUndefined()
+    expect(
+      candidateErrors(candidate({ githubUrl: 'https://github.com/octocat' })).sources,
+    ).toBeUndefined()
+  })
+
+  it('counts only the active CV mode as a source', () => {
+    const leftover = candidate({ cvMode: 'file', cvFile: null, cvText: CV_TEXT })
+
+    expect(hasSource(leftover)).toBe(false)
+    expect(candidateSources(candidate({ cvMode: 'text', cvText: CV_TEXT, cvFile: PDF }))).toEqual({
+      cv: true,
+      github: false,
+    })
+  })
+
+  it('checks the pasted CV length', () => {
+    expect(candidateErrors(candidate({ cvMode: 'text', cvText: 'too short' })).cv).toBeDefined()
+    expect(candidateErrors(candidate({ cvMode: 'text', cvText: CV_TEXT })).cv).toBeUndefined()
+  })
+
+  it('checks the GitHub URL only when one is given', () => {
+    expect(candidateErrors(candidate({ githubUrl: 'octocat' })).github).toBeDefined()
+    expect(candidateErrors(candidate({ githubUrl: '  ' })).github).toBeUndefined()
+  })
+
+  it('requires consent', () => {
+    expect(candidateErrors(candidate({ cvFile: PDF })).consent).toBeDefined()
+    expect(hasCandidateErrors(candidateErrors(candidate({ cvFile: PDF, consent: true })))).toBe(
+      false,
+    )
+  })
+})
+
+describe('buildAnalysisForm', () => {
+  it('sends the job, the file, the GitHub URL and consent', () => {
+    const form = buildAnalysisForm(
+      POSTING,
+      candidate({ cvFile: PDF, githubUrl: ' https://github.com/octocat ', consent: true }),
+    )
+
+    expect(JSON.parse(form.get('job') as string)).toEqual(POSTING)
+    expect((form.get('cv') as File).name).toBe('cv.pdf')
+    expect(form.get('github_url')).toBe('https://github.com/octocat')
+    expect(form.get('consent')).toBe('true')
+    expect(form.has('cv_text')).toBe(false)
+  })
+
+  it('sends only the active CV mode, never both', () => {
+    const form = buildAnalysisForm(
+      POSTING,
+      candidate({ cvMode: 'text', cvFile: PDF, cvText: ` ${CV_TEXT} `, consent: true }),
+    )
+
+    expect(form.get('cv_text')).toBe(CV_TEXT)
+    expect(form.has('cv')).toBe(false)
+  })
+
+  it('omits a blank GitHub URL', () => {
+    const form = buildAnalysisForm(POSTING, candidate({ cvFile: PDF, consent: true }))
+
+    expect(form.has('github_url')).toBe(false)
+  })
+})
+
+describe('CV retry', () => {
+  it('needs the CV again', () => {
+    expect(cvRetryError(candidate())).not.toBeNull()
+    expect(cvRetryError(candidate({ cvFile: PDF }))).toBeNull()
+  })
+
+  it('sends only the CV', () => {
+    const form = buildCvRetryForm(candidate({ cvFile: PDF, githubUrl: 'https://github.com/x' }))
+
+    expect([...form.keys()]).toEqual(['cv'])
+  })
+})
+
+describe('githubRetryError: fixing a github_user_not_found decision', () => {
+  it('requires a URL', () => {
+    expect(githubRetryError('')).toBeDefined()
+    expect(githubRetryError('   ')).toBeDefined()
+  })
+
+  it('requires a real profile link', () => {
+    expect(githubRetryError('octocat')).toBeDefined()
+    expect(githubRetryError('https://github.com/octocat/repo')).toBeDefined()
+  })
+
+  it('accepts a real profile link', () => {
+    expect(githubRetryError('https://github.com/octocat')).toBeNull()
+    expect(githubRetryError('  https://github.com/octocat  ')).toBeNull()
+  })
+})
+
+describe('buildGithubRetryForm', () => {
+  it('sends only the trimmed github_url', () => {
+    const form = buildGithubRetryForm('  https://github.com/octocat  ')
+
+    expect([...form.keys()]).toEqual(['github_url'])
+    expect(form.get('github_url')).toBe('https://github.com/octocat')
+  })
+})
+
+describe('configurable upload limits', () => {
+  const limits = { maxCvBytes: 2 * 1024 * 1024, minCvTextChars: 80, maxCvTextChars: 1000 }
+
+  it('rejects a file over the configured limit and names that limit', () => {
+    expect(cvFileError({ name: 'cv.pdf', size: 2 * 1024 * 1024 }, limits)).toBeNull()
+    expect(cvFileError({ name: 'cv.pdf', size: 2 * 1024 * 1024 + 1 }, limits)).toBe(
+      'That file is larger than 2 MB.',
+    )
+  })
+
+  it('applies the configured pasted-CV bounds and names them', () => {
+    const short = candidate({ cvMode: 'text', cvText: CV_TEXT.slice(0, 60) })
+    const long = candidate({ cvMode: 'text', cvText: 'x'.repeat(1001) })
+
+    expect(candidateErrors(short, limits).cv).toBe('Paste at least 80 characters of your CV.')
+    expect(candidateErrors(long, limits).cv).toMatch(/over 1,000 characters/)
+    expect(cvRetryError(long, limits)).toMatch(/over 1,000 characters/)
+  })
+})
+
+describe('formatBytes', () => {
+  it.each([
+    [512, '512 B'],
+    [2048, '2 KB'],
+    [1_572_864, '1.5 MB'],
+    [5 * 1024 * 1024, '5 MB'],
+  ])('%s → %s', (bytes, expected) => {
+    expect(formatBytes(bytes)).toBe(expected)
+  })
+})
+
+describe('DISCLOSURE', () => {
+  it('matches the spec §6.5 text verbatim', () => {
+    expect(DISCLOSURE).toBe(
+      "Your CV is processed on this server by a locally hosted AI model and never leaves it. The job URL is fetched by our server. Public GitHub data is read through GitHub's API. Everything is deleted within an hour.",
+    )
+  })
+})

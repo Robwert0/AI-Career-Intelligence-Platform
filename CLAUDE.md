@@ -247,8 +247,17 @@ pytest -q
 # Ingest a CV into the chunks table (phase 4; run from backend/, needs DATABASE_URL)
 cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 
-# Worker
+# Worker (consumes every queue; the queues are `intake` and `analysis`)
 celery -A app.workers.celery_app worker --loglevel=info
+# To keep job intake responsive behind long analyses, run two workers instead:
+celery -A app.workers.celery_app worker -Q intake,celery -n intake@%h
+celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
+
+# Job Match Analyzer: calibrate the per-source gates (MATCH_PRESELECT_MIN_SIMILARITY[_GITHUB]),
+# then run the eval gate (both need labelled postings under docs/eval/calibration/)
+cd backend && uv run python scripts/eval_match.py prepare
+uv run python scripts/eval_match.py calibrate
+uv run python scripts/eval_match.py run
 
 # Frontend
 cd frontend && npm run dev

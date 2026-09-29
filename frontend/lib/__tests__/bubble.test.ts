@@ -6,7 +6,7 @@ describe('showsChatBubble', () => {
     expect(showsChatBubble(pathname)).toBe(true)
   })
 
-  it.each(['/chat', '/chat/'])('hides it on the full chat page %s', (pathname) => {
+  it.each(['/chat', '/chat/', '/match', '/match/'])('hides it on %s', (pathname) => {
     expect(showsChatBubble(pathname)).toBe(false)
   })
 

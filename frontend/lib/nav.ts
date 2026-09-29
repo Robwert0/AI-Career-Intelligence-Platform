@@ -4,4 +4,5 @@ export const NAV_LINKS = [
   { href: '/#experience', label: 'Experience' },
   { href: '/#skills', label: 'Skills' },
   { href: '/#contact', label: 'Contact' },
+  { href: '/match', label: 'Job Match Analyzer' },
 ]

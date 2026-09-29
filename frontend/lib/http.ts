@@ -1,5 +1,13 @@
-export type ApiResult<T> =
-  { ok: true; data: T } | { ok: false; status: number; detail: string; retryAfter?: number }
+export type ApiFailure = {
+  ok: false
+  status: number
+  detail: string
+  retryAfter?: number
+  code?: string
+  body?: unknown
+}
+
+export type ApiResult<T> = { ok: true; data: T } | ApiFailure
 
 const UNPARSEABLE = Symbol('unparseable')
 
@@ -8,6 +16,7 @@ const UNPARSEABLE = Symbol('unparseable')
 const REQUEST_TIMEOUT_MS = 10_000
 
 type ValidationItem = { msg?: string }
+type CodedDetail = { code: string; message: string }
 
 function detailFrom(body: unknown, status: number): string {
   if (typeof body === 'object' && body !== null && 'detail' in body) {
@@ -19,6 +28,14 @@ function detailFrom(body: unknown, status: number): string {
     }
   }
   return `Request failed with status ${status}`
+}
+
+function codedDetail(body: unknown): CodedDetail | null {
+  if (typeof body !== 'object' || body === null || !('detail' in body)) return null
+  const detail = (body as { detail: unknown }).detail
+  if (typeof detail !== 'object' || detail === null) return null
+  const { code, message } = detail as { code?: unknown; message?: unknown }
+  return typeof code === 'string' && typeof message === 'string' ? { code, message } : null
 }
 
 function retryAfterFrom(response: Response): number | undefined {
@@ -35,7 +52,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       ...init,
       signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', ...init.headers },
+      // A multipart Content-Type must come from the browser: it carries the boundary.
+      headers:
+        init.body instanceof FormData
+          ? { ...init.headers }
+          : { 'Content-Type': 'application/json', ...init.headers },
     })
   } catch {
     return { ok: false, status: 0, detail: 'Could not reach the server' }
@@ -46,12 +67,15 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const body = await response.json().catch(() => UNPARSEABLE)
 
   if (!response.ok) {
-    return {
+    const parsed = body === UNPARSEABLE ? null : body
+    const coded = codedDetail(parsed)
+    const failure: ApiFailure = {
       ok: false,
       status: response.status,
-      detail: detailFrom(body === UNPARSEABLE ? null : body, response.status),
+      detail: coded?.message ?? detailFrom(parsed, response.status),
       retryAfter: retryAfterFrom(response),
     }
+    return coded === null ? failure : { ...failure, code: coded.code, body: parsed }
   }
 
   if (body === UNPARSEABLE) {

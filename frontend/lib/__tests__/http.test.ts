@@ -111,4 +111,61 @@ describe('request', () => {
 
     expect(result).toMatchObject({ ok: false, status: 0 })
   })
+
+  it('surfaces a coded detail as its message, code and body', async () => {
+    const body = {
+      detail: { code: 'analysis_in_progress', message: 'An analysis is already running.' },
+      analysis_id: 'a1',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(409, body)),
+    )
+
+    const result = await request('/match/analyses')
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      detail: 'An analysis is already running.',
+      code: 'analysis_in_progress',
+      body,
+    })
+  })
+
+  it('adds no code for a plain string detail', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(404, { detail: 'Not found' })),
+    )
+
+    const result = await request('/match/jobs/x')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBeUndefined()
+  })
+
+  it('lets the browser set the multipart content type for FormData', async () => {
+    const fetchMock = vi.fn(async () => respond(202, { analysis_id: 'a1' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const form = new FormData()
+    form.append('consent', 'true')
+
+    await request('/match/analyses', { method: 'POST', body: form })
+
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as RequestInit
+    expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined()
+    expect(init.body).toBe(form)
+  })
+
+  it('keeps a caller-supplied signal', async () => {
+    const fetchMock = vi.fn(async () => respond(200, {}))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await request('/users/me', { signal: controller.signal })
+
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as RequestInit
+    expect(init.signal).toBe(controller.signal)
+  })
 })
