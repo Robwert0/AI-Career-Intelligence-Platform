@@ -69,9 +69,9 @@ scalable and explainable** before it counts as done.
 | 5 | CV upload endpoint | 🟡 Partial: CV upload (PDF/DOCX, magic-byte + macro validation) ships as part of the Job Match Analyzer, backed by Redis with a TTL, not S3 |
 | 6 | Async jobs (Celery workers) | ✅ Done: job intake and analysis both run as Celery tasks with queue position, stage progress and stale-queue handling |
 | 7 | AI analysis: CV feedback, ATS scoring | 🟡 Partial: grounded CV rewrite suggestions and gap analysis ship as part of the Job Match Analyzer; no separate standalone ATS-scoring endpoint |
-| 8 | Job matching: CV vs job description | ✅ Done: the Job Match Analyzer (job intake, CV + GitHub evidence, hybrid retrieval, multi-stage LLM assessment, transparent scoring). The similarity-preselection threshold is calibrated against one real CV; the eval quality gate (`scripts/eval_match.py`) has not yet passed against hand-labelled postings |
+| 8 | Job matching: CV vs job description | ✅ Done: the Job Match Analyzer (job intake, CV + GitHub evidence, hybrid retrieval, multi-stage LLM assessment, transparent scoring). The per-source similarity gates (CV 0.605, GitHub 0.583) are calibrated against one real CV and one GitHub profile; the eval quality gate (`scripts/eval_match.py`) has not yet passed against hand-labelled postings |
 | 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Planned |
-| 10 | Security hardening | 🟡 Partial: rate limiting, prompt-injection defense and file-upload validation done for chat and the Job Match Analyzer; queue/worker-concurrency hardening (single shared worker, stale-queue edge cases) still open |
+| 10 | Security hardening | 🟡 Partial: rate limiting, prompt-injection defense and file-upload validation done for chat and the Job Match Analyzer; queue/worker-concurrency hardening (a global cap of 20 waiting analyses and separate intake/analysis queues exist; stale-queue edge cases remain) still open |
 | 11 | Observability | 🟡 Partial: logging done; error tracking and token usage pending |
 | 12 | Deployment | ⏳ Planned |
 
@@ -120,7 +120,7 @@ uv sync --extra dev
 uv run alembic upgrade head
 uv run python scripts/ingest_cv.py path/to/cv.pdf   # load a CV into the chunks table
 uv run uvicorn app.main:app --reload
-uv run celery -A app.workers.celery_app worker --loglevel=info   # background jobs (separate terminal)
+uv run celery -A app.workers.celery_app worker --loglevel=info   # background jobs (separate terminal); consumes every queue
 
 cd ../frontend
 npm ci
@@ -128,12 +128,25 @@ npm run dev
 ```
 
 Job Match Analyzer env lines worth calling out (see `.env.example` for the rest):
-- `MATCH_PRESELECT_MIN_SIMILARITY` — required, no default; calibrate it against your own CV with
-  `uv run python scripts/eval_match.py calibrate` before relying on it.
-- `MAX_UPLOAD_MB=5` — the CV upload size limit (1-20); the frontend's own client-side check must
-  agree with whatever value this is set to.
+- `MATCH_PRESELECT_MIN_SIMILARITY=0.605` (CV) and `MATCH_PRESELECT_MIN_SIMILARITY_GITHUB=0.583` —
+  the refusal gate is per source and both have committed defaults. The statistic is each source's
+  mean, over the posting's requirements, of that requirement's best evidence match ("relatedness").
+  The defaults were measured on one CV and one GitHub profile; re-measure against your own with
+  `uv run python scripts/eval_match.py calibrate`. **Existing setups: remove an old
+  `MATCH_PRESELECT_MIN_SIMILARITY=0.681` line from `.env`** -- it overrides the new CV gate.
+- `MAX_UPLOAD_MB=5` — the CV upload size limit (1-20). The frontend reads the effective limit from
+  `GET /match/config` (falling back to 5 MB), so there is nothing to keep in sync.
 - `GITHUB_TOKEN` — optional. Without it, every user of this deployment shares GitHub's
   unauthenticated ~60 requests/hour (about 2 new profiles).
+
+Two Celery queues exist: `intake` (job extraction) and `analysis` (the long CV/GitHub analysis). The
+plain worker command above consumes both. To keep job intake responsive behind a long analysis, run
+two workers instead:
+
+```bash
+uv run celery -A app.workers.celery_app worker -Q intake,celery -n intake@%h
+uv run celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
+```
 
 ### Checks
 
@@ -142,4 +155,4 @@ cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd frontend && npm run lint && npm run test && npm run build
 ```
 
-The suite has 1182 backend tests (pytest) and 385 frontend tests (Vitest).
+The suite has 1377 backend tests (pytest) and 412 frontend tests (Vitest).
