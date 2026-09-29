@@ -59,6 +59,7 @@ export const cv: Cv = {
   name: 'Robert Mirea',
   initials: 'RM',
   title: 'Backend & AI Engineer',
+  photo: { src: '/robert-mirea.jpg', alt: 'Robert Mirea' },
   location: 'Bucharest, Romania',
   links: [
     { name: 'Email', label: 'mirearobert32@gmail.com', href: 'mailto:mirearobert32@gmail.com' },
