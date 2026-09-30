@@ -45,7 +45,7 @@ export const projects: Project[] = [
     highlights: [
       'RAG chatbot that answers questions about my CV: section-aware chunking, BGE embeddings in pgvector, hybrid retrieval (vector similarity + Postgres full-text) fused with Reciprocal Rank Fusion, and source citations in a Next.js chat UI.',
       'LLM guardrails: calibrated similarity threshold that refuses off-topic questions before generation, prompt-injection detection, context isolation for untrusted text, output checks against system-prompt leakage, and PII redaction; bounded-concurrency generation on a local LLM (Ollama).',
-      'Async FastAPI/SQLAlchemy, JWT refresh-token rotation, Redis rate limiting, CI with ruff, mypy, pytest.',
+      'Async FastAPI REST API with SQLAlchemy, JWT refresh-token rotation, Redis rate limiting, CI with ruff, mypy, pytest.',
     ],
     repos: ['https://github.com/Robwert0/AI-Career-Intelligence-Platform'],
   },

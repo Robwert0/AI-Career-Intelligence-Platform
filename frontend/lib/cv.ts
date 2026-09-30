@@ -155,7 +155,7 @@ export const cv: Cv = {
       keyHighlights: [
         {
           lead: 'Feature ownership',
-          text: 'End to end, from DB migration to backoffice to product: a character builder with ComfyUI-generated portraits, ElevenLabs text-to-speech, companion discovery, and a payment-gated referral program.',
+          text: 'End to end, from DB migration and FastAPI REST endpoints to backoffice and product: a character builder with ComfyUI-generated portraits, ElevenLabs text-to-speech, companion discovery, and a payment-gated referral program.',
         },
         {
           lead: 'Security and payments',
@@ -171,7 +171,7 @@ export const cv: Cv = {
         },
       ],
       highlights: [
-        'Own features end to end, from DB migration to backoffice to product: a character builder with ComfyUI-generated portraits, ElevenLabs text-to-speech, companion discovery, and a payment-gated referral program.',
+        'Own features end to end, from DB migration and FastAPI REST endpoints to backoffice and product: a character builder with ComfyUI-generated portraits, ElevenLabs text-to-speech, companion discovery, and a payment-gated referral program.',
         'LLM engine: built a provider-agnostic AI client factory; post-generation repetition-loop detection with provider failover; suppressed persona-break leaks; decoupled the image guard-rail from chat; linked moderation to Langfuse traces and scores.',
         'Engineering enablement: built AI-agent tooling for the team — Claude Code skills, automation pipelines, and repo conventions.',
         'Security and payments: fixed cross-user IDOR vulnerabilities; hardened the payment integration (callback amount/currency validation, pending payment persisted before the provider call).',
@@ -267,6 +267,7 @@ export const cv: Cv = {
       skills: [
         'Python',
         'FastAPI',
+        'REST APIs',
         'PostgreSQL/pgvector',
         'SQLAlchemy/Alembic',
         'Redis',
