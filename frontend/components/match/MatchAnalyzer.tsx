@@ -13,6 +13,7 @@ import { CandidateStep } from './CandidateStep'
 import { JobPreview } from './JobPreview'
 import { JobSourceForm } from './JobSourceForm'
 import { MatchReportView } from './MatchReportView'
+import { ToolIntro } from './ToolIntro'
 
 const STEPS: { id: Step; label: string }[] = [
   { id: 'job', label: 'The job' },
@@ -63,23 +64,72 @@ export function MatchAnalyzer() {
 
   const index = STEPS.findIndex((step) => step.id === state.step)
 
+  if (state.step === 'report' && state.report !== null) {
+    return (
+      <section aria-labelledby="match-step-title">
+        <MatchReportView
+          report={state.report}
+          job={state.draft === null ? null : toPosting(state.draft)}
+          headingRef={headingRef}
+          onEditJob={() => go({ type: 'editJob' })}
+          onStartOver={() => go({ type: 'startOver' })}
+        />
+      </section>
+    )
+  }
+
   return (
-    <section aria-labelledby="match-step-title" className="space-y-8">
-      <ol aria-label="Steps" className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs">
-        {STEPS.map((step, position) => (
-          <li
-            key={step.id}
-            aria-current={step.id === state.step ? 'step' : undefined}
-            className={
-              step.id === state.step ? 'text-accent' : position < index ? 'text-fg' : 'text-muted'
-            }
-          >
-            {position + 1}. {step.label}
-          </li>
-        ))}
+    <section aria-labelledby="match-step-title" className="max-w-3xl space-y-8">
+      <ToolIntro />
+      <ol aria-label="Steps" className="grid grid-cols-4 gap-2">
+        {STEPS.map((step, position) => {
+          const current = step.id === state.step
+          const done = position < index
+          return (
+            <li
+              key={step.id}
+              aria-current={current ? 'step' : undefined}
+              className={`space-y-2 border-t-2 pt-2 text-xs sm:text-sm ${
+                current
+                  ? 'border-accent font-medium text-fg'
+                  : done
+                    ? 'border-line-strong text-muted'
+                    : 'border-line text-subtle'
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <span
+                  aria-hidden="true"
+                  className={`flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[11px] ${
+                    current
+                      ? 'bg-accent text-on-accent'
+                      : done
+                        ? 'border border-line-strong text-muted'
+                        : 'border border-line text-subtle'
+                  }`}
+                >
+                  {done ? '✓' : position + 1}
+                </span>
+                <span>
+                  {step.label}
+                  {done ? <span className="sr-only"> (done)</span> : null}
+                </span>
+              </span>
+            </li>
+          )
+        })}
       </ol>
-      <h2 id="match-step-title" ref={headingRef} tabIndex={-1} className="text-xl font-medium">
-        Step {index + 1} of {STEPS.length}: {STEPS[index].label}
+      <h2
+        id="match-step-title"
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-2xl font-semibold tracking-tight focus:outline-none"
+      >
+        <span className="block font-mono text-xs font-normal tracking-normal text-accent">
+          Step {index + 1} of {STEPS.length}
+          <span className="sr-only">: </span>
+        </span>
+        {STEPS[index].label}
       </h2>
 
       {state.step === 'job' && state.draft === null ? (
@@ -130,14 +180,6 @@ export function MatchAnalyzer() {
             go({ type: 'analysisAbandoned' })
             if (pasteCv) dispatch({ type: 'candidateChanged', candidate: { cvMode: 'text' } })
           }}
-          onEditJob={() => go({ type: 'editJob' })}
-          onStartOver={() => go({ type: 'startOver' })}
-        />
-      ) : null}
-
-      {state.step === 'report' && state.report !== null ? (
-        <MatchReportView
-          report={state.report}
           onEditJob={() => go({ type: 'editJob' })}
           onStartOver={() => go({ type: 'startOver' })}
         />

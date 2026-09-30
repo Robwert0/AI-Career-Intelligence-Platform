@@ -3,12 +3,21 @@
 import Link from 'next/link'
 import { useAuth } from '@/components/AuthProvider'
 import { MatchAnalyzer } from './MatchAnalyzer'
+import { ToolIntro } from './ToolIntro'
 
 export function MatchGate() {
   const { status, exitReason } = useAuth()
-  if (status === 'loading') return <p className="font-mono text-xs text-muted">checking session…</p>
-  if (status === 'anonymous') return <SignInPrompt expired={exitReason === 'expired'} />
-  return <MatchAnalyzer />
+  if (status === 'authenticated') return <MatchAnalyzer />
+  return (
+    <div className="max-w-3xl space-y-8">
+      <ToolIntro />
+      {status === 'loading' ? (
+        <p className="font-mono text-xs text-muted">checking session…</p>
+      ) : (
+        <SignInPrompt expired={exitReason === 'expired'} />
+      )}
+    </div>
+  )
 }
 
 function SignInPrompt({ expired }: { expired: boolean }) {

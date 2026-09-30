@@ -11,3 +11,6 @@ export const ERROR_TEXT = 'font-mono text-xs text-danger'
 export const ALERT = 'space-y-3 rounded-md border border-danger px-4 py-3 text-sm'
 export const PANEL = 'space-y-6 rounded-lg border border-line bg-surface p-5 sm:p-6'
 export const SECTION_TITLE = 'font-mono text-xs tracking-widest text-accent uppercase'
+export const REPORT_HEADING = 'text-2xl font-semibold tracking-tight sm:text-3xl'
+export const DISCLOSURE_SUMMARY =
+  'inline-flex cursor-pointer list-none items-center gap-2 rounded-sm py-1 text-sm font-medium text-accent hover:underline hover:underline-offset-4 [&::-webkit-details-marker]:hidden'

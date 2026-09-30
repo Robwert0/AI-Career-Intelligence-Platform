@@ -88,21 +88,23 @@ export function CandidateStep({
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-8">
-      <p className="text-sm text-muted">
-        Add a CV, a GitHub profile, or both. Both together give the fullest picture.
+      <p className="rounded-lg border border-line bg-surface px-4 py-3 text-sm leading-relaxed">
+        Your CV and your GitHub profile are each optional, but you need at least one. Both together
+        give the fullest picture.
       </p>
 
       <CvInput
         idPrefix="candidate"
         candidate={candidate}
         limits={limits}
+        optional
         error={fieldError('cv')}
         onChange={onChange}
       />
 
       <div className="space-y-2">
-        <label htmlFor="github-url" className="font-medium">
-          GitHub profile
+        <label htmlFor="github-url" className="block font-medium">
+          GitHub profile <span className="font-normal text-muted">(optional)</span>
         </label>
         <input
           id="github-url"
