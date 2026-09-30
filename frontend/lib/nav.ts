@@ -3,6 +3,7 @@ export const NAV_LINKS = [
   { href: '/#work', label: 'Work' },
   { href: '/#experience', label: 'Experience' },
   { href: '/#skills', label: 'Skills' },
+  { href: '/#education', label: 'Education' },
   { href: '/#contact', label: 'Contact' },
   { href: '/match', label: 'Job Match Analyzer' },
 ]

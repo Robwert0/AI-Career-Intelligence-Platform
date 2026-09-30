@@ -11,17 +11,17 @@ export function Education() {
             key={degree.degree}
             className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-8"
           >
-            <p className="font-mono text-xs text-subtle">{degree.period}</p>
+            <p className="font-mono text-xs text-subtle md:pt-1">{degree.period}</p>
             <div className="space-y-1.5">
-              <h3 className="font-medium">{degree.degree}</h3>
-              <p className="text-sm text-muted">{degree.school}</p>
-              {degree.note ? <p className="text-sm leading-relaxed">{degree.note}</p> : null}
+              <h3 className="text-lg font-semibold tracking-tight">{degree.degree}</h3>
+              <p className="text-muted">{degree.school}</p>
+              {degree.note ? <p className="leading-relaxed text-muted">{degree.note}</p> : null}
             </div>
           </article>
         ))}
         <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-8">
           <p className="font-mono text-xs text-subtle">languages</p>
-          <p className="text-sm">{cv.languages.join(' · ')}</p>
+          <p>{cv.languages.join(' · ')}</p>
         </div>
       </div>
     </Chapter>
@@ -35,12 +35,12 @@ export function Contact() {
     <section
       id="contact"
       aria-labelledby="contact-title"
-      className="reveal rounded-lg border border-line bg-surface px-6 py-12 sm:px-12"
+      className="reveal rounded-xl border border-line bg-surface px-5 py-10 sm:px-12 sm:py-12"
     >
       <p className="font-mono text-xs text-accent">
         05 <span className="text-subtle">/ contact</span>
       </p>
-      <h2 id="contact-title" className="mt-3 text-2xl font-medium tracking-tight sm:text-3xl">
+      <h2 id="contact-title" className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
         Let&apos;s talk.
       </h2>
       <p className="mt-3 max-w-xl leading-relaxed text-muted">

@@ -55,6 +55,30 @@ describe('portfolio wiring', () => {
     }
   })
 
+  it('leads the featured work with exactly one project', () => {
+    expect(cv.selectedWork.filter((work) => work.lead)).toHaveLength(1)
+  })
+
+  it('keeps each featured preview to four technologies', () => {
+    for (const work of cv.selectedWork) expect(work.stack.length, work.title).toBeLessThanOrEqual(4)
+  })
+
+  it('lists only home-page skills that the full CV inventory backs', () => {
+    const inventory = new Set(cv.skills.flatMap((group) => group.skills))
+    for (const skill of cv.featuredSkills.flatMap((group) => group.skills)) {
+      expect(inventory, skill).toContain(skill)
+    }
+  })
+
+  it('keeps the role summary short while the full highlights stay for /cv', () => {
+    for (const role of cv.experience) {
+      if (!role.keyHighlights) continue
+      expect(role.keyHighlights.length).toBeGreaterThanOrEqual(3)
+      expect(role.keyHighlights.length).toBeLessThanOrEqual(4)
+      expect(role.highlights.length).toBeGreaterThan(role.keyHighlights.length)
+    }
+  })
+
   it('offers a CV download only when the PDF is actually in public/', () => {
     if (!cv.pdf) return
     expect(cv.pdf.href).toMatch(/^\/[\w.-]+\.pdf$/)

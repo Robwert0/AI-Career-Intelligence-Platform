@@ -12,7 +12,7 @@ export default function Home() {
   return (
     <>
       <SiteNav initials={cv.initials} photo={cv.photo} />
-      <main className={`${CONTAINER} flex-1 space-y-24 pb-24 sm:space-y-28`}>
+      <main className={`${CONTAINER} flex-1 space-y-20 pb-20 sm:space-y-28 sm:pb-24`}>
         <Hero />
         <SelectedWork />
         <Experience />
