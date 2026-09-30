@@ -91,7 +91,7 @@ export const cv: Cv = {
       period: '2026 – present',
       lead: true,
       summary:
-        'This site: a chat that answers questions about my CV and cites the passages it used.',
+        'This site: a chat that answers questions about my CV and shows the passages it retrieved.',
       highlight:
         'Works end to end on my real CV, with 370+ backend tests and a security review on every auth or AI-input change.',
       problem:

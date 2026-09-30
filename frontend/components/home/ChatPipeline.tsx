@@ -12,7 +12,7 @@ const STEPS: { title: string; detail: string; parts?: string[] }[] = [
     detail: 'System prompt, question and CV extracts in separate, escaped channels.',
   },
   { title: 'Output check', detail: 'An answer that leaks the prompt is replaced by a refusal.' },
-  { title: 'Answer with sources', detail: 'The CV passages it drew on are returned with it.' },
+  { title: 'Answer with sources', detail: 'The CV extracts it was given are returned with it.' },
 ]
 
 export function ChatPipeline() {

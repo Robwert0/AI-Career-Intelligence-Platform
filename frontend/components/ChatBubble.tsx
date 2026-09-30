@@ -12,6 +12,15 @@ import { useConversation } from '@/lib/useConversation'
 
 const PANEL_ID = 'chat-bubble-panel'
 
+function canFocus(element: HTMLElement | null | undefined): element is HTMLElement {
+  return (
+    element != null &&
+    element !== document.body &&
+    element.isConnected &&
+    element.checkVisibility?.() !== false
+  )
+}
+
 function SignInPrompt() {
   return (
     <div className="flex flex-col gap-4 p-5">
@@ -65,8 +74,11 @@ export function ChatBubble() {
   const opener = useRef<HTMLElement | null>(null)
   const returnFocus = useRef(false)
 
-  function show() {
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  function show(trigger: HTMLElement | null) {
+    opener.current =
+      trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    // Already open: setOpen(true) changes nothing, so the focus effect wouldn't run again.
+    panelRef.current?.focus()
     setOpen(true)
   }
 
@@ -92,9 +104,15 @@ export function ChatBubble() {
   }, [pathname])
 
   useEffect(() => {
-    window.addEventListener(OPEN_CHAT_EVENT, show)
-    return () => window.removeEventListener(OPEN_CHAT_EVENT, show)
-  }, [])
+    if (!showsChatBubble(pathname)) return
+    function onOpen(event: Event) {
+      show(
+        event instanceof CustomEvent && event.detail instanceof HTMLElement ? event.detail : null,
+      )
+    }
+    window.addEventListener(OPEN_CHAT_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_CHAT_EVENT, onOpen)
+  }, [pathname])
 
   // Focus after the re-render: on phones the toggle is display:none while the panel is open,
   // and focus() on a hidden element silently does nothing.
@@ -105,7 +123,9 @@ export function ChatBubble() {
     }
     if (!returnFocus.current) return
     returnFocus.current = false
-    const target = opener.current?.isConnected ? opener.current : toggleRef.current
+    // The opener can be gone or hidden by now: the launcher steps aside for an inline entry.
+    const entry = document.querySelector<HTMLElement>(`${CHAT_ENTRY_SELECTOR} button`)
+    const target = [opener.current, entry, toggleRef.current].find(canFocus)
     target?.focus()
   }, [open])
 
@@ -162,7 +182,7 @@ export function ChatBubble() {
       <button
         ref={toggleRef}
         type="button"
-        onClick={() => (open ? close() : show())}
+        onClick={(event) => (open ? close() : show(event.currentTarget))}
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? 'Close chat' : undefined}

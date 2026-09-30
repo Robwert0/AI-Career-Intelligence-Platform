@@ -13,13 +13,13 @@ export function AskCv() {
       <div className="space-y-1">
         <p className="font-medium">Ask about my experience</p>
         <p className="text-sm leading-relaxed text-muted">
-          Answers come only from my CV and show the passages they used.
+          Answers come only from my CV and list the CV extracts retrieved for the question.
           {status === 'authenticated' ? null : ' Requires signing in.'}
         </p>
       </div>
       <button
         type="button"
-        onClick={openChatBubble}
+        onClick={(event) => openChatBubble(event.currentTarget)}
         aria-haspopup="dialog"
         className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md border border-line-strong px-4 py-2.5 text-sm font-medium transition-colors hover:border-accent hover:text-accent"
       >
@@ -34,7 +34,7 @@ export function AskCv() {
         >
           <path d="M4 5h16v11H9l-5 4V5z" />
         </svg>
-        {status === 'authenticated' ? 'Open the chat' : 'Ask my CV'}
+        Ask my CV
       </button>
     </div>
   )

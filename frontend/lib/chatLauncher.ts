@@ -5,6 +5,8 @@ export const OPEN_CHAT_EVENT = 'chat-bubble:open'
 // Marks an inline entry point; the floating launcher steps aside while one is on screen.
 export const CHAT_ENTRY_SELECTOR = '[data-chat-entry]'
 
-export function openChatBubble(): void {
-  window.dispatchEvent(new Event(OPEN_CHAT_EVENT))
+// The trigger rides along because Safari and macOS Firefox don't focus a clicked button, so
+// document.activeElement can't say where focus should return.
+export function openChatBubble(trigger: HTMLElement | null = null): void {
+  window.dispatchEvent(new CustomEvent<HTMLElement | null>(OPEN_CHAT_EVENT, { detail: trigger }))
 }
