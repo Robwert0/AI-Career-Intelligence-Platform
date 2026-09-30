@@ -7,9 +7,19 @@ import { useAuth } from '@/components/AuthProvider'
 import { Composer } from '@/components/Composer'
 import { Transcript } from '@/components/Transcript'
 import { showsChatBubble } from '@/lib/bubble'
+import { CHAT_ENTRY_SELECTOR, OPEN_CHAT_EVENT } from '@/lib/chatLauncher'
 import { useConversation } from '@/lib/useConversation'
 
 const PANEL_ID = 'chat-bubble-panel'
+
+function canFocus(element: HTMLElement | null | undefined): element is HTMLElement {
+  return (
+    element != null &&
+    element !== document.body &&
+    element.isConnected &&
+    element.checkVisibility?.() !== false
+  )
+}
 
 function SignInPrompt() {
   return (
@@ -18,7 +28,9 @@ function SignInPrompt() {
         Ask anything about my experience, projects, or skills — answered only from my CV, with the
         source extracts attached.
       </p>
-      <p className="text-sm text-muted">Sign in to start a conversation.</p>
+      <p className="text-sm text-muted">
+        The chat requires an account: sign in, or create one, to start a conversation.
+      </p>
       <div className="flex items-center gap-4 font-mono text-sm">
         <Link href="/login" className="border border-fg px-3 py-2">
           sign in
@@ -56,20 +68,65 @@ export function ChatBubble() {
   const pathname = usePathname()
   const { status } = useAuth()
   const [open, setOpen] = useState(false)
+  const [entryInView, setEntryInView] = useState(false)
   const toggleRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const opener = useRef<HTMLElement | null>(null)
   const returnFocus = useRef(false)
+
+  function show(trigger: HTMLElement | null) {
+    opener.current =
+      trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    // Already open: setOpen(true) changes nothing, so the focus effect wouldn't run again.
+    panelRef.current?.focus()
+    setOpen(true)
+  }
 
   function close() {
     returnFocus.current = true
     setOpen(false)
   }
 
+  useEffect(() => {
+    const visible = new Set<Element>()
+    const observer = new IntersectionObserver((changes) => {
+      for (const change of changes) {
+        if (change.isIntersecting) visible.add(change.target)
+        else visible.delete(change.target)
+      }
+      setEntryInView(visible.size > 0)
+    })
+    document.querySelectorAll(CHAT_ENTRY_SELECTOR).forEach((entry) => observer.observe(entry))
+    return () => {
+      observer.disconnect()
+      setEntryInView(false)
+    }
+  }, [pathname])
+
+  useEffect(() => {
+    if (!showsChatBubble(pathname)) return
+    function onOpen(event: Event) {
+      show(
+        event instanceof CustomEvent && event.detail instanceof HTMLElement ? event.detail : null,
+      )
+    }
+    window.addEventListener(OPEN_CHAT_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_CHAT_EVENT, onOpen)
+  }, [pathname])
+
   // Focus after the re-render: on phones the toggle is display:none while the panel is open,
   // and focus() on a hidden element silently does nothing.
   useEffect(() => {
-    if (open || !returnFocus.current) return
+    if (open) {
+      panelRef.current?.focus()
+      return
+    }
+    if (!returnFocus.current) return
     returnFocus.current = false
-    toggleRef.current?.focus()
+    // The opener can be gone or hidden by now: the launcher steps aside for an inline entry.
+    const entry = document.querySelector<HTMLElement>(`${CHAT_ENTRY_SELECTOR} button`)
+    const target = [opener.current, entry, toggleRef.current].find(canFocus)
+    target?.focus()
   }, [open])
 
   useEffect(() => {
@@ -87,10 +144,12 @@ export function ChatBubble() {
     <div className="print:hidden">
       {open ? (
         <section
+          ref={panelRef}
           id={PANEL_ID}
+          tabIndex={-1}
           role="dialog"
           aria-label="Chat about Robert's CV"
-          className={`fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-lg border border-line bg-bg shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-24 sm:w-[380px] sm:rounded-lg ${status === 'authenticated' ? 'h-[85dvh] sm:h-[520px]' : ''}`}
+          className={`fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-lg border border-line bg-bg shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-24 sm:w-[380px] sm:rounded-lg focus:outline-none ${status === 'authenticated' ? 'h-[85dvh] sm:h-[520px]' : ''}`}
         >
           <header className="flex items-baseline justify-between border-b border-line px-4 py-3">
             <span className="font-mono text-sm">ask my cv</span>
@@ -123,11 +182,11 @@ export function ChatBubble() {
       <button
         ref={toggleRef}
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) => (open ? close() : show(event.currentTarget))}
         aria-expanded={open}
         aria-controls={PANEL_ID}
-        aria-label={open ? 'Close chat' : 'Chat about my CV'}
-        className={`fixed right-5 bottom-5 z-50 flex size-14 items-center justify-center rounded-full bg-fg text-bg shadow-lg transition-transform hover:scale-105 ${open ? 'max-sm:hidden' : ''}`}
+        aria-label={open ? 'Close chat' : undefined}
+        className={`fixed right-4 bottom-4 z-50 flex items-center justify-center gap-2 rounded-full bg-fg text-bg shadow-lg transition-transform hover:scale-105 motion-reduce:transition-none motion-reduce:hover:scale-100 sm:right-5 sm:bottom-5 ${open ? 'size-14 max-sm:hidden' : `size-12 sm:h-12 sm:w-auto sm:px-5 ${entryInView ? 'hidden' : ''}`}`}
       >
         {open ? (
           <svg
@@ -154,7 +213,12 @@ export function ChatBubble() {
             <path d="M4 5h16v11H9l-5 4V5z" />
           </svg>
         )}
+        {open ? null : (
+          <span className="text-sm font-medium max-sm:sr-only">Ask about my experience</span>
+        )}
       </button>
+      {/* Lets the page scroll its last lines and controls clear of the floating launcher. */}
+      <div aria-hidden="true" className="h-20" />
     </div>
   )
 }

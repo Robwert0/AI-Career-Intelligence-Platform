@@ -25,7 +25,7 @@ export const projects: Project[] = [
     context: 'Personal project',
     period: 'Jun 2026 – present',
     purpose:
-      'An interactive "AI version of my CV": visitors read the CV and ask it questions, and a retrieval-augmented model answers from the CV itself, citing the passages it used.',
+      'An interactive "AI version of my CV": visitors read the CV and ask it questions, and a retrieval-augmented model answers from the CV itself and shows the passages it retrieved.',
     description:
       'A monorepo with a FastAPI backend and a Next.js frontend that talk over HTTP only. The CV PDF is parsed, chunked by section, embedded and stored in PostgreSQL with pgvector; each question runs hybrid retrieval and a local LLM answers from the retrieved chunks. Built as a production system rather than a demo: every feature ships with tests and goes through a security review before it merges.',
     stack: [
@@ -45,7 +45,7 @@ export const projects: Project[] = [
     highlights: [
       'RAG chatbot that answers questions about my CV: section-aware chunking, BGE embeddings in pgvector, hybrid retrieval (vector similarity + Postgres full-text) fused with Reciprocal Rank Fusion, and source citations in a Next.js chat UI.',
       'LLM guardrails: calibrated similarity threshold that refuses off-topic questions before generation, prompt-injection detection, context isolation for untrusted text, output checks against system-prompt leakage, and PII redaction; bounded-concurrency generation on a local LLM (Ollama).',
-      'Async FastAPI/SQLAlchemy, JWT refresh-token rotation, Redis rate limiting, CI with ruff, mypy, pytest.',
+      'Async FastAPI REST API with SQLAlchemy, JWT refresh-token rotation, Redis rate limiting, CI with ruff, mypy, pytest.',
     ],
     repos: ['https://github.com/Robwert0/AI-Career-Intelligence-Platform'],
   },

@@ -49,17 +49,51 @@ export function Chapter({
   children: React.ReactNode
 }) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} className="reveal space-y-10">
+    <section id={id} aria-labelledby={`${id}-title`} className="reveal space-y-8 sm:space-y-10">
       <header className="space-y-3">
         <p className="font-mono text-xs text-accent">
           {index} <span className="text-subtle">/ {id}</span>
         </p>
-        <h2 id={`${id}-title`} className="text-2xl font-medium tracking-tight sm:text-3xl">
+        <h2
+          id={`${id}-title`}
+          className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl"
+        >
           {title}
         </h2>
         {intro ? <p className="max-w-2xl leading-relaxed text-muted">{intro}</p> : null}
       </header>
       {children}
     </section>
+  )
+}
+
+export function Disclosure({
+  summary,
+  children,
+  className = '',
+}: {
+  summary: React.ReactNode
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <details className={`group ${className}`}>
+      <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-sm py-1 text-sm font-medium text-accent hover:underline hover:underline-offset-4 [&::-webkit-details-marker]:hidden">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          className="size-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M6 3.5 10.5 8 6 12.5" />
+        </svg>
+        {summary}
+      </summary>
+      <div className="pt-4">{children}</div>
+    </details>
   )
 }
