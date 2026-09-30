@@ -49,7 +49,7 @@ export function MatchReportView({ report, job, headingRef, onStartOver, onEditJo
     ...(report.requirements.length > 0
       ? [{ id: 'requirements-title', label: 'Requirements' }]
       : []),
-    ...(report.rewrites.length > 0 ? [{ id: 'wording-title', label: 'Suggested wording' }] : []),
+    ...(report.rewrites.length > 0 ? [{ id: 'wording-title', label: 'Suggested CV wording' }] : []),
   ]
 
   return (

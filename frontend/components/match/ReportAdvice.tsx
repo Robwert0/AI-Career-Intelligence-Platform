@@ -154,6 +154,8 @@ function RewriteCard({ rewrite, label }: { rewrite: Rewrite; label: string }) {
 
   async function copySuggestion() {
     try {
+      // Cleared first so a second copy is a new change the live region announces again.
+      setCopy('idle')
       await navigator.clipboard.writeText(rewrite.after)
       setCopy('copied')
     } catch {
@@ -210,10 +212,12 @@ function Segments({ segments, kind }: { segments: DiffSegment[]; kind: 'added' |
         key={index}
         className="rounded-sm bg-accent/20 text-fg underline decoration-accent/70 decoration-2 underline-offset-2"
       >
+        <span className="sr-only">added: </span>
         {segment.text}
       </ins>
     ) : (
       <del key={index} className="decoration-danger/70">
+        <span className="sr-only">removed: </span>
         {segment.text}
       </del>
     ),

@@ -3,20 +3,12 @@ import { DISCLOSURE_SUMMARY } from './styles'
 export function Disclosure({
   summary,
   children,
-  open,
-  onToggle,
 }: {
   summary: React.ReactNode
   children: React.ReactNode
-  open?: boolean
-  onToggle?: (open: boolean) => void
 }) {
   return (
-    <details
-      className="group"
-      open={open}
-      onToggle={onToggle ? (event) => onToggle(event.currentTarget.open) : undefined}
-    >
+    <details className="group">
       <summary className={DISCLOSURE_SUMMARY}>
         <svg
           aria-hidden="true"

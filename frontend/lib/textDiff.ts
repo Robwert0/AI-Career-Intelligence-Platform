@@ -37,7 +37,7 @@ function same(left: string, right: string): boolean {
 }
 
 function tokens(text: string): string[] {
-  return text.match(/\S+\s*/g) ?? []
+  return text.match(/^\s+|\S+\s*/g) ?? []
 }
 
 function push(segments: DiffSegment[], text: string, changed: boolean) {

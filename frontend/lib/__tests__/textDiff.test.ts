@@ -35,6 +35,12 @@ describe('wordDiff', () => {
     expect(diff.suggested).toEqual([{ text: 'Same words here.', changed: false }])
   })
 
+  it('keeps leading whitespace', () => {
+    const diff = wordDiff('  lead a', '  lead b')
+    expect(join(diff.original)).toBe('  lead a')
+    expect(join(diff.suggested)).toBe('  lead b')
+  })
+
   it('handles an empty side', () => {
     expect(wordDiff('', 'New line.').suggested).toEqual([{ text: 'New line.', changed: true }])
     expect(wordDiff('Old line.', '').original).toEqual([{ text: 'Old line.', changed: true }])
