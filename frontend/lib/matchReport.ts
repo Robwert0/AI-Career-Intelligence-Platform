@@ -145,3 +145,50 @@ export function sourceSummary(coverage: Coverage): string[] {
 export function evidenceShare(coverage: Coverage): string {
   return `${formatPercent(coverage.requirements_with_evidence)} of assessed requirements have cited evidence.`
 }
+
+export type RequirementFilter = 'all' | 'attention' | 'demonstrated' | 'not_assessed'
+
+export const REQUIREMENT_FILTERS: { id: RequirementFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'attention', label: 'Needs attention' },
+  { id: 'demonstrated', label: 'Demonstrated' },
+  { id: 'not_assessed', label: 'Not assessed' },
+]
+
+const NEEDS_ATTENTION: ReadonlySet<RequirementStatus> = new Set([
+  'partial',
+  'not_demonstrated',
+  'unmet',
+])
+
+export function matchesFilter(
+  requirement: Pick<AssessedRequirement, 'status'>,
+  filter: RequirementFilter,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'attention') return NEEDS_ATTENTION.has(requirement.status)
+  return requirement.status === filter
+}
+
+export function filterCounts(
+  requirements: Pick<AssessedRequirement, 'status'>[],
+): Record<RequirementFilter, number> {
+  const counts = { all: 0, attention: 0, demonstrated: 0, not_assessed: 0 }
+  for (const filter of REQUIREMENT_FILTERS) {
+    counts[filter.id] = requirements.filter((r) => matchesFilter(r, filter.id)).length
+  }
+  return counts
+}
+
+// Requirement ids look like "req:required:3"; colons are legal in an id but break CSS selectors
+// and read badly in a URL fragment.
+export function requirementAnchor(requirementId: string): string {
+  return `req-${requirementId.replace(/[^A-Za-z0-9_-]/g, '-')}`
+}
+
+export function sourceStatusLines(coverage: Coverage): { source: string; status: string }[] {
+  return [
+    { source: 'CV', status: SOURCE_STATUS_TEXT[coverage.cv] },
+    { source: 'GitHub', status: SOURCE_STATUS_TEXT[coverage.github.status] },
+  ]
+}

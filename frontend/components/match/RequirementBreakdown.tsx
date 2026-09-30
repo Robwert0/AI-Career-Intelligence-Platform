@@ -2,90 +2,143 @@ import type { AssessedRequirement, Evidence } from '@/lib/match'
 import {
   citation,
   evidenceKindLabel,
+  filterCounts,
   IMPORTANCE_LABEL,
+  matchesFilter,
   NOT_ASSESSED_NOTE,
+  REQUIREMENT_FILTERS,
+  requirementAnchor,
   statusLabel,
+  type RequirementFilter,
 } from '@/lib/matchReport'
+import { Disclosure } from './Disclosure'
 import { StatusIcon } from './StatusIcon'
-import { SECTION_TITLE } from './styles'
+import { REPORT_HEADING } from './styles'
 
-function marker(requirement: AssessedRequirement): string {
-  if (requirement.hard_gap) return 'border-l-4 border-l-danger'
-  if (requirement.status === 'not_assessed') return 'border-l-4 border-dashed border-l-line-strong'
-  return 'border-l-4 border-l-transparent'
+type Props = {
+  requirements: AssessedRequirement[]
+  filter: RequirementFilter
+  onFilterChange: (filter: RequirementFilter) => void
 }
 
-export function RequirementBreakdown({ requirements }: { requirements: AssessedRequirement[] }) {
+export function RequirementBreakdown({ requirements, filter, onFilterChange }: Props) {
   if (requirements.length === 0) return null
+  const counts = filterCounts(requirements)
+  const shown = requirements.filter((requirement) => matchesFilter(requirement, filter))
+  const active = REQUIREMENT_FILTERS.find((option) => option.id === filter)!
+
   return (
-    <section aria-labelledby="requirements-title" className="space-y-4">
-      <h2 id="requirements-title" className={SECTION_TITLE}>
-        Requirement breakdown
-      </h2>
+    <section aria-labelledby="requirements-title" className="space-y-5">
+      <div className="space-y-2">
+        <h2 id="requirements-title" className={REPORT_HEADING}>
+          Requirements
+        </h2>
+        <p className="max-w-2xl text-muted">
+          Each requirement from the posting, how well your evidence shows it, and the evidence
+          cited.
+        </p>
+      </div>
 
-      <table className="hidden w-full border-collapse text-left text-sm md:table">
-        <caption className="sr-only">
-          Each requirement from the job, how well your evidence shows it, and the evidence cited
-        </caption>
-        <thead>
-          <tr className="border-b border-line font-mono text-xs text-muted">
-            <th scope="col" className="py-2 pr-4 pl-4 font-normal">
-              Requirement
-            </th>
-            <th scope="col" className="py-2 pr-4 font-normal">
-              Status
-            </th>
-            <th scope="col" className="py-2 font-normal">
-              Evidence and reasoning
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {requirements.map((requirement) => (
-            <tr
-              key={requirement.id}
-              className={`border-b border-line align-top ${requirement.status === 'not_assessed' ? 'text-muted' : ''}`}
-            >
-              <th scope="row" className={`w-1/3 py-3 pr-4 pl-3 font-normal ${marker(requirement)}`}>
-                <span className="block">{requirement.text}</span>
-                <span className="font-mono text-xs text-muted">
-                  {IMPORTANCE_LABEL[requirement.importance]}
-                </span>
-              </th>
-              <td className="py-3 pr-4 whitespace-nowrap">
-                <StatusTag requirement={requirement} />
-              </td>
-              <td className="py-3">
-                <RequirementDetail requirement={requirement} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <ul className="space-y-3 md:hidden">
-        {requirements.map((requirement) => (
-          <li
-            key={requirement.id}
-            className={`space-y-2 rounded-md border border-line p-3 ${marker(requirement)} ${requirement.status === 'not_assessed' ? 'text-muted' : ''}`}
+      <div role="group" aria-label="Filter requirements" className="flex flex-wrap gap-2">
+        {REQUIREMENT_FILTERS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            aria-pressed={filter === option.id}
+            onClick={() => onFilterChange(option.id)}
+            className={`rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
+              filter === option.id
+                ? 'border-accent bg-accent text-on-accent'
+                : 'border-line-strong hover:border-accent hover:text-accent'
+            }`}
           >
-            <p>{requirement.text}</p>
-            <p className="font-mono text-xs text-muted">
-              {IMPORTANCE_LABEL[requirement.importance]}
-            </p>
-            <StatusTag requirement={requirement} />
-            <RequirementDetail requirement={requirement} />
-          </li>
+            {option.label} <span className="tabular-nums">({counts[option.id]})</span>
+          </button>
         ))}
-      </ul>
+      </div>
+      <p role="status" className="sr-only">
+        {filter === 'all'
+          ? `Showing all ${counts.all} requirements.`
+          : `Showing ${shown.length} of ${counts.all} requirements: ${active.label.toLowerCase()}.`}
+      </p>
+
+      {shown.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-line-strong px-4 py-6 text-center text-muted">
+          No requirements in this group.
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {shown.map((requirement) => (
+            <RequirementCard key={requirement.id} requirement={requirement} />
+          ))}
+        </ul>
+      )}
     </section>
+  )
+}
+
+function cardStyle(requirement: AssessedRequirement): string {
+  if (requirement.hard_gap) return 'border-danger/60 border-l-4 border-l-danger'
+  if (requirement.status === 'not_assessed') return 'border-dashed border-line-strong'
+  return 'border-line'
+}
+
+function RequirementCard({ requirement }: { requirement: AssessedRequirement }) {
+  const notAssessed = requirement.status === 'not_assessed'
+  return (
+    <li
+      id={requirementAnchor(requirement.id)}
+      tabIndex={-1}
+      className={`scroll-mt-24 rounded-lg border p-4 focus:outline-2 focus:outline-offset-2 focus:outline-accent sm:p-5 ${cardStyle(requirement)}`}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <StatusTag requirement={requirement} />
+        <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-xs text-muted">
+          {IMPORTANCE_LABEL[requirement.importance]}
+        </span>
+      </div>
+      <h3 className={`mt-2 font-semibold break-words ${notAssessed ? 'text-muted' : ''}`}>
+        {requirement.text}
+      </h3>
+      {notAssessed ? (
+        <p className="mt-1.5 text-sm leading-relaxed text-muted">{NOT_ASSESSED_NOTE}</p>
+      ) : (
+        <div className="mt-1.5 space-y-2">
+          <p className="leading-relaxed text-muted">{requirement.rationale}</p>
+          {requirement.hard_gap ? (
+            <p className="text-sm text-danger">
+              Hard gap: your evidence contradicts this required item. It does not cap the estimate,
+              but an employer may treat it as a blocker.
+            </p>
+          ) : null}
+          {requirement.evidence.length > 0 ? (
+            <Disclosure
+              summary={
+                <>
+                  Evidence ({requirement.evidence.length})
+                  <span className="sr-only">: {requirement.text}</span>
+                </>
+              }
+            >
+              <ul className="space-y-3 border-l-2 border-line pl-4">
+                {requirement.evidence.map((item, index) => (
+                  <EvidenceItem key={`${item.id}-${index}`} evidence={item} />
+                ))}
+              </ul>
+            </Disclosure>
+          ) : (
+            <p className="text-sm text-subtle">No evidence cited.</p>
+          )}
+        </div>
+      )}
+    </li>
   )
 }
 
 function StatusTag({ requirement }: { requirement: AssessedRequirement }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 font-mono text-xs ${requirement.hard_gap ? 'font-semibold text-danger' : ''}`}
+      className={`inline-flex items-center gap-1.5 text-sm font-medium ${requirement.hard_gap ? 'text-danger' : ''}`}
     >
       <StatusIcon status={requirement.status} />
       {statusLabel(requirement)}
@@ -93,51 +146,29 @@ function StatusTag({ requirement }: { requirement: AssessedRequirement }) {
   )
 }
 
-function RequirementDetail({ requirement }: { requirement: AssessedRequirement }) {
-  if (requirement.status === 'not_assessed') return <p className="text-sm">{NOT_ASSESSED_NOTE}</p>
-  return (
-    <div className="space-y-2">
-      <p className="text-sm leading-relaxed">{requirement.rationale}</p>
-      {requirement.hard_gap ? (
-        <p className="text-xs text-danger">
-          Hard gap: your evidence contradicts this required item. It does not cap the estimate, but
-          an employer may treat it as a blocker.
-        </p>
-      ) : null}
-      {requirement.evidence.length > 0 ? (
-        <ul className="space-y-2">
-          {requirement.evidence.map((item, index) => (
-            <EvidenceLine key={`${item.id}-${index}`} evidence={item} />
-          ))}
-        </ul>
-      ) : (
-        <p className="text-xs text-muted">No evidence cited.</p>
-      )}
-    </div>
-  )
-}
-
-function EvidenceLine({ evidence }: { evidence: Evidence }) {
+function EvidenceItem({ evidence }: { evidence: Evidence }) {
   const { label, href } = citation(evidence)
   return (
-    <li className="space-y-0.5">
-      <p className="flex flex-wrap items-baseline gap-x-2 font-mono text-xs text-accent">
+    <li className="space-y-1">
+      <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-xs">
         {href ? (
           <a
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="underline underline-offset-4"
+            className="text-accent underline underline-offset-4"
           >
             {label}
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
         ) : (
-          label
+          <span className="text-accent">{label}</span>
         )}
         <span className="text-subtle">{evidenceKindLabel(evidence.kind)}</span>
       </p>
-      <p className="line-clamp-3 text-xs break-words text-muted">{evidence.text}</p>
+      <blockquote className="text-sm leading-relaxed break-words whitespace-pre-line">
+        {evidence.text}
+      </blockquote>
     </li>
   )
 }

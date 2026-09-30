@@ -9,10 +9,14 @@ import {
   citation,
   evidenceById,
   evidenceShare,
+  filterCounts,
   formatPercent,
   formatPoints,
   formatWeight,
+  matchesFilter,
+  requirementAnchor,
   requirementTextById,
+  sourceStatusLines,
   sourceSummary,
   statusLabel,
   weightsRedistributed,
@@ -181,5 +185,44 @@ describe('report view-model helpers on the golden report', () => {
       expect(evidence.get(rewrite.evidence_id)?.text).toBe(rewrite.before)
       expect(rewrite.questions.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('requirement filters on the golden report', () => {
+  it('counts each filter, with needs attention = partial, not demonstrated or unmet', () => {
+    expect(filterCounts(report.requirements)).toEqual({
+      all: 7,
+      attention: 4,
+      demonstrated: 2,
+      not_assessed: 1,
+    })
+  })
+
+  it('keeps the hard gap under needs attention and never under demonstrated', () => {
+    const gap = report.requirements.find((r) => r.hard_gap)!
+    expect(matchesFilter(gap, 'attention')).toBe(true)
+    expect(matchesFilter(gap, 'demonstrated')).toBe(false)
+  })
+
+  it('files every status under exactly one narrow filter', () => {
+    for (const requirement of report.requirements) {
+      const narrow = (['attention', 'demonstrated', 'not_assessed'] as const).filter((f) =>
+        matchesFilter(requirement, f),
+      )
+      expect(narrow, requirement.id).toHaveLength(1)
+    }
+  })
+
+  it('turns requirement ids into selector-safe anchors', () => {
+    expect(requirementAnchor('req:required:3')).toBe('req-req-required-3')
+    const anchors = report.requirements.map((r) => requirementAnchor(r.id))
+    expect(new Set(anchors).size).toBe(anchors.length)
+  })
+
+  it('names each source status in a short line', () => {
+    expect(sourceStatusLines(report.coverage)).toEqual([
+      { source: 'CV', status: 'read' },
+      { source: 'GitHub', status: 'read' },
+    ])
   })
 })

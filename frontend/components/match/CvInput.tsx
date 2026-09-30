@@ -24,10 +24,11 @@ type Props = {
   candidate: CandidateInput
   limits: UploadLimits
   error?: string
+  optional?: boolean
   onChange: (patch: Partial<CandidateInput>) => void
 }
 
-export function CvInput({ idPrefix, candidate, limits, error, onChange }: Props) {
+export function CvInput({ idPrefix, candidate, limits, error, optional, onChange }: Props) {
   const [pickError, setPickError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const fileId = `${idPrefix}-cv-file`
@@ -61,7 +62,9 @@ export function CvInput({ idPrefix, candidate, limits, error, onChange }: Props)
 
   return (
     <fieldset className="space-y-3">
-      <legend className="font-medium">CV</legend>
+      <legend className="font-medium">
+        CV{optional ? <span className="font-normal text-muted"> (optional)</span> : null}
+      </legend>
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
         {MODES.map((mode) => (
           <label key={mode.id} className="inline-flex items-center gap-2">
