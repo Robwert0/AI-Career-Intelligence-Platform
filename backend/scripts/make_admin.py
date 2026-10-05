@@ -16,7 +16,7 @@ from app.core.security import hash_password, verify_password
 from app.models import User
 from app.repositories import UserRepository
 from app.repositories.user_repo import EmailAlreadyExistsError
-from app.schemas.auth import _within_bcrypt_limit
+from app.schemas.auth import _within_bcrypt_limit, normalize_email
 
 logger = logging.getLogger("make_admin")
 
@@ -33,6 +33,7 @@ class Result(enum.Enum):
     TOO_LONG = "too_long"
     MISMATCH = "mismatch"
     EMAIL_EXISTS = "email_exists"
+    CHANGED = "changed"
 
 
 EXIT_CODES = {
@@ -45,7 +46,9 @@ EXIT_CODES = {
     Result.TOO_LONG: 2,
     Result.MISMATCH: 2,
     Result.EMAIL_EXISTS: 3,
+    Result.CHANGED: 5,
 }
+EXIT_INVALID_EMAIL = 2
 EXIT_UNEXPECTED = 4
 
 
@@ -65,15 +68,6 @@ def check_admin_password(password: str) -> Result | None:
     return None
 
 
-async def verify_owner(session: AsyncSession, email: str, password: str) -> User | None:
-    user = await UserRepository(session).get_user_by_email(email)
-    if user is None:
-        return None
-    if not await asyncio.to_thread(verify_password, password, user.hashed_password):
-        return None
-    return user
-
-
 async def create_admin(session: AsyncSession, email: str, password: str, confirm: str) -> Outcome:
     repo = UserRepository(session)
     if await repo.get_user_by_email(email) is not None:
@@ -85,28 +79,32 @@ async def create_admin(session: AsyncSession, email: str, password: str, confirm
 
     hashed = await asyncio.to_thread(hash_password, password)
     try:
-        user = await repo.create_user(email, hashed)
+        user = await repo.create_user(email, hashed, is_admin=True)
     except EmailAlreadyExistsError:
         return Outcome(Result.EMAIL_EXISTS)
-    await repo.set_admin(email, True)
     return Outcome(Result.CREATED, user.id)
 
 
-async def grant_admin(session: AsyncSession, email: str, password: str) -> Outcome:
-    repo = UserRepository(session)
-    if await repo.get_user_by_email(email) is None:
+async def grant_admin(
+    session: AsyncSession, user_id: uuid.UUID, password: str, *, was_admin: bool
+) -> Outcome:
+    # By id, not email: a row deleted and re-registered under the same email while the
+    # operator was typing is a different account and must not be promoted.
+    user = await UserRepository(session).get_user_by_id(user_id)
+    if user is None:
         return Outcome(Result.NO_SUCH_USER)
+    if user.is_admin != was_admin:
+        return Outcome(Result.CHANGED, user.id)
     if (rejected := check_admin_password(password)) is Result.TOO_LONG:
-        return Outcome(rejected)
+        return Outcome(rejected, user.id)
     # Emails are unverified, so owning the row's email proves nothing; the password does.
-    owner = await verify_owner(session, email, password)
-    if owner is None:
-        return Outcome(Result.WRONG_PASSWORD)
+    if not await asyncio.to_thread(verify_password, password, user.hashed_password):
+        return Outcome(Result.WRONG_PASSWORD, user.id)
     if rejected is not None:
-        return Outcome(rejected, owner.id)
-    owner.is_admin = True
+        return Outcome(rejected, user.id)
+    user.is_admin = True
     await session.flush()
-    return Outcome(Result.GRANTED, owner.id)
+    return Outcome(Result.GRANTED, user.id)
 
 
 async def revoke_admin(session: AsyncSession, email: str) -> Outcome:
@@ -130,12 +128,17 @@ def _prompt(label: str) -> Awaitable[str]:
     return asyncio.to_thread(getpass.getpass, label)
 
 
-async def _run_create(email: str) -> Outcome:
+async def _email_taken(email: str) -> bool:
     async with SessionLocal() as session:
-        if await UserRepository(session).get_user_by_email(email) is not None:
-            return Outcome(Result.EMAIL_EXISTS)
-        password = await _prompt("password for the new admin: ")
-        confirm = await _prompt("confirm password: ")
+        return await UserRepository(session).get_user_by_email(email) is not None
+
+
+async def _run_create(email: str) -> Outcome:
+    if await _email_taken(email):
+        return Outcome(Result.EMAIL_EXISTS)
+    password = await _prompt("password for the new admin: ")
+    confirm = await _prompt("confirm password: ")
+    async with SessionLocal() as session:
         outcome = await create_admin(session, email, password, confirm)
         if outcome.result is Result.CREATED:
             await session.commit()
@@ -148,8 +151,11 @@ async def _run_grant(email: str) -> Outcome:
         if user is None:
             return Outcome(Result.NO_SUCH_USER)
         _print_account(user)
-        password = await _prompt("password for this account: ")
-        outcome = await grant_admin(session, email, password)
+        user_id, was_admin = user.id, user.is_admin
+    # The read session is closed so no transaction stays open while the operator types.
+    password = await _prompt("password for this account: ")
+    async with SessionLocal() as session:
+        outcome = await grant_admin(session, user_id, password, was_admin=was_admin)
         if outcome.result is Result.GRANTED:
             await session.commit()
         return outcome
@@ -182,6 +188,7 @@ def _report(outcome: Outcome, email: str, grant: bool) -> None:
         Result.EMAIL_EXISTS: (
             "an account with this email already exists — refusing to create an admin over it"
         ),
+        Result.CHANGED: "the account changed while the password was being typed — nothing done",
     }
     if outcome.result in messages:
         logger.info("admin %s user_id=%s", outcome.result.value, outcome.user_id)
@@ -196,8 +203,8 @@ def main() -> int:
         epilog=(
             "Run from backend/ with DATABASE_URL set. --create is the normal way to make an admin. "
             "Granting asks for that account's password, which must be at least 16 characters. "
-            "Exit codes: 0 done, 1 no such user, 2 password rejected, 3 email already exists, "
-            "4 unexpected error."
+            "Exit codes: 0 done, 1 no such user, 2 password or email rejected, "
+            "3 email already exists, 4 unexpected error, 5 account changed during the prompt."
         ),
     )
     parser.add_argument("email")
@@ -206,20 +213,26 @@ def main() -> int:
     action.add_argument("--revoke", action="store_true", help="remove admin access instead")
     args = parser.parse_args()
 
+    try:
+        email = normalize_email(args.email)
+    except ValueError as exc:
+        print(f"not a valid email address: {exc}", file=sys.stderr)
+        return EXIT_INVALID_EMAIL
+
     configure_logging("INFO")
     if args.create:
-        run = _run_create(args.email)
+        run = _run_create(email)
     elif args.revoke:
-        run = _run_revoke(args.email)
+        run = _run_revoke(email)
     else:
-        run = _run_grant(args.email)
+        run = _run_grant(email)
     try:
         outcome = asyncio.run(run)
+        _report(outcome, email, grant=not (args.create or args.revoke))
     except Exception as exc:
         # The message can carry bound values or account data; the type is enough to debug.
         print(f"unexpected error: {type(exc).__name__}", file=sys.stderr)
         return EXIT_UNEXPECTED
-    _report(outcome, args.email, grant=not (args.create or args.revoke))
     return EXIT_CODES[outcome.result]
 
 

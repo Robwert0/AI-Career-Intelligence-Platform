@@ -28,12 +28,14 @@ class UserRepository:
         hashed_password: str,
         company: str | None = None,
         role: str | None = None,
+        is_admin: bool = False,
     ) -> User:
         user = User(
             email=email,
             hashed_password=hashed_password,
             company=company,
             role=role,
+            is_admin=is_admin,
         )
         try:
             async with self._session.begin_nested():
@@ -90,11 +92,11 @@ class UserRepository:
         )
         return result.rowcount
 
-    async def delete_by_email(self, email: str) -> bool:
+    async def delete_by_id(self, user_id: uuid.UUID) -> bool:
         result = cast(
             CursorResult[Any],
             await self._session.execute(
-                delete(User).where(User.email == email).execution_options(synchronize_session=False)
+                delete(User).where(User.id == user_id).execution_options(synchronize_session=False)
             ),
         )
         return result.rowcount > 0

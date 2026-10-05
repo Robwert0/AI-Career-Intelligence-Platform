@@ -3,7 +3,16 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+)
 
 
 def _within_bcrypt_limit(v: str) -> str:
@@ -13,6 +22,17 @@ def _within_bcrypt_limit(v: str) -> str:
 
 
 Password = Annotated[str, Field(min_length=8), AfterValidator(_within_bcrypt_limit)]
+
+_EMAIL = TypeAdapter(EmailStr)
+
+
+def normalize_email(value: str) -> str:
+    # The scripts must look accounts up by the same normalized form registration stored.
+    try:
+        return _EMAIL.validate_python(value)
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        raise ValueError(error.get("ctx", {}).get("reason", error["msg"])) from None
 
 
 UserRole = Literal["recruiter", "hiring_manager", "engineer", "other"]

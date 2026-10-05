@@ -248,7 +248,7 @@ pytest -q
 cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 
 # Create a dedicated admin (prompts for a 16+ char password; refuses an existing email; run from backend/)
-cd backend && python scripts/make_admin.py --create admin@your-private-domain
+cd backend && python scripts/make_admin.py --create admin@yourdomain.com
 # Grant (needs that account's 16+ char password) or --revoke admin on an existing account
 python scripts/make_admin.py you@example.com
 # Erasure request: delete one account (asks for the email again; admins need --allow-admin)

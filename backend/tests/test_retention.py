@@ -90,15 +90,13 @@ async def test_delete_inactive_takes_the_refresh_tokens_with_the_account(
     assert list(remaining) == []
 
 
-async def test_delete_by_email_reports_whether_an_account_went(db_session: AsyncSession) -> None:
-    user_id = await add_user(
-        db_session, created_days_ago=10, active_days_ago=1, email="gone@test.dev"
-    )
+async def test_delete_by_id_reports_whether_an_account_went(db_session: AsyncSession) -> None:
+    user_id = await add_user(db_session, created_days_ago=10, active_days_ago=1)
     repo = UserRepository(db_session)
 
-    assert await repo.delete_by_email("GONE@test.dev") is True
+    assert await repo.delete_by_id(user_id) is True
     assert await existing_ids(db_session, [user_id]) == set()
-    assert await repo.delete_by_email("gone@test.dev") is False
+    assert await repo.delete_by_id(user_id) is False
 
 
 class RecordingRepo:
