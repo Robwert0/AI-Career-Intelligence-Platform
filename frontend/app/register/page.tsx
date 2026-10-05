@@ -48,7 +48,7 @@ function RegisterForm() {
           <select
             value={role}
             onChange={(event) => setRole(event.target.value as UserRole | '')}
-            className={FIELD_CLASS}
+            className={FIELD_CLASS.replace('bg-transparent', 'bg-bg')}
           >
             <option value="">prefer not to say</option>
             {ROLE_OPTIONS.map((option) => (
@@ -57,10 +57,11 @@ function RegisterForm() {
               </option>
             ))}
           </select>
-          <span className="font-mono text-xs text-muted">
-            Shared with Robert so he knows who viewed his CV.
-          </span>
         </label>
+
+        <p className="font-mono text-xs text-muted">
+          Your email, company, role, sign-up date and last visit are visible to Robert.
+        </p>
       </CredentialsForm>
 
       <p className="font-mono text-xs text-muted">
