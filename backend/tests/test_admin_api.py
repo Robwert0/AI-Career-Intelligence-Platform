@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.policies import ADMIN_IP, ADMIN_USER
 from app.core.security import create_access_token
 from app.models import User
 
@@ -129,7 +130,12 @@ async def test_a_rate_limited_non_admin_still_gets_404(
     limited_client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     jane = await _user(db_session, "jane@acme.dev")
+    attempts = ADMIN_USER.capacity + 1
+    assert attempts <= ADMIN_IP.capacity
 
-    response = await limited_client.get("/admin/users", headers=_auth(jane))
+    statuses = [
+        (await limited_client.get("/admin/users", headers=_auth(jane))).status_code
+        for _ in range(attempts)
+    ]
 
-    assert response.status_code == 404
+    assert statuses == [404] * attempts
