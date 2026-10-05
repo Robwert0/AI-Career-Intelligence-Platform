@@ -3,3 +3,5 @@ node_modules
 package-lock.json
 # Shared with the backend byte-for-byte; reformatting it would break the golden-file sync.
 lib/__tests__/fixtures/match-report.full.json
+# Vendored byte-for-byte; its sha256 is pinned in public/umami.README.md.
+public/umami.js

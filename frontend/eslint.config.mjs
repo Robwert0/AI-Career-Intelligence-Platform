@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     'out/**',
     'build/**',
     'next-env.d.ts',
+    // Vendored byte-for-byte; its sha256 is pinned in public/umami.README.md.
+    'public/umami.js',
   ]),
 ])
 

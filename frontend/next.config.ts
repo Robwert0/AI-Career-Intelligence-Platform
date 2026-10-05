@@ -12,23 +12,20 @@ const PHASE_PRODUCTION_SERVER = 'phase-production-server'
 // proxy.ts is present).
 const PROXIED_PREFIXES = ['auth', 'users', 'chat', 'match', 'admin']
 
-const UMAMI_SCRIPT_ORIGIN = 'https://cloud.umami.is'
-// The tracker posts events to a different host than the one serving script.js.
-const UMAMI_COLLECT_ORIGINS = 'https://cloud.umami.is https://api-gateway.umami.dev'
+// The tracker is served from our own origin (public/umami.js); only its events leave the site.
+const UMAMI_COLLECTOR_ORIGIN = 'https://gateway.umami.is'
 
 const isDevelopment = process.env.NODE_ENV !== 'production'
 const umamiEnabled = Boolean(process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID)
 
 // React needs eval() for dev-only debugging features and never uses it in production, so the
 // relaxation is dev-only. The strict production policy is the one verified against `next build`.
-const scriptSrc = [
-  "script-src 'self' 'unsafe-inline'",
-  ...(isDevelopment ? ["'unsafe-eval'"] : []),
-  ...(umamiEnabled ? [UMAMI_SCRIPT_ORIGIN] : []),
-].join(' ')
+const scriptSrc = isDevelopment
+  ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+  : "script-src 'self' 'unsafe-inline'"
 
 const connectSrc = umamiEnabled
-  ? `connect-src 'self' ${UMAMI_COLLECT_ORIGINS}`
+  ? `connect-src 'self' ${UMAMI_COLLECTOR_ORIGIN}`
   : "connect-src 'self'"
 
 const SECURITY_HEADERS = [

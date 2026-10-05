@@ -18,6 +18,8 @@ const geistMono = Geist_Mono({
 
 const umamiWebsiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID
 const umamiDomains = process.env.NEXT_PUBLIC_UMAMI_DOMAINS
+// The vendored tracker's built-in default; pinned so it matches the CSP connect-src exactly.
+const UMAMI_HOST_URL = 'https://gateway.umami.is'
 
 export const metadata: Metadata = {
   title: 'Robert Mirea — Backend & AI Engineer',
@@ -42,9 +44,10 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
         </AuthProvider>
         {umamiWebsiteId ? (
           <Script
-            src="https://cloud.umami.is/script.js"
+            src="/umami.js"
             data-website-id={umamiWebsiteId}
             data-domains={umamiDomains}
+            data-host-url={UMAMI_HOST_URL}
             strategy="afterInteractive"
           />
         ) : null}
