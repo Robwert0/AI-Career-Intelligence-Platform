@@ -140,7 +140,7 @@ async def test_grant_refuses_when_the_row_was_replaced_during_the_prompt(
 
     outcome = await grant_admin(db_session, shown_id, ADMIN_PASSWORD, was_admin=False)
 
-    assert outcome.result is Result.NO_SUCH_USER
+    assert outcome.result is Result.GONE
     await db_session.refresh(squatter)
     assert squatter.is_admin is False
 
@@ -338,3 +338,27 @@ def test_main_exits_2_for_an_email_the_api_would_reject(
     )
     assert "not a valid email address: " in capsys.readouterr().err
     assert _is_admin(cli_db, "admin@x.local") is None
+
+
+def test_main_says_the_confirmed_account_is_gone_when_deleted_during_the_prompt(
+    cli_db: CliDb, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    email = _cli_email()
+    _seed(cli_db, email, ADMIN_PASSWORD)
+
+    async def remove() -> None:
+        async with cli_db.sessions() as session:
+            await session.execute(delete(User).where(User.email == email))
+            await session.commit()
+
+    def delete_then_answer(prompt: str = "") -> str:
+        asyncio.run(remove())
+        return ADMIN_PASSWORD
+
+    monkeypatch.setattr("getpass.getpass", delete_then_answer)
+    monkeypatch.setattr(sys, "argv", ["make_admin.py", email])
+
+    assert make_admin.main() == 1
+    err = capsys.readouterr().err
+    assert "the account you confirmed no longer exists — nothing changed" in err
+    assert "no user with email" not in err

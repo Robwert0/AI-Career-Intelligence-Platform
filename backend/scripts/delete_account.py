@@ -22,6 +22,7 @@ class Result(enum.Enum):
     MISMATCH = "mismatch"
     ADMIN_REFUSED = "admin_refused"
     CHANGED = "changed"
+    GONE = "gone"
 
 
 EXIT_CODES = {
@@ -30,6 +31,7 @@ EXIT_CODES = {
     Result.MISMATCH: 2,
     Result.ADMIN_REFUSED: 3,
     Result.CHANGED: 5,
+    Result.GONE: 1,
 }
 EXIT_INVALID_EMAIL = 2
 EXIT_UNEXPECTED = 4
@@ -52,7 +54,7 @@ async def erase_account(
     repo = UserRepository(session)
     user = await repo.get_user_by_id(user_id)
     if user is None:
-        return Outcome(Result.NOT_FOUND)
+        return Outcome(Result.GONE)
     if user.is_admin != was_admin:
         return Outcome(Result.CHANGED, user_id)
     if user.is_admin and not allow_admin:
@@ -92,6 +94,8 @@ def _report(outcome: Outcome, email: str) -> None:
         print(f"no user with email {email}", file=sys.stderr)
     elif outcome.result is Result.MISMATCH:
         print("confirmation does not match — nothing deleted", file=sys.stderr)
+    elif outcome.result is Result.GONE:
+        print("the account you confirmed no longer exists — nothing changed", file=sys.stderr)
     elif outcome.result is Result.CHANGED:
         print("the account changed while you were confirming — nothing deleted", file=sys.stderr)
     else:
@@ -103,7 +107,8 @@ def main() -> int:
         description="Delete an account and its sessions, for an erasure request.",
         epilog=(
             "Run from backend/ with DATABASE_URL set. Asks for the email again before deleting. "
-            "Exit codes: 0 deleted, 1 no such user, 2 confirmation mismatch or invalid email, "
+            "Exit codes: 0 deleted, 1 no such user (or deleted during the prompt), "
+            "2 confirmation mismatch or invalid email, "
             "3 admin account (pass --allow-admin), 4 unexpected error, "
             "5 account changed during the prompt."
         ),

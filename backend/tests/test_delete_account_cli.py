@@ -42,10 +42,10 @@ async def test_erasure_deletes_the_account_by_id(db_session: AsyncSession) -> No
     assert not await exists(db_session, user_id)
 
 
-async def test_an_account_gone_since_the_prompt_is_not_found(db_session: AsyncSession) -> None:
+async def test_an_account_gone_since_the_prompt_is_reported_gone(db_session: AsyncSession) -> None:
     outcome = await erase_account(db_session, uuid.uuid4(), was_admin=False)
 
-    assert outcome.result is Result.NOT_FOUND
+    assert outcome.result is Result.GONE
 
 
 async def test_an_admin_is_refused_without_allow_admin(db_session: AsyncSession) -> None:
@@ -208,3 +208,26 @@ def test_main_exits_2_for_an_email_the_api_would_reject(
 ) -> None:
     assert _main(monkeypatch, cli_db, ["admin@x.local"], "admin@x.local") == 2
     assert "not a valid email address: " in capsys.readouterr().err
+
+
+def test_main_says_the_confirmed_account_is_gone_when_deleted_during_the_prompt(
+    cli_db: CliDb, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    email = _seed(cli_db)
+
+    async def remove() -> None:
+        async with cli_db.sessions() as session:
+            await session.execute(delete(User).where(User.email == email))
+            await session.commit()
+
+    def delete_then_answer(prompt: str = "") -> str:
+        asyncio.run(remove())
+        return email
+
+    monkeypatch.setattr("builtins.input", delete_then_answer)
+    monkeypatch.setattr(sys, "argv", ["delete_account.py", email])
+
+    assert delete_account.main() == 1
+    err = capsys.readouterr().err
+    assert "the account you confirmed no longer exists — nothing changed" in err
+    assert "no user with email" not in err

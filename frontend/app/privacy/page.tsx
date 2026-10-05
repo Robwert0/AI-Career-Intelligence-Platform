@@ -45,9 +45,12 @@ export default function PrivacyPage() {
             </li>
             <li>
               Server logs: the server&apos;s request logs record your IP address and the page or API
-              path requested and, for chat, your pseudonymous account id with usage figures (token
-              counts and response time). They are kept for security and troubleshooting and deleted
-              after 30 days.
+              path requested. For chat they also record your pseudonymous account id, the AI model
+              used, usage figures (token counts and response time) and technical details: whether
+              your message matched known prompt-injection phrasing (and which patterns), whether the
+              answer was refused or incomplete (with the search relevance score or the check that
+              failed), and, for a blocked answer, a short fingerprint and its length, never its
+              text. They are kept for security and troubleshooting and deleted after 30 days.
             </li>
           </ul>
         </Section>

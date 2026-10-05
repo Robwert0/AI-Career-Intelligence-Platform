@@ -34,6 +34,7 @@ class Result(enum.Enum):
     MISMATCH = "mismatch"
     EMAIL_EXISTS = "email_exists"
     CHANGED = "changed"
+    GONE = "gone"
 
 
 EXIT_CODES = {
@@ -47,6 +48,7 @@ EXIT_CODES = {
     Result.MISMATCH: 2,
     Result.EMAIL_EXISTS: 3,
     Result.CHANGED: 5,
+    Result.GONE: 1,
 }
 EXIT_INVALID_EMAIL = 2
 EXIT_UNEXPECTED = 4
@@ -92,7 +94,7 @@ async def grant_admin(
     # operator was typing is a different account and must not be promoted.
     user = await UserRepository(session).get_user_by_id(user_id)
     if user is None:
-        return Outcome(Result.NO_SUCH_USER)
+        return Outcome(Result.GONE)
     if user.is_admin != was_admin:
         return Outcome(Result.CHANGED, user.id)
     if (rejected := check_admin_password(password)) is Result.TOO_LONG:
@@ -189,6 +191,7 @@ def _report(outcome: Outcome, email: str, grant: bool) -> None:
             "an account with this email already exists — refusing to create an admin over it"
         ),
         Result.CHANGED: "the account changed while the password was being typed — nothing done",
+        Result.GONE: "the account you confirmed no longer exists — nothing changed",
     }
     if outcome.result in messages:
         logger.info("admin %s user_id=%s", outcome.result.value, outcome.user_id)
@@ -203,7 +206,8 @@ def main() -> int:
         epilog=(
             "Run from backend/ with DATABASE_URL set. --create is the normal way to make an admin. "
             "Granting asks for that account's password, which must be at least 16 characters. "
-            "Exit codes: 0 done, 1 no such user, 2 password or email rejected, "
+            "Exit codes: 0 done, 1 no such user (or deleted during the prompt), "
+            "2 password or email rejected, "
             "3 email already exists, 4 unexpected error, 5 account changed during the prompt."
         ),
     )
