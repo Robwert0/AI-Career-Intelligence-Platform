@@ -16,6 +16,10 @@ type CredentialsFormProps = {
 export const FIELD_CLASS =
   'border border-line bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-accent'
 
+// FIELD_CLASS with an opaque background, so the select stays readable in dark mode.
+export const SELECT_CLASS =
+  'border border-line bg-bg px-3 py-2 text-sm outline-none focus-visible:border-accent'
+
 export function CredentialsForm({
   submitLabel,
   passwordHint,

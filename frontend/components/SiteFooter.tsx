@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { cv } from '@/lib/cv'
 import { CONTAINER } from '@/lib/layout'
 import { getProject } from '@/lib/projects'
@@ -11,7 +12,15 @@ export function SiteFooter() {
       <p>
         © {new Date().getFullYear()} {cv.name}
       </p>
-      <p>Anonymous visit statistics via Umami.</p>
+      <p>
+        Anonymous visit statistics via Umami.{' · '}
+        <Link
+          href="/privacy"
+          className="underline decoration-line-strong underline-offset-4 hover:text-fg"
+        >
+          privacy
+        </Link>
+      </p>
       <p>
         Built with Next.js and FastAPI
         {source ? (

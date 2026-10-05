@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
-import { CredentialsForm, FIELD_CLASS } from '@/components/CredentialsForm'
+import { CredentialsForm, FIELD_CLASS, SELECT_CLASS } from '@/components/CredentialsForm'
 import { ROLE_OPTIONS, type UserRole } from '@/lib/roles'
 import { safeNextPath, withNext } from '@/lib/redirect'
 
@@ -48,7 +48,7 @@ function RegisterForm() {
           <select
             value={role}
             onChange={(event) => setRole(event.target.value as UserRole | '')}
-            className={FIELD_CLASS.replace('bg-transparent', 'bg-bg')}
+            className={SELECT_CLASS}
           >
             <option value="">prefer not to say</option>
             {ROLE_OPTIONS.map((option) => (
@@ -60,7 +60,12 @@ function RegisterForm() {
         </label>
 
         <p className="font-mono text-xs text-muted">
-          Your email, company, role, sign-up date and last visit are visible to Robert.
+          Your email, company, role, sign-up date and last visit are visible to Robert. Details in
+          the{' '}
+          <Link href="/privacy" className="text-accent underline underline-offset-4">
+            privacy notice
+          </Link>
+          .
         </p>
       </CredentialsForm>
 

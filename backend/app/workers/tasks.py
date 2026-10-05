@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from celery.exceptions import SoftTimeLimitExceeded
@@ -13,6 +14,7 @@ from app.ai.generation import Generator
 from app.ai.match.structured import ExtractionError
 from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
+from app.core.db import SessionLocal, engine
 from app.core.job_store import (
     TERMINAL,
     JobRecord,
@@ -24,6 +26,7 @@ from app.core.job_store import (
 from app.core.redis import create_redis
 from app.integrations.github import GitHubCache, GitHubClient
 from app.integrations.safe_fetch import SafeFetcher
+from app.repositories import UserRepository
 from app.schemas.match import AnalysisInput, JobIntakeRequest
 from app.services.analysis_service import analyse
 from app.services.analysis_sources import (
@@ -38,6 +41,7 @@ from app.services.analysis_sources import (
 )
 from app.services.candidate_evidence import CvReading, GitHubReading, read_cv, read_github
 from app.services.job_intake_service import IntakeError, run_job_intake
+from app.services.retention_service import RetentionService
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -371,3 +375,22 @@ async def forget_finished_inputs(store: JobStore, job_id: str) -> None:
 def run_analysis_task(analysis_id: str) -> None:
     run_job(analysis_id, _run_analysis, stage=None)
     asyncio.run(_with_store(lambda store: forget_finished_inputs(store, analysis_id)))
+
+
+async def _purge_inactive_accounts() -> int:
+    try:
+        async with SessionLocal() as session:
+            purged = await RetentionService(UserRepository(session)).purge_inactive(
+                datetime.now(UTC)
+            )
+            await session.commit()
+            return purged
+    finally:
+        # Each run gets a new event loop; a pooled asyncpg connection is bound to the old one.
+        await engine.dispose()
+
+
+@celery_app.task(name="accounts.purge_inactive")
+def purge_inactive_accounts() -> None:
+    purged = asyncio.run(_purge_inactive_accounts())
+    logger.info("purged %d inactive accounts", purged)

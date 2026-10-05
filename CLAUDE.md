@@ -251,12 +251,16 @@ cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 cd backend && python scripts/make_admin.py --create admin@your-private-domain
 # Grant (needs that account's 16+ char password) or --revoke admin on an existing account
 python scripts/make_admin.py you@example.com
+# Erasure request: delete one account (asks for the email again; admins need --allow-admin)
+python scripts/delete_account.py visitor@example.com
 
 # Worker (consumes every queue; the queues are `intake` and `analysis`)
 celery -A app.workers.celery_app worker --loglevel=info
 # To keep job intake responsive behind long analyses, run two workers instead:
 celery -A app.workers.celery_app worker -Q intake,celery -n intake@%h
 celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
+# Beat: schedules the daily purge of accounts inactive past ACCOUNT_RETENTION_DAYS (03:00 UTC)
+celery -A app.workers.celery_app beat --loglevel=info
 
 # Job Match Analyzer: calibrate the per-source gates (MATCH_PRESELECT_MIN_SIMILARITY[_GITHUB]),
 # then run the eval gate (both need labelled postings under docs/eval/calibration/)

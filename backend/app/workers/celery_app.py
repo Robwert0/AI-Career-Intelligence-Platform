@@ -1,6 +1,7 @@
 from typing import Any
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import setup_logging
 from kombu import Queue
 
@@ -30,6 +31,13 @@ def create_celery_app(broker_url: str) -> Celery:
         task_routes={
             "jobs.extract_job": {"queue": "intake"},
             "jobs.run_analysis": {"queue": "analysis"},
+            "accounts.purge_inactive": {"queue": "celery"},
+        },
+        beat_schedule={
+            "purge-inactive-accounts": {
+                "task": "accounts.purge_inactive",
+                "schedule": crontab(hour=3, minute=0),
+            },
         },
         # visibility_timeout: an unacked task is redelivered after this long. It must outlast
         # the longest task, or a slow analysis would be handed to the worker a second time.

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,6 +72,29 @@ class UserRepository:
             CursorResult[Any],
             await self._session.execute(
                 update(User).where(User.email == email).values(is_admin=value)
+            ),
+        )
+        return result.rowcount > 0
+
+    async def delete_inactive(self, cutoff: datetime) -> int:
+        result = cast(
+            CursorResult[Any],
+            await self._session.execute(
+                delete(User)
+                .where(
+                    func.coalesce(User.last_active_at, User.created_at) < cutoff,
+                    User.is_admin.is_(False),
+                )
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return result.rowcount
+
+    async def delete_by_email(self, email: str) -> bool:
+        result = cast(
+            CursorResult[Any],
+            await self._session.execute(
+                delete(User).where(User.email == email).execution_options(synchronize_session=False)
             ),
         )
         return result.rowcount > 0
