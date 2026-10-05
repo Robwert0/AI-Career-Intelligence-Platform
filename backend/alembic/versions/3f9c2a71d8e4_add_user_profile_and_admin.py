@@ -25,9 +25,7 @@ def upgrade() -> None:
         "users",
         sa.Column("is_admin", sa.Boolean(), server_default=sa.false(), nullable=False),
     )
-    op.add_column(
-        "users", sa.Column("last_active_at", sa.DateTime(timezone=True), nullable=True)
-    )
+    op.add_column("users", sa.Column("last_active_at", sa.DateTime(timezone=True), nullable=True))
     op.create_check_constraint(
         "ck_users_role",
         "users",
