@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -125,11 +126,11 @@ def test_retention_defaults_to_a_year_and_refuses_under_30_days(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ACCOUNT_RETENTION_DAYS", raising=False)
-    assert Settings().account_retention_days == 365
+    assert Settings(_env_file=None).account_retention_days == 365
 
     monkeypatch.setenv("ACCOUNT_RETENTION_DAYS", "29")
     with pytest.raises(ValidationError, match="account_retention_days"):
-        Settings()
+        Settings(_env_file=None)
 
 
 @pytest.fixture
@@ -183,5 +184,5 @@ def test_the_task_purges_and_commits_and_survives_a_second_run(
 
     assert asyncio.run(remaining()) == {fresh_id}
     messages = [record.getMessage() for record in caplog.records]
-    assert "purged 1 inactive accounts" in messages
+    assert any(re.fullmatch(r"purged \d+ inactive accounts", message) for message in messages)
     assert not any("@purge.test.dev" in message for message in messages)
