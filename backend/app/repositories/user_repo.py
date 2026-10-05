@@ -19,10 +19,18 @@ class UserRepository:
         result = await self._session.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
-    async def create_user(self, email: str, hashed_password: str) -> User:
+    async def create_user(
+        self,
+        email: str,
+        hashed_password: str,
+        company: str | None = None,
+        role: str | None = None,
+    ) -> User:
         user = User(
             email=email,
             hashed_password=hashed_password,
+            company=company,
+            role=role,
         )
         try:
             async with self._session.begin_nested():

@@ -62,6 +62,8 @@ class AuthService:
             user = await self._repo.create_user(
                 email=data.email,
                 hashed_password=hashed,
+                company=data.company,
+                role=data.role,
             )
         except EmailAlreadyExistsError:
             raise EmailAlreadyRegisteredError from None
