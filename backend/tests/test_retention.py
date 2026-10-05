@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -206,3 +207,26 @@ def test_the_task_purges_and_commits_and_survives_a_second_run(
     messages = [record.getMessage() for record in caplog.records]
     assert any(re.fullmatch(r"purged \d+ inactive accounts", message) for message in messages)
     assert not any("@purge.test.dev" in message for message in messages)
+
+
+def test_the_purge_count_is_logged_even_when_the_marker_write_fails(
+    committed_db: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caplog.set_level(logging.INFO, logger="app.workers.tasks")
+
+    class BrokenMarker:
+        def __init__(self, redis: object) -> None:
+            pass
+
+        async def record(self, at: datetime) -> None:
+            raise RedisConnectionError("redis down")
+
+    monkeypatch.setattr(tasks, "RetentionMarker", BrokenMarker)
+
+    with pytest.raises(RedisConnectionError):
+        purge_inactive_accounts()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(re.fullmatch(r"purged \d+ inactive accounts", message) for message in messages)

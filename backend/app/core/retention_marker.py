@@ -22,9 +22,10 @@ class RetentionMarker:
     async def last_purge_at(self) -> datetime | None:
         try:
             raw = await self._redis.get(self.key)
-        except RedisError as exc:
+            if raw is None:
+                return None
+            return datetime.fromisoformat(raw.decode() if isinstance(raw, bytes) else raw)
+        except (RedisError, ValueError) as exc:
+            # A broken marker must not take the admin page down with it.
             logger.warning("retention marker unreadable error_type=%s", type(exc).__name__)
             return None
-        if raw is None:
-            return None
-        return datetime.fromisoformat(raw.decode() if isinstance(raw, bytes) else raw)

@@ -57,3 +57,15 @@ async def test_an_unreachable_redis_reads_as_none_and_logs_only_the_error_type(
     assert [record.getMessage() for record in caplog.records] == [
         "retention marker unreadable error_type=ConnectionError"
     ]
+
+
+async def test_a_corrupt_value_reads_as_none_and_logs_only_the_error_type(
+    marker: RetentionMarker, redis_client: Redis, caplog: pytest.LogCaptureFixture
+) -> None:
+    await redis_client.set(marker.key, "not-a-timestamp")
+    caplog.set_level(logging.WARNING, logger="app.core.retention_marker")
+
+    assert await marker.last_purge_at() is None
+    assert [record.getMessage() for record in caplog.records] == [
+        "retention marker unreadable error_type=ValueError"
+    ]

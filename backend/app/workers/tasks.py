@@ -378,7 +378,7 @@ def run_analysis_task(analysis_id: str) -> None:
     asyncio.run(_with_store(lambda store: forget_finished_inputs(store, analysis_id)))
 
 
-async def _purge_inactive_accounts() -> int:
+async def _purge_inactive_accounts() -> None:
     now = datetime.now(UTC)
     try:
         async with SessionLocal() as session:
@@ -387,15 +387,15 @@ async def _purge_inactive_accounts() -> int:
     finally:
         # Each run gets a new event loop; a pooled asyncpg connection is bound to the old one.
         await engine.dispose()
+    # Logged before the marker write, so the deletions are on record even if Redis is down.
+    logger.info("purged %d inactive accounts", purged)
     redis = create_redis()
     try:
         await RetentionMarker(redis).record(now)
     finally:
         await redis.aclose()
-    return purged
 
 
 @celery_app.task(name="accounts.purge_inactive")
 def purge_inactive_accounts() -> None:
-    purged = asyncio.run(_purge_inactive_accounts())
-    logger.info("purged %d inactive accounts", purged)
+    asyncio.run(_purge_inactive_accounts())
