@@ -10,7 +10,7 @@ const PHASE_PRODUCTION_SERVER = 'phase-production-server'
 // No proxy.ts exists, so rewrites stream request bodies: a CV upload up to the server-configured
 // limit (MAX_UPLOAD_MB) is never buffered or truncated (proxyClientMaxBodySize only applies when
 // proxy.ts is present).
-const PROXIED_PREFIXES = ['auth', 'users', 'chat', 'match']
+const PROXIED_PREFIXES = ['auth', 'users', 'chat', 'match', 'admin']
 
 const isDevelopment = process.env.NODE_ENV !== 'production'
 
