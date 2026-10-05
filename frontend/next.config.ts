@@ -17,12 +17,19 @@ const UMAMI_SCRIPT_ORIGIN = 'https://cloud.umami.is'
 const UMAMI_COLLECT_ORIGINS = 'https://cloud.umami.is https://api-gateway.umami.dev'
 
 const isDevelopment = process.env.NODE_ENV !== 'production'
+const umamiEnabled = Boolean(process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID)
 
 // React needs eval() for dev-only debugging features and never uses it in production, so the
 // relaxation is dev-only. The strict production policy is the one verified against `next build`.
-const scriptSrc = isDevelopment
-  ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${UMAMI_SCRIPT_ORIGIN}`
-  : `script-src 'self' 'unsafe-inline' ${UMAMI_SCRIPT_ORIGIN}`
+const scriptSrc = [
+  "script-src 'self' 'unsafe-inline'",
+  ...(isDevelopment ? ["'unsafe-eval'"] : []),
+  ...(umamiEnabled ? [UMAMI_SCRIPT_ORIGIN] : []),
+].join(' ')
+
+const connectSrc = umamiEnabled
+  ? `connect-src 'self' ${UMAMI_COLLECT_ORIGINS}`
+  : "connect-src 'self'"
 
 const SECURITY_HEADERS = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -36,7 +43,7 @@ const SECURITY_HEADERS = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self' data:",
-      `connect-src 'self' ${UMAMI_COLLECT_ORIGINS}`,
+      connectSrc,
       "frame-ancestors 'none'",
       "base-uri 'none'",
       "form-action 'self'",
