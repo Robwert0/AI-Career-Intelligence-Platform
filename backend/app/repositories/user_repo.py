@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -43,3 +44,7 @@ class UserRepository:
 
     async def get_user_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
+
+    async def touch_last_active(self, user: User, at: datetime) -> None:
+        user.last_active_at = at
+        await self._session.flush()
