@@ -247,8 +247,10 @@ pytest -q
 # Ingest a CV into the chunks table (phase 4; run from backend/, needs DATABASE_URL)
 cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 
-# Grant (or --revoke) admin access; granting asks for that account's password (run from backend/)
-cd backend && python scripts/make_admin.py you@example.com
+# Create a dedicated admin (prompts for a 16+ char password; refuses an existing email; run from backend/)
+cd backend && python scripts/make_admin.py --create admin@your-private-domain
+# Grant (needs that account's 16+ char password) or --revoke admin on an existing account
+python scripts/make_admin.py you@example.com
 
 # Worker (consumes every queue; the queues are `intake` and `analysis`)
 celery -A app.workers.celery_app worker --loglevel=info
