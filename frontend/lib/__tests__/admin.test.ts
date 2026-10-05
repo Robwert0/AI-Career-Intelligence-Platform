@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatWhen, listUsers } from '../admin'
+import { type AdminUserRow, appendUnique, formatWhen, listUsers } from '../admin'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -27,5 +27,22 @@ describe('formatWhen', () => {
 
   it('formats an ISO time as a short date and time', () => {
     expect(formatWhen('2026-10-05T09:07:00Z')).toMatch(/2026/)
+  })
+})
+
+describe('appendUnique', () => {
+  const row = (id: string): AdminUserRow => ({
+    id,
+    email: `${id}@test.dev`,
+    company: null,
+    role: null,
+    created_at: '2026-10-05T09:07:00Z',
+    last_active_at: null,
+  })
+
+  it('drops rows already loaded and keeps the order of the rest', () => {
+    const merged = appendUnique([row('a'), row('b')], [row('b'), row('c'), row('d')])
+
+    expect(merged.map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
   })
 })

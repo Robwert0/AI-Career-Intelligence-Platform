@@ -29,3 +29,9 @@ export function formatWhen(iso: string | null): string {
   if (iso === null) return 'never'
   return new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
 }
+
+// Offset paging over a newest-first list repeats a row whenever someone signs up between pages.
+export function appendUnique(existing: AdminUserRow[], next: AdminUserRow[]): AdminUserRow[] {
+  const seen = new Set(existing.map((row) => row.id))
+  return [...existing, ...next.filter((row) => !seen.has(row.id))]
+}

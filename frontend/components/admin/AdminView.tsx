@@ -3,11 +3,17 @@
 import { notFound } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
-import { type AdminUserRow, type AdminUsersPage, formatWhen, listUsers } from '@/lib/admin'
-import { authErrorMessage } from '@/lib/messages'
+import {
+  type AdminUserRow,
+  type AdminUsersPage,
+  appendUnique,
+  formatWhen,
+  listUsers,
+} from '@/lib/admin'
 import { ROLE_OPTIONS, roleLabel } from '@/lib/roles'
 
 const DASHBOARD_URL = process.env.NEXT_PUBLIC_UMAMI_DASHBOARD_URL
+const LOAD_FAILED = 'Could not load users. Try again.'
 
 type State =
   | { kind: 'loading' }
@@ -19,6 +25,7 @@ export function AdminView() {
   const { sessionExpired } = useAuth()
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [loadingMore, setLoadingMore] = useState(false)
+  const [moreError, setMoreError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -27,7 +34,7 @@ export function AdminView() {
       if (result.ok) setState({ kind: 'ready', page: result.data, rows: result.data.items })
       else if (result.status === 404) setState({ kind: 'missing' })
       else if (result.status === 401) sessionExpired()
-      else setState({ kind: 'error', message: authErrorMessage(result) })
+      else setState({ kind: 'error', message: LOAD_FAILED })
     })
     return () => {
       active = false
@@ -39,12 +46,21 @@ export function AdminView() {
   async function loadMore() {
     if (state.kind !== 'ready' || loadingMore) return
     setLoadingMore(true)
+    setMoreError(null)
     const result = await listUsers(state.rows.length)
     setLoadingMore(false)
     if (result.ok) {
-      setState({ kind: 'ready', page: result.data, rows: [...state.rows, ...result.data.items] })
+      setState({
+        kind: 'ready',
+        page: result.data,
+        rows: appendUnique(state.rows, result.data.items),
+      })
+    } else if (result.status === 404) {
+      setState({ kind: 'missing' })
+    } else if (result.status === 401) {
+      sessionExpired()
     } else {
-      setState({ kind: 'error', message: authErrorMessage(result) })
+      setMoreError(LOAD_FAILED)
     }
   }
 
@@ -113,14 +129,21 @@ export function AdminView() {
           </div>
 
           {state.rows.length < state.page.total ? (
-            <button
-              type="button"
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="border border-fg px-3 py-2 font-mono text-sm disabled:opacity-40"
-            >
-              {loadingMore ? 'loading…' : 'load more'}
-            </button>
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="border border-fg px-3 py-2 font-mono text-sm disabled:opacity-40"
+              >
+                {loadingMore ? 'loading…' : 'load more'}
+              </button>
+              {moreError ? (
+                <p role="alert" className="font-mono text-xs text-danger">
+                  {moreError}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </>
       ) : null}
