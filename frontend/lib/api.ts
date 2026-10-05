@@ -1,7 +1,15 @@
+import type { UserRole } from './roles'
 import { getAccessToken, refreshAccessToken } from './auth'
 import { ApiResult, request } from './http'
 
-export type UserRead = { id: string; email: string; created_at: string }
+export type UserRead = {
+  id: string
+  email: string
+  created_at: string
+  company: string | null
+  role: UserRole | null
+  is_admin: boolean
+}
 export type Source = { section: string; content: string }
 export type ChatResponse = { answer: string; refused: boolean; sources: Source[] }
 

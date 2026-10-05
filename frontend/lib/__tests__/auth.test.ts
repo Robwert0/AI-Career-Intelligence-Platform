@@ -5,6 +5,7 @@ import {
   login,
   logout,
   refreshAccessToken,
+  register,
   setAccessToken,
 } from '../auth'
 
@@ -229,5 +230,32 @@ describe('logout racing an in-flight refresh', () => {
     await refreshing
 
     expect(getAccessToken()).toBeNull()
+  })
+})
+
+describe('register', () => {
+  it('sends company and role when given', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond(201, {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await register('a@b.dev', 'supersecret1', { company: 'Acme', role: 'recruiter' })
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body).toEqual({
+      email: 'a@b.dev',
+      password: 'supersecret1',
+      company: 'Acme',
+      role: 'recruiter',
+    })
+  })
+
+  it('omits empty profile fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond(201, {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await register('a@b.dev', 'supersecret1', { company: '  ' })
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body).toEqual({ email: 'a@b.dev', password: 'supersecret1' })
   })
 })

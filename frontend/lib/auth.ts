@@ -1,4 +1,5 @@
 import { ApiResult, request } from './http'
+import type { UserRole } from './roles'
 
 type TokenResponse = { access_token: string }
 
@@ -57,10 +58,22 @@ export async function login(email: string, password: string): Promise<ApiResult<
   return result
 }
 
-export function register(email: string, password: string): Promise<ApiResult<unknown>> {
+export type SignUpProfile = { company?: string; role?: UserRole }
+
+export function register(
+  email: string,
+  password: string,
+  profile: SignUpProfile = {},
+): Promise<ApiResult<unknown>> {
+  const company = profile.company?.trim()
   return request('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({
+      email,
+      password,
+      ...(company ? { company } : {}),
+      ...(profile.role ? { role: profile.role } : {}),
+    }),
   })
 }
 
