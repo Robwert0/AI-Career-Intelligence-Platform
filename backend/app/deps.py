@@ -78,7 +78,7 @@ async def get_current_user(
 
 
 async def get_current_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
-    # 404, not 403: a non-admin should not learn this endpoint exists.
+    # 404, not 403: don't confirm to a signed-in non-admin that they lack the flag.
     if not user.is_admin:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     return user

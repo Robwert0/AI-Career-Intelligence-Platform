@@ -78,6 +78,16 @@ async def test_admin_sees_users_newest_first_with_totals(
     }
 
 
+async def test_the_user_list_is_not_cached(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _user(db_session, "robert@test.dev", is_admin=True)
+
+    response = await client.get("/admin/users", headers=_auth(admin))
+
+    assert response.headers["cache-control"] == "no-store"
+
+
 async def test_paging_slices_items_but_not_totals(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

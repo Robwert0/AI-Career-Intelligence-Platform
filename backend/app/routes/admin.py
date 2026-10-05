@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.core import policies
 from app.deps import get_admin_service, get_current_admin, rate_limit
@@ -20,8 +20,10 @@ router = APIRouter()
     ],
 )
 async def list_users(
+    response: Response,
     service: Annotated[AdminService, Depends(get_admin_service)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AdminUsersPage:
+    response.headers["Cache-Control"] = "no-store"
     return await service.list_users(limit, offset)
