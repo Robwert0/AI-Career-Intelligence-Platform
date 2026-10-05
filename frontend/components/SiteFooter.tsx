@@ -11,6 +11,7 @@ export function SiteFooter() {
       <p>
         © {new Date().getFullYear()} {cv.name}
       </p>
+      <p>Anonymous visit statistics via Umami.</p>
       <p>
         Built with Next.js and FastAPI
         {source ? (
