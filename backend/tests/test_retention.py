@@ -13,9 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.core.config import Settings, settings
+from app.core.redis import create_redis
+from app.core.retention_marker import RetentionMarker
 from app.models import RefreshToken, User
 from app.repositories import UserRepository
 from app.services.retention_service import RetentionService
+from app.workers import tasks
 from app.workers.tasks import purge_inactive_accounts
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
@@ -148,9 +151,15 @@ def committed_db() -> Iterator[async_sessionmaker[AsyncSession]]:
 
 
 def test_the_task_purges_and_commits_and_survives_a_second_run(
-    committed_db: async_sessionmaker[AsyncSession], caplog: pytest.LogCaptureFixture
+    committed_db: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     caplog.set_level(logging.INFO, logger="app.workers.tasks")
+    marker_key = f"test:{uuid.uuid4()}"
+    monkeypatch.setattr(
+        tasks, "RetentionMarker", lambda redis: RetentionMarker(redis, key=marker_key)
+    )
     real_now = datetime.now(UTC)
 
     async def seed() -> tuple[uuid.UUID, uuid.UUID]:
@@ -181,6 +190,19 @@ def test_the_task_purges_and_commits_and_survives_a_second_run(
             return await existing_ids(session, [old_id, fresh_id])
 
     assert asyncio.run(remaining()) == {fresh_id}
+
+    async def last_purge() -> datetime | None:
+        redis = create_redis()
+        try:
+            at = await RetentionMarker(redis, key=marker_key).last_purge_at()
+            await redis.delete(marker_key)
+            return at
+        finally:
+            await redis.aclose()
+
+    recorded = asyncio.run(last_purge())
+    assert recorded is not None
+    assert real_now <= recorded <= datetime.now(UTC)
     messages = [record.getMessage() for record in caplog.records]
     assert any(re.fullmatch(r"purged \d+ inactive accounts", message) for message in messages)
     assert not any("@purge.test.dev" in message for message in messages)

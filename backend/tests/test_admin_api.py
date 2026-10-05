@@ -1,13 +1,33 @@
+import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest_asyncio
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.policies import ADMIN_IP, ADMIN_USER
+from app.core.redis import create_redis
+from app.core.retention_marker import RetentionMarker
 from app.core.security import create_access_token
+from app.deps import get_retention_marker
+from app.main import app
 from app.models import User
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def marker() -> AsyncGenerator[RetentionMarker]:
+    # The client fixture skips the lifespan, so app.state.redis does not exist in these tests.
+    redis: Redis = create_redis()
+    key = f"test:{uuid.uuid4()}"
+    marker = RetentionMarker(redis, key=key)
+    app.dependency_overrides[get_retention_marker] = lambda: marker
+    yield marker
+    await redis.delete(key)
+    await redis.aclose()
 
 
 async def _user(
@@ -149,3 +169,40 @@ async def test_a_rate_limited_non_admin_still_gets_404(
     ]
 
     assert statuses == [404] * attempts
+
+
+async def test_the_last_purge_time_is_reported(
+    client: httpx.AsyncClient, db_session: AsyncSession, marker: RetentionMarker
+) -> None:
+    admin = await _user(db_session, "robert@test.dev", is_admin=True)
+    await marker.record(T0)
+
+    response = await client.get("/admin/users", headers=_auth(admin))
+
+    assert datetime.fromisoformat(response.json()["last_purge_at"]) == T0
+
+
+async def test_no_purge_yet_is_reported_as_null(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _user(db_session, "robert@test.dev", is_admin=True)
+
+    response = await client.get("/admin/users", headers=_auth(admin))
+
+    assert response.status_code == 200
+    assert response.json()["last_purge_at"] is None
+
+
+async def test_an_unreachable_marker_still_serves_the_page(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _user(db_session, "robert@test.dev", is_admin=True)
+    dead = Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.5)
+    app.dependency_overrides[get_retention_marker] = lambda: RetentionMarker(dead)
+    try:
+        response = await client.get("/admin/users", headers=_auth(admin))
+    finally:
+        await dead.aclose()
+
+    assert response.status_code == 200
+    assert response.json()["last_purge_at"] is None

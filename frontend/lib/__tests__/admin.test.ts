@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { type AdminUserRow, appendUnique, formatWhen, listUsers } from '../admin'
+import { type AdminUserRow, appendUnique, formatWhen, isPurgeStale, listUsers } from '../admin'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -44,5 +44,26 @@ describe('appendUnique', () => {
     const merged = appendUnique([row('a'), row('b')], [row('b'), row('c'), row('d')])
 
     expect(merged.map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
+describe('isPurgeStale', () => {
+  const now = new Date('2026-10-05T12:00:00Z')
+  const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString()
+
+  it('treats a purge that never ran as stale', () => {
+    expect(isPurgeStale(null, now)).toBe(true)
+  })
+
+  it('treats a purge 47 hours ago as fresh', () => {
+    expect(isPurgeStale(hoursAgo(47), now)).toBe(false)
+  })
+
+  it('treats a purge 49 hours ago as stale', () => {
+    expect(isPurgeStale(hoursAgo(49), now)).toBe(true)
+  })
+
+  it('treats an unparseable time as stale', () => {
+    expect(isPurgeStale('not a date', now)).toBe(true)
   })
 })

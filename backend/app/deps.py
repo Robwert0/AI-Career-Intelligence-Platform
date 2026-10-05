@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
 from app.core.rate_limiter import Limiter, Policy, Scope
+from app.core.retention_marker import RetentionMarker
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
 from app.services import AuthService, IngestionService
@@ -84,8 +85,15 @@ async def get_current_admin(user: Annotated[User, Depends(get_current_user)]) ->
     return user
 
 
-def get_admin_service(repo: Annotated[UserRepository, Depends(get_user_repo)]) -> AdminService:
-    return AdminService(repo)
+def get_retention_marker(request: Request) -> RetentionMarker:
+    return RetentionMarker(request.app.state.redis)
+
+
+def get_admin_service(
+    repo: Annotated[UserRepository, Depends(get_user_repo)],
+    marker: Annotated[RetentionMarker, Depends(get_retention_marker)],
+) -> AdminService:
+    return AdminService(repo, marker)
 
 
 def get_chunk_repo(

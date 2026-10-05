@@ -19,6 +19,7 @@ export type AdminUsersPage = {
   by_role: Record<UserRole | 'unspecified', number>
   limit: number
   offset: number
+  last_purge_at: string | null
 }
 
 export function listUsers(offset: number): Promise<ApiResult<AdminUsersPage>> {
@@ -28,6 +29,15 @@ export function listUsers(offset: number): Promise<ApiResult<AdminUsersPage>> {
 export function formatWhen(iso: string | null): string {
   if (iso === null) return 'never'
   return new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+// The purge runs daily, so two missed runs mean the Celery beat process has stopped.
+const PURGE_STALE_MS = 48 * 60 * 60 * 1000
+
+export function isPurgeStale(iso: string | null, now: Date): boolean {
+  if (iso === null) return true
+  const age = now.getTime() - new Date(iso).getTime()
+  return !(age <= PURGE_STALE_MS)
 }
 
 // Offset paging over a newest-first list repeats a row whenever someone signs up between pages.

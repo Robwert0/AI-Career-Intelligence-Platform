@@ -23,3 +23,4 @@ class AdminUsersPage(BaseModel):
     by_role: dict[str, int]
     limit: int
     offset: int
+    last_purge_at: datetime | None

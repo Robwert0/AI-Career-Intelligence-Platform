@@ -8,6 +8,7 @@ import {
   type AdminUsersPage,
   appendUnique,
   formatWhen,
+  isPurgeStale,
   listUsers,
 } from '@/lib/admin'
 import { ROLE_OPTIONS, roleLabel } from '@/lib/roles'
@@ -19,7 +20,7 @@ type State =
   | { kind: 'loading' }
   | { kind: 'missing' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; page: AdminUsersPage; rows: AdminUserRow[] }
+  | { kind: 'ready'; page: AdminUsersPage; rows: AdminUserRow[]; purgeStale: boolean }
 
 export function AdminView() {
   const { sessionExpired } = useAuth()
@@ -31,10 +32,20 @@ export function AdminView() {
     let active = true
     listUsers(0).then((result) => {
       if (!active) return
-      if (result.ok) setState({ kind: 'ready', page: result.data, rows: result.data.items })
-      else if (result.status === 404) setState({ kind: 'missing' })
-      else if (result.status === 401) sessionExpired()
-      else setState({ kind: 'error', message: LOAD_FAILED })
+      if (result.ok) {
+        setState({
+          kind: 'ready',
+          page: result.data,
+          rows: result.data.items,
+          purgeStale: isPurgeStale(result.data.last_purge_at, new Date()),
+        })
+      } else if (result.status === 404) {
+        setState({ kind: 'missing' })
+      } else if (result.status === 401) {
+        sessionExpired()
+      } else {
+        setState({ kind: 'error', message: LOAD_FAILED })
+      }
     })
     return () => {
       active = false
@@ -54,6 +65,7 @@ export function AdminView() {
         kind: 'ready',
         page: result.data,
         rows: appendUnique(state.rows, result.data.items),
+        purgeStale: isPurgeStale(result.data.last_purge_at, new Date()),
       })
     } else if (result.status === 404) {
       setState({ kind: 'missing' })
@@ -79,6 +91,13 @@ export function AdminView() {
           </a>
         ) : null}
       </div>
+
+      {state.kind === 'ready' ? (
+        <p className={`font-mono text-xs ${state.purgeStale ? 'text-danger' : 'text-muted'}`}>
+          retention purge: {formatWhen(state.page.last_purge_at)}
+          {state.purgeStale ? ' — check the Celery beat process' : null}
+        </p>
+      ) : null}
 
       {state.kind === 'loading' ? <p className="font-mono text-xs text-muted">loading…</p> : null}
       {state.kind === 'error' ? (

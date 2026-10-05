@@ -24,6 +24,7 @@ from app.core.job_store import (
     queue_is_stale,
 )
 from app.core.redis import create_redis
+from app.core.retention_marker import RetentionMarker
 from app.integrations.github import GitHubCache, GitHubClient
 from app.integrations.safe_fetch import SafeFetcher
 from app.repositories import UserRepository
@@ -378,16 +379,20 @@ def run_analysis_task(analysis_id: str) -> None:
 
 
 async def _purge_inactive_accounts() -> int:
+    now = datetime.now(UTC)
     try:
         async with SessionLocal() as session:
-            purged = await RetentionService(UserRepository(session)).purge_inactive(
-                datetime.now(UTC)
-            )
+            purged = await RetentionService(UserRepository(session)).purge_inactive(now)
             await session.commit()
-            return purged
     finally:
         # Each run gets a new event loop; a pooled asyncpg connection is bound to the old one.
         await engine.dispose()
+    redis = create_redis()
+    try:
+        await RetentionMarker(redis).record(now)
+    finally:
+        await redis.aclose()
+    return purged
 
 
 @celery_app.task(name="accounts.purge_inactive")
