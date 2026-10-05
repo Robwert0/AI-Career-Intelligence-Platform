@@ -36,6 +36,22 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
+        <Section title="for every visitor">
+          <ul className="list-disc space-y-1.5 pl-5 leading-relaxed marker:text-line">
+            <li>
+              Rate limiting: your IP address is held briefly in Redis to protect the site from
+              abuse, and expires automatically within about an hour. If you are signed in, your
+              account id is used the same way.
+            </li>
+            <li>
+              Server logs: the server&apos;s request logs record your IP address and the page or API
+              path requested and, for chat, your pseudonymous account id with usage figures (token
+              counts and response time). They are kept for security and troubleshooting and deleted
+              after 30 days.
+            </li>
+          </ul>
+        </Section>
+
         <Section title="if you create an account">
           <ul className="list-disc space-y-1.5 pl-5 leading-relaxed marker:text-line">
             <li>your email address</li>
@@ -50,14 +66,21 @@ export default function PrivacyPage() {
             </li>
           </ul>
           <p className="leading-relaxed">
+            A sign-in cookie (httpOnly, so page scripts cannot read it) holds your session token so
+            you stay signed in. It is needed for sign-in, is not used for tracking, lasts up to 7
+            days from your last sign-in or session refresh, and is cleared when you sign out.
+          </p>
+          <p className="leading-relaxed">
             Robert&apos;s admin page shows your email, company, role, sign-up date and last visit.
             It never shows your password hash or session records.
           </p>
         </Section>
 
-        <Section title="why">
+        <Section title="why, and on what basis">
           <p className="leading-relaxed">
-            So Robert knows who viewed his CV. Company and role are optional.
+            Account data and server logs are processed on the basis of legitimate interest: running
+            and securing the site, and letting Robert know who viewed his CV. The company and role
+            are optional; you give them with your consent and can have them removed on request.
           </p>
         </Section>
 
@@ -85,7 +108,7 @@ export default function PrivacyPage() {
         <Section title="your rights">
           <p className="leading-relaxed">
             Email {contact} to see or delete your data. Deletion requests are handled within 30
-            days.
+            days. You can also complain to the data protection authority in your country.
           </p>
         </Section>
       </main>
