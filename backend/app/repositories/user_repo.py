@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,3 +50,28 @@ class UserRepository:
     async def touch_last_active(self, user: User, at: datetime) -> None:
         user.last_active_at = at
         await self._session.flush()
+
+    async def list_users(self, limit: int, offset: int) -> list[User]:
+        result = await self._session.execute(
+            select(User)
+            .order_by(User.created_at.desc(), User.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars())
+
+    async def count_users(self) -> int:
+        return await self._session.scalar(select(func.count()).select_from(User)) or 0
+
+    async def count_by_role(self) -> dict[str | None, int]:
+        result = await self._session.execute(select(User.role, func.count()).group_by(User.role))
+        return {role: count for role, count in result.tuples()}
+
+    async def set_admin(self, email: str, value: bool) -> bool:
+        result = cast(
+            CursorResult[Any],
+            await self._session.execute(
+                update(User).where(User.email == email).values(is_admin=value)
+            ),
+        )
+        return result.rowcount > 0

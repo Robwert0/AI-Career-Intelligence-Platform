@@ -13,6 +13,7 @@ from app.core.log_config import configure_logging
 from app.core.rate_limiter import TokenBucketLimiter
 from app.core.redis import create_redis
 from app.deps import verify_trusted_origin
+from app.routes.admin import router as admin_router
 from app.routes.auth import router as auth_router
 from app.routes.chat import router as chat_router
 from app.routes.health import router as health_router
@@ -51,6 +52,7 @@ app.include_router(auth_router, prefix="/auth")
 app.include_router(chat_router, prefix="/chat")
 app.include_router(users_router, prefix="/users")
 app.include_router(match_router, prefix="/match")
+app.include_router(admin_router, prefix="/admin")
 
 _REFLECTED_KEYS = frozenset({"input", "ctx"})
 
