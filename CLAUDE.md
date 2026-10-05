@@ -247,6 +247,9 @@ pytest -q
 # Ingest a CV into the chunks table (phase 4; run from backend/, needs DATABASE_URL)
 cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 
+# Grant (or --revoke) admin access to an existing account (run from backend/)
+cd backend && python scripts/make_admin.py you@example.com
+
 # Worker (consumes every queue; the queues are `intake` and `analysis`)
 celery -A app.workers.celery_app worker --loglevel=info
 # To keep job intake responsive behind long analyses, run two workers instead:
