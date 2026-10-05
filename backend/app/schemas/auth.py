@@ -1,3 +1,4 @@
+import unicodedata
 import uuid
 from datetime import datetime
 from typing import Annotated, Literal
@@ -21,8 +22,20 @@ def _blank_to_none(v: str | None) -> str | None:
     return v or None
 
 
+def _no_control_or_format_chars(v: str) -> str:
+    # Cf covers bidi overrides and zero-width characters that can disguise a name in the admin list.
+    if any(unicodedata.category(ch) in ("Cc", "Cf") for ch in v):
+        raise ValueError("company must not contain control or invisible formatting characters")
+    return v
+
+
 Company = Annotated[
-    Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None,
+    Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, max_length=100),
+        AfterValidator(_no_control_or_format_chars),
+    ]
+    | None,
     AfterValidator(_blank_to_none),
 ]
 

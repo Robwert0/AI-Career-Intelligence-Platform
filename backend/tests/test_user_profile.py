@@ -79,6 +79,22 @@ async def test_a_company_over_100_characters_is_rejected(client: httpx.AsyncClie
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("company", ["Acme\nCorp", "Ac\u202eme", "Ac\u200bme"])
+async def test_a_company_with_control_or_invisible_characters_is_rejected(
+    client: httpx.AsyncClient, company: str
+) -> None:
+    response = await client.post("/auth/register", json=_body(company=company))
+
+    assert response.status_code == 422
+
+
+async def test_a_company_with_ordinary_punctuation_is_accepted(client: httpx.AsyncClient) -> None:
+    response = await client.post("/auth/register", json=_body(company="Acme GmbH & Co."))
+
+    assert response.status_code == 201
+    assert response.json()["company"] == "Acme GmbH & Co."
+
+
 async def test_a_forged_admin_flag_is_ignored(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
