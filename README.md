@@ -32,6 +32,9 @@ scalable and explainable** before it counts as done.
   retrieved documents, special-token escaping, and an output guard that blocks prompt leaks
 
 **Job Match Analyzer**
+- A public sample report at `/match/sample` (fictional candidate and job, no account, no AI call)
+  shows the real report before sign-up; `backend/tests/test_sample_report.py` proves its score,
+  breakdown and coverage are exactly what the scoring code computes from its statuses
 - Add a job posting (a URL our server fetches, or pasted text) and a CV (PDF/DOCX upload, or
   pasted text) and/or a public GitHub profile; review and edit the extracted requirements before
   analysing

@@ -1,0 +1,275 @@
+{
+  "score": 65,
+  "refusal": null,
+  "summary": {
+    "strongest": [
+      "4+ years building backend services in Python",
+      "Designing and operating PostgreSQL databases",
+      "Building and documenting REST APIs"
+    ],
+    "gaps": ["Participating in an on-call rotation"]
+  },
+  "breakdown": [
+    {
+      "category": "required",
+      "weight": 70,
+      "effective_weight": 70.0,
+      "score": 0.667,
+      "points": 46.7
+    },
+    {
+      "category": "preferred",
+      "weight": 20,
+      "effective_weight": 20.0,
+      "score": 0.5,
+      "points": 10.0
+    },
+    {
+      "category": "applied_evidence",
+      "weight": 10,
+      "effective_weight": 10.0,
+      "score": 0.8,
+      "points": 8.0
+    }
+  ],
+  "coverage": {
+    "level": "high",
+    "cv": "read",
+    "github": {
+      "status": "read",
+      "inspected_repos": 6,
+      "public_non_fork_repos": 9,
+      "readmes_found": 4
+    },
+    "requirements_with_evidence": 0.778,
+    "limitations": [
+      "GitHub shows public repositories only; professional work is often private",
+      "GitHub was inspected via metadata and READMEs; no code was reviewed",
+      "Requirements about personal characteristics or work authorisation were not assessed"
+    ]
+  },
+  "requirements": [
+    {
+      "id": "req:required:0",
+      "text": "4+ years building backend services in Python",
+      "importance": "required",
+      "status": "demonstrated",
+      "rationale": "Five years of Python services at Marrowby Health, plus the billing services at Tallow & Finch.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:0",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Marrowby Health",
+          "text": "Built and ran Python services on PostgreSQL for appointment booking, including schema changes, query tuning and zero-downtime migrations, over 5 years.",
+          "url": null
+        },
+        {
+          "id": "cv:experience:1",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Tallow & Finch",
+          "text": "Moved order events onto RabbitMQ and added Prometheus metrics to the billing services.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:1",
+      "text": "Designing and operating PostgreSQL databases",
+      "importance": "required",
+      "status": "demonstrated",
+      "rationale": "Schema changes, query tuning and zero-downtime migrations on PostgreSQL in production.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:0",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Marrowby Health",
+          "text": "Built and ran Python services on PostgreSQL for appointment booking, including schema changes, query tuning and zero-downtime migrations, over 5 years.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:2",
+      "text": "Building and documenting REST APIs",
+      "importance": "required",
+      "status": "demonstrated",
+      "rationale": "A FastAPI REST API with an OpenAPI spec, described on the CV and public on GitHub.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:project:0",
+          "source": "cv",
+          "kind": "project",
+          "section_label": "Projects · Parcel Tracker",
+          "text": "Parcel Tracker: a FastAPI REST API with an OpenAPI spec, a pytest suite and a Docker setup.",
+          "url": null
+        },
+        {
+          "id": "gh:repo:parcel-tracker",
+          "source": "github",
+          "kind": "repo",
+          "section_label": "GitHub · parcel-tracker",
+          "text": "parcel-tracker: REST API for tracking parcels. Languages: Python 94%, Dockerfile 6%. Topics: fastapi, rest-api. Last pushed 2026-08. README: Endpoints, OpenAPI docs and a pytest suite.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:3",
+      "text": "Running services on Kubernetes in production",
+      "importance": "required",
+      "status": "partial",
+      "rationale": "Kubernetes is listed for staging deployments only; no production use is described.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:skills:0",
+          "source": "cv",
+          "kind": "skill_list",
+          "section_label": "Skills",
+          "text": "Python, FastAPI, PostgreSQL, Redis, RabbitMQ, Docker, Kubernetes (staging deployments), Prometheus",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:4",
+      "text": "Observability: metrics, tracing and alerting",
+      "importance": "required",
+      "status": "partial",
+      "rationale": "Added Prometheus metrics to the billing services; tracing and alerting are not mentioned.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:1",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Tallow & Finch",
+          "text": "Moved order events onto RabbitMQ and added Prometheus metrics to the billing services.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:required:5",
+      "text": "Participating in an on-call rotation",
+      "importance": "required",
+      "status": "not_demonstrated",
+      "rationale": "Nothing in the CV or the inspected repositories mentions on-call or incident response.",
+      "hard_gap": false,
+      "evidence": []
+    },
+    {
+      "id": "req:required:6",
+      "text": "Right to work in the UK",
+      "importance": "required",
+      "status": "not_assessed",
+      "rationale": "This concerns a personal characteristic or work authorisation, so it was not assessed. Confirm it yourself.",
+      "hard_gap": false,
+      "evidence": []
+    },
+    {
+      "id": "req:preferred:0",
+      "text": "Event-driven systems with Kafka or RabbitMQ",
+      "importance": "preferred",
+      "status": "demonstrated",
+      "rationale": "Moved the billing services' order events onto RabbitMQ at Tallow & Finch.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "cv:experience:1",
+          "source": "cv",
+          "kind": "work",
+          "section_label": "Experience · Tallow & Finch",
+          "text": "Moved order events onto RabbitMQ and added Prometheus metrics to the billing services.",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "req:preferred:1",
+      "text": "Experience with Go",
+      "importance": "preferred",
+      "status": "not_demonstrated",
+      "rationale": "Go does not appear in the CV, the skills list or the inspected repositories.",
+      "hard_gap": false,
+      "evidence": []
+    },
+    {
+      "id": "req:preferred:2",
+      "text": "Infrastructure as code with Terraform",
+      "importance": "preferred",
+      "status": "partial",
+      "rationale": "A personal Terraform repository; no use at work is described.",
+      "hard_gap": false,
+      "evidence": [
+        {
+          "id": "gh:repo:infra-sandbox",
+          "source": "github",
+          "kind": "repo",
+          "section_label": "GitHub · infra-sandbox",
+          "text": "infra-sandbox: Terraform experiments for a personal cloud account. Languages: HCL 100%. Last pushed 2026-05.",
+          "url": null
+        }
+      ]
+    }
+  ],
+  "recommendations": {
+    "immediate": [
+      {
+        "requirement_id": "req:required:3",
+        "title": "Say where your Kubernetes work ran",
+        "detail": "If any of your Kubernetes work served real users, say so and name what you ran. If it was staging only, say that plainly rather than leaving it to be guessed."
+      },
+      {
+        "requirement_id": "req:required:4",
+        "title": "Name the alerting and tracing you have used",
+        "detail": "Your CV mentions Prometheus metrics. If you also set up alerts or traces, add them to the same line, since the posting asks for all three."
+      },
+      {
+        "requirement_id": "req:required:5",
+        "title": "Mention any incident or on-call work",
+        "detail": "If you have handled production incidents, even informally, add one line on what you did. If you have not, expect the topic to come up in interviews."
+      }
+    ],
+    "longer_term": [
+      {
+        "requirement_id": "req:preferred:1",
+        "title": "Build a small service in Go",
+        "detail": "A small public Go service with tests and a README would give a reviewer something concrete to look at."
+      },
+      {
+        "requirement_id": "req:preferred:2",
+        "title": "Use Terraform on something that runs",
+        "detail": "Extend infra-sandbox to deploy one of your services, and describe what it provisions in the README."
+      }
+    ]
+  },
+  "rewrites": [
+    {
+      "evidence_id": "cv:experience:0",
+      "before": "Built and ran Python services on PostgreSQL for appointment booking, including schema changes, query tuning and zero-downtime migrations, over 5 years.",
+      "after": "Over 5 years, built and ran the Python services behind appointment booking on PostgreSQL, including schema changes, query tuning and zero-downtime migrations.",
+      "questions": [
+        "Roughly how many bookings or users did these services handle?",
+        "Did a migration or tuning change have a measurable effect, such as faster pages or less downtime?"
+      ]
+    },
+    {
+      "evidence_id": "cv:experience:1",
+      "before": "Moved order events onto RabbitMQ and added Prometheus metrics to the billing services.",
+      "after": "Moved the billing services' order events onto RabbitMQ and instrumented them with Prometheus metrics.",
+      "questions": [
+        "What changed after the move: fewer failed orders, faster processing, something else?",
+        "Did you also set up alerts on those metrics?"
+      ]
+    }
+  ],
+  "disclaimer": "This is an alignment estimate from the evidence you supplied. It is not a hiring probability or an employer's ATS score.",
+  "model": "sample data"
+}

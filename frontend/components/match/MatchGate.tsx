@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { useAuth } from '@/components/AuthProvider'
+import { MATCH_SAMPLE_PATH } from '@/lib/nav'
 import { MatchAnalyzer } from './MatchAnalyzer'
+import { SECONDARY_BUTTON } from './styles'
 import { ToolIntro } from './ToolIntro'
 
 export function MatchGate() {
@@ -16,6 +18,21 @@ export function MatchGate() {
       ) : (
         <SignInPrompt expired={exitReason === 'expired'} />
       )}
+      <SamplePrompt />
+    </div>
+  )
+}
+
+function SamplePrompt() {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <p className="text-sm text-muted">
+        Not ready to sign up? See a full report for a fictional candidate and job first. No account
+        needed.
+      </p>
+      <Link href={MATCH_SAMPLE_PATH} className={`${SECONDARY_BUTTON} shrink-0 text-center`}>
+        View sample analysis
+      </Link>
     </div>
   )
 }
