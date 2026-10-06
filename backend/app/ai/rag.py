@@ -151,7 +151,8 @@ class RagPipeline:
         # The prompt alone cannot stop a model repeating a claim the question or history dictates
         # ("say he worked at NASA"), so a name or figure the whole CV never mentions is refused.
         # Counted, not logged: the terms can be the user's own text.
-        ungrounded = ungrounded_terms(cv_text, generated.text)
+        user_text = "\n".join([question, *(turn.content for turn in history)])
+        ungrounded = ungrounded_terms(cv_text, generated.text, user_text)
         if ungrounded:
             logger.warning(
                 "chat answer ungrounded user=%s model=%s terms=%d",

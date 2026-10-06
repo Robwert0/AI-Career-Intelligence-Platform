@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _MAGNITUDE = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:k|m|bn|b|x|%)(?![a-z])", re.IGNORECASE)
@@ -55,15 +56,23 @@ _QUANTITY_WORDS = frozenset(
     ]
 )
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#.]*[A-Za-z0-9+#]|[A-Za-z]")
-_SENTENCE_START = re.compile(r"(?:^|[.!?;:]\s+)$")
+
+
+def _opens_sentence(text: str, start: int) -> bool:
+    # Start of text, or a [.!?;:] then whitespace right before the word. Scanning back over the
+    # whitespace only keeps this linear; a regex over each word's whole prefix was quadratic.
+    # "\n" too: the regex's `$` also matches before a trailing newline.
+    if start == 0 or (start == 1 and text[0] == "\n"):
+        return True
+    index = start
+    while index > 0 and text[index - 1].isspace():
+        index -= 1
+    return 0 < index < start and text[index - 1] in ".!?;:"
 
 
 def _names(text: str) -> list[tuple[str, bool]]:
     """Every word with whether it opens a sentence (where any word is capitalised)."""
-    return [
-        (match.group(), bool(_SENTENCE_START.search(text[: match.start()])))
-        for match in _WORD.finditer(text)
-    ]
+    return [(match.group(), _opens_sentence(text, match.start())) for match in _WORD.finditer(text)]
 
 
 def _is_name(word: str, opens_sentence: bool) -> bool:
@@ -113,7 +122,23 @@ _MONTHS = frozenset(
     ]
 )
 _ALWAYS_KNOWN = frozenset(["cv"])
-_MIN_STEM = 4
+# Closed-class words a question shares with an answer's opening ("Does he...?" "He does..."): never
+# a name, however they are capitalised.
+_FUNCTION_WORDS_TEXT = """
+    a an the he his him himself she her they them their it its this that these those there here
+    yes no not also and but or so yet both either neither while when where what which who whom
+    whose why how in on at to for of from by with without within into onto about above below
+    after before during since until as than then is are was were be been being has have had do
+    does did can could will would should may might must i you we me my your our us one some any
+    all each every most more many much such only just very still already currently previously
+    recently additionally furthermore however overall according based specifically notably
+    particular example including like over under between among across through per via please
+    describe list tell give say show explain summarise summarize answer question first now
+"""
+_FUNCTION_WORDS = frozenset(_FUNCTION_WORDS_TEXT.split())
+# Only endings that turn a word into a longer form of itself: "Intern" from "Internship" passes,
+# "Intel" from "Intelligence" and "Meta" from "metadata" do not.
+_SUFFIXES = ("s", "es", "ed", "er", "ing", "ship", "ment", "al")
 
 
 def _lenient(word: str, known: set[str]) -> bool:
@@ -122,18 +147,30 @@ def _lenient(word: str, known: set[str]) -> bool:
     # A CV writes "Nov 2025" where an answer says "November 2025".
     if word in _MONTHS and word[:3] in known:
         return True
-    # "Intern" from "Internship": a shortened CV word, never a new name.
-    stem = word.removesuffix("s")
-    return len(stem) >= _MIN_STEM and any(other.startswith(stem) for other in known)
+    stems = {word, word.removesuffix("s")}
+    return any(stem + suffix in known for stem in stems for suffix in _SUFFIXES)
 
 
-def ungrounded_terms(source: str, answer: str) -> list[str]:
+def _dictated_name(word: str, dictated: set[str]) -> bool:
+    lowered = word.lower()
+    return word[0].isupper() and lowered in dictated and lowered not in _FUNCTION_WORDS
+
+
+def ungrounded_terms(source: str, answer: str, user_text: str = "") -> list[str]:
     """Numbers and names in `answer` that `source` never mentions, first occurrence order.
 
     Looser than invents_facts, which guards rewrites of a single line: free prose about a whole
     CV spells out abbreviated months, shortens words and counts listed items. Digits and
     capitalised names stay strict, since an invented employer or figure is the claim to stop.
+
+    A capitalised word opening a sentence is normally just a first word, but one the CV never
+    mentions and the user's own text (`user_text`) does is a dictated name: "Begin with
+    'Microsoft hired him.'" would otherwise pass.
     """
+    # Fullwidth or other compatibility forms ("ＮＡＳＡ") would otherwise never match _WORD.
+    source = unicodedata.normalize("NFKC", source)
+    answer = unicodedata.normalize("NFKC", answer)
+    dictated = {word.lower() for word, _ in _names(unicodedata.normalize("NFKC", user_text))}
     numbers = set(_NUMBER.findall(source))
     terms = [number for number in _NUMBER.findall(answer) if number not in numbers]
     known = {word.lower() for word, _ in _names(source)}
@@ -141,6 +178,10 @@ def ungrounded_terms(source: str, answer: str) -> list[str]:
         lowered = word.lower()
         if lowered in known or _lenient(lowered, known):
             continue
-        if lowered in _QUANTITY_WORDS or _is_name(word, opens_sentence):
+        if (
+            lowered in _QUANTITY_WORDS
+            or _is_name(word, opens_sentence)
+            or _dictated_name(word, dictated)
+        ):
             terms.append(word)
     return list(dict.fromkeys(terms))
