@@ -6,6 +6,8 @@ REFRESH = Policy("refresh", capacity=10, refill_per_second=10 / 60, scope=Scope.
 LOGOUT = Policy("logout", capacity=10, refill_per_second=10 / 60, scope=Scope.IP)
 ME_IP = Policy("me_ip", capacity=120, refill_per_second=2.0, scope=Scope.IP)
 ME_USER = Policy("me_user", capacity=60, refill_per_second=1.0, scope=Scope.USER)
+ADMIN_IP = Policy("admin_ip", capacity=60, refill_per_second=1.0, scope=Scope.IP)
+ADMIN_USER = Policy("admin_user", capacity=30, refill_per_second=0.5, scope=Scope.USER)
 CHAT_USER = Policy("chat_user", capacity=20, refill_per_second=20 / 60, scope=Scope.USER)
 CHAT_IP = Policy("chat_ip", capacity=30, refill_per_second=0.5, scope=Scope.IP)
 MATCH_JOB_USER = Policy(

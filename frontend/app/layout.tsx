@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import Script from 'next/script'
 import { AuthProvider } from '@/components/AuthProvider'
 import { ChatBubble } from '@/components/ChatBubble'
 import { themeInitScript } from '@/lib/theme'
@@ -14,6 +15,11 @@ const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
   subsets: ['latin'],
 })
+
+const umamiWebsiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID
+const umamiDomains = process.env.NEXT_PUBLIC_UMAMI_DOMAINS
+// The vendored tracker's built-in default; pinned so it matches the CSP connect-src exactly.
+const UMAMI_HOST_URL = 'https://gateway.umami.is'
 
 export const metadata: Metadata = {
   title: 'Robert Mirea — Backend & AI Engineer',
@@ -36,6 +42,15 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
           {children}
           <ChatBubble />
         </AuthProvider>
+        {umamiWebsiteId ? (
+          <Script
+            src="/umami.js"
+            data-website-id={umamiWebsiteId}
+            data-domains={umamiDomains}
+            data-host-url={UMAMI_HOST_URL}
+            strategy="afterInteractive"
+          />
+        ) : null}
       </body>
     </html>
   )

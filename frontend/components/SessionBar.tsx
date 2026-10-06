@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 import { me } from '@/lib/api'
@@ -8,6 +9,7 @@ import { authErrorMessage } from '@/lib/messages'
 export function SessionBar() {
   const { signOut, sessionExpired } = useAuth()
   const [email, setEmail] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -15,8 +17,10 @@ export function SessionBar() {
     let active = true
     me().then((result) => {
       if (!active) return
-      if (result.ok) setEmail(result.data.email)
-      else if (result.status === 401) sessionExpired()
+      if (result.ok) {
+        setEmail(result.data.email)
+        setIsAdmin(result.data.is_admin)
+      } else if (result.status === 401) sessionExpired()
       else setError(authErrorMessage(result))
     })
     return () => {
@@ -38,6 +42,11 @@ export function SessionBar() {
         <span className="font-mono text-sm">cv.chat</span>
         <span className="flex items-baseline gap-4 font-mono text-xs text-muted">
           {email}
+          {isAdmin ? (
+            <Link href="/admin" className="underline underline-offset-4 hover:text-fg">
+              admin
+            </Link>
+          ) : null}
           <button
             type="button"
             onClick={handleSignOut}

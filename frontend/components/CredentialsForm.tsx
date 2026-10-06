@@ -10,10 +10,15 @@ type CredentialsFormProps = {
   autoCompletePassword: 'current-password' | 'new-password'
   onSubmit: (email: string, password: string) => Promise<ApiResult<unknown>>
   onSuccess: () => void
+  children?: React.ReactNode
 }
 
-const FIELD_CLASS =
+export const FIELD_CLASS =
   'border border-line bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-accent'
+
+// FIELD_CLASS with an opaque background, so the select stays readable in dark mode.
+export const SELECT_CLASS =
+  'border border-line bg-bg px-3 py-2 text-sm outline-none focus-visible:border-accent'
 
 export function CredentialsForm({
   submitLabel,
@@ -21,6 +26,7 @@ export function CredentialsForm({
   autoCompletePassword,
   onSubmit,
   onSuccess,
+  children,
 }: CredentialsFormProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -68,6 +74,8 @@ export function CredentialsForm({
         />
         {passwordHint ? <span className="font-mono text-xs text-muted">{passwordHint}</span> : null}
       </label>
+
+      {children}
 
       <p role="alert" aria-live="polite" className="min-h-5 font-mono text-xs text-danger">
         {error}

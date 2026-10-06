@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 import redis.exceptions
 from celery.exceptions import SoftTimeLimitExceeded
+from celery.schedules import crontab
 from fakes import ScriptedGenerator
 from redis.asyncio import Redis
 
@@ -473,3 +474,13 @@ def test_intake_and_analyses_are_routed_to_their_own_queues() -> None:
     assert {queue.name for queue in celery_app.conf.task_queues} >= {"celery", "intake", "analysis"}
     # A shared routing key would copy every task into every queue on a direct exchange.
     assert all(queue.routing_key == queue.name for queue in celery_app.conf.task_queues)
+
+
+def test_the_inactive_account_purge_runs_daily_on_the_default_queue() -> None:
+    schedule = celery_app.conf.beat_schedule
+
+    entries = [entry for entry in schedule.values() if entry["task"] == "accounts.purge_inactive"]
+    assert len(entries) == 1
+    assert entries[0]["schedule"] == crontab(hour=3, minute=0)
+    assert celery_app.conf.task_routes["accounts.purge_inactive"] == {"queue": "celery"}
+    assert "accounts.purge_inactive" in celery_app.tasks

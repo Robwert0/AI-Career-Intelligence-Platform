@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { bootstrap, login, logout, register, setAccessToken } from '@/lib/auth'
+import { bootstrap, login, logout, register, setAccessToken, type SignUpProfile } from '@/lib/auth'
 import type { ApiResult } from '@/lib/http'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
@@ -9,7 +9,7 @@ export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 type AuthValue = {
   status: AuthStatus
   signIn: (email: string, password: string) => Promise<ApiResult<unknown>>
-  signUp: (email: string, password: string) => Promise<ApiResult<unknown>>
+  signUp: (email: string, password: string, profile?: SignUpProfile) => Promise<ApiResult<unknown>>
   signOut: () => Promise<ApiResult<void>>
   sessionExpired: () => void
   exitReason: ExitReason
@@ -38,7 +38,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return result
   }, [])
 
-  const signUp = useCallback((email: string, password: string) => register(email, password), [])
+  const signUp = useCallback(
+    (email: string, password: string, profile?: SignUpProfile) =>
+      register(email, password, profile),
+    [],
+  )
 
   const signOut = useCallback(async () => {
     const result = await logout()

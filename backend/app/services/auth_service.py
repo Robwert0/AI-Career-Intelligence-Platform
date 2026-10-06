@@ -62,6 +62,8 @@ class AuthService:
             user = await self._repo.create_user(
                 email=data.email,
                 hashed_password=hashed,
+                company=data.company,
+                role=data.role,
             )
         except EmailAlreadyExistsError:
             raise EmailAlreadyRegisteredError from None
@@ -84,6 +86,7 @@ class AuthService:
         ):
             raise InvalidCredentialsError
 
+        await self._repo.touch_last_active(user, datetime.now(UTC))
         return (
             create_access_token(str(user.id)),
             await self._issue_refresh_token(user.id, family_id=uuid4()),
@@ -105,6 +108,7 @@ class AuthService:
         if user is None:
             raise InvalidRefreshTokenError
 
+        await self._repo.touch_last_active(user, datetime.now(UTC))
         return (
             create_access_token(str(user.id)),
             await self._issue_refresh_token(user.id, family_id=spent.family_id),

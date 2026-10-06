@@ -10,15 +10,23 @@ const PHASE_PRODUCTION_SERVER = 'phase-production-server'
 // No proxy.ts exists, so rewrites stream request bodies: a CV upload up to the server-configured
 // limit (MAX_UPLOAD_MB) is never buffered or truncated (proxyClientMaxBodySize only applies when
 // proxy.ts is present).
-const PROXIED_PREFIXES = ['auth', 'users', 'chat', 'match']
+const PROXIED_PREFIXES = ['auth', 'users', 'chat', 'match', 'admin']
+
+// The tracker is served from our own origin (public/umami.js); only its events leave the site.
+const UMAMI_COLLECTOR_ORIGIN = 'https://gateway.umami.is'
 
 const isDevelopment = process.env.NODE_ENV !== 'production'
+const umamiEnabled = Boolean(process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID)
 
 // React needs eval() for dev-only debugging features and never uses it in production, so the
 // relaxation is dev-only. The strict production policy is the one verified against `next build`.
 const scriptSrc = isDevelopment
   ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
   : "script-src 'self' 'unsafe-inline'"
+
+const connectSrc = umamiEnabled
+  ? `connect-src 'self' ${UMAMI_COLLECTOR_ORIGIN}`
+  : "connect-src 'self'"
 
 const SECURITY_HEADERS = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -32,7 +40,7 @@ const SECURITY_HEADERS = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      connectSrc,
       "frame-ancestors 'none'",
       "base-uri 'none'",
       "form-action 'self'",

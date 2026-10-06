@@ -2,15 +2,18 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
-import { CredentialsForm } from '@/components/CredentialsForm'
+import { CredentialsForm, FIELD_CLASS, SELECT_CLASS } from '@/components/CredentialsForm'
+import { ROLE_OPTIONS, type UserRole } from '@/lib/roles'
 import { safeNextPath, withNext } from '@/lib/redirect'
 
 function RegisterForm() {
   const { signUp } = useAuth()
   const router = useRouter()
   const next = safeNextPath(useSearchParams().get('next'))
+  const [company, setCompany] = useState('')
+  const [role, setRole] = useState<UserRole | ''>('')
 
   return (
     <>
@@ -23,9 +26,48 @@ function RegisterForm() {
         submitLabel="create account"
         passwordHint="at least 8 characters"
         autoCompletePassword="new-password"
-        onSubmit={signUp}
+        onSubmit={(email, password) =>
+          signUp(email, password, { company, role: role || undefined })
+        }
         onSuccess={() => router.push(withNext('/login?registered=1', next))}
-      />
+      >
+        <label className="flex flex-col gap-2">
+          <span className="font-mono text-xs text-muted">company (optional)</span>
+          <input
+            type="text"
+            value={company}
+            onChange={(event) => setCompany(event.target.value)}
+            maxLength={100}
+            autoComplete="organization"
+            className={FIELD_CLASS}
+          />
+        </label>
+
+        <label className="flex flex-col gap-2">
+          <span className="font-mono text-xs text-muted">i am a… (optional)</span>
+          <select
+            value={role}
+            onChange={(event) => setRole(event.target.value as UserRole | '')}
+            className={SELECT_CLASS}
+          >
+            <option value="">prefer not to say</option>
+            {ROLE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <p className="font-mono text-xs text-muted">
+          Your email, company, role, sign-up date and last visit are visible to Robert. Details in
+          the{' '}
+          <Link href="/privacy" className="text-accent underline underline-offset-4">
+            privacy notice
+          </Link>
+          .
+        </p>
+      </CredentialsForm>
 
       <p className="font-mono text-xs text-muted">
         already have one?{' '}

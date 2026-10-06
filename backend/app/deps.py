@@ -19,9 +19,11 @@ from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
 from app.core.rate_limiter import Limiter, Policy, Scope
+from app.core.retention_marker import RetentionMarker
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
 from app.services import AuthService, IngestionService
+from app.services.admin_service import AdminService
 from app.services.auth_service import InvalidAccessTokenError
 from app.services.match_service import MatchService
 from app.workers.queue import TaskQueue
@@ -74,6 +76,24 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+
+
+async def get_current_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
+    # 404, not 403: don't confirm to a signed-in non-admin that they lack the flag.
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return user
+
+
+def get_retention_marker(request: Request) -> RetentionMarker:
+    return RetentionMarker(request.app.state.redis)
+
+
+def get_admin_service(
+    repo: Annotated[UserRepository, Depends(get_user_repo)],
+    marker: Annotated[RetentionMarker, Depends(get_retention_marker)],
+) -> AdminService:
+    return AdminService(repo, marker)
 
 
 def get_chunk_repo(
