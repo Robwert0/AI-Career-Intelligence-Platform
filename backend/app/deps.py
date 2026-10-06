@@ -165,7 +165,7 @@ def _client_ip(request: Request) -> str:
     return request.client.host
 
 
-async def _enforce(policy: Policy, identity: str, limiter: Limiter) -> None:
+async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
     try:
         decision = await limiter.check(policy, identity, now=time.time())
     except RedisError:
@@ -182,13 +182,13 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
     # Two closures, not one: FastAPI resolves dependencies from the signature, so an IP-scoped
     # policy must not carry the auth dependency or /auth/login would require a login.
     async def by_ip(request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]) -> None:
-        await _enforce(policy, _client_ip(request), limiter)
+        await enforce_rate_limit(policy, _client_ip(request), limiter)
 
     async def by_user(
         user: Annotated[User, Depends(get_current_user)],
         limiter: Annotated[Limiter, Depends(get_limiter)],
     ) -> None:
-        await _enforce(policy, str(user.id), limiter)
+        await enforce_rate_limit(policy, str(user.id), limiter)
 
     return by_ip if policy.scope is Scope.IP else by_user
 

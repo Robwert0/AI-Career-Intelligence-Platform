@@ -424,3 +424,25 @@ async def test_the_largest_allowed_history_is_accepted(chat_client: ChatFixture)
     )
 
     assert response.status_code == 200
+
+
+async def test_a_follow_up_spends_two_chat_tokens_per_user(
+    chat_client: ChatFixture, allow_all_limiter: AllowAllLimiter
+) -> None:
+    client, _, headers = chat_client
+
+    await client.post("/chat", json={"message": "and Go?", "history": FOLLOW_UP}, headers=headers)
+
+    names = [name for name, _ in allow_all_limiter.calls]
+    assert names.count("chat_user") == 2
+    assert names.count("chat_ip") == 1
+
+
+async def test_a_single_question_spends_one_chat_token_per_user(
+    chat_client: ChatFixture, allow_all_limiter: AllowAllLimiter
+) -> None:
+    client, _, headers = chat_client
+
+    await client.post("/chat", json={"message": "Kubernetes"}, headers=headers)
+
+    assert [name for name, _ in allow_all_limiter.calls].count("chat_user") == 1

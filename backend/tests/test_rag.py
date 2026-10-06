@@ -8,6 +8,7 @@ import pytest
 from fakes import FakeGenerator, ScriptedGenerator, UnavailableGenerator
 
 from app.ai.conversation import MAX_STANDALONE_CHARS, Turn
+from app.ai.embeddings import QueryTooLongError
 from app.ai.generation import FinishReason, GeneratorUnavailableError, Role
 from app.ai.prompts import CANARY, INCOMPLETE_TEXT, REFUSAL_TEXT
 from app.ai.rag import GenerationCapacityError, RagPipeline, RetrieverScope
@@ -459,3 +460,53 @@ async def test_an_answer_that_merely_mentions_the_refusal_is_not_one() -> None:
 
     assert answer.refused is False
     assert answer.sources
+
+
+class SlotWatchingGenerator(ScriptedGenerator):
+    def __init__(self, texts: list[str], slots: asyncio.Semaphore) -> None:
+        super().__init__(texts)
+        self._slots = slots
+        self.slot_free: list[bool] = []
+
+    async def generate(self, messages, **kwargs):  # type: ignore[no-untyped-def]
+        self.slot_free.append(not self._slots.locked())
+        return await super().generate(messages, **kwargs)
+
+
+async def test_a_follow_up_holds_one_slot_from_rewrite_to_answer() -> None:
+    slots = asyncio.Semaphore(1)
+    generator = SlotWatchingGenerator(["Which project?", "An answer."], slots)
+    rag = RagPipeline(scope_over(StubRetriever(hit())), generator, slots)
+
+    answer = await rag.answer("Which one?", history=HISTORY)
+
+    assert answer.text == "An answer."
+    assert generator.slot_free == [False, False]
+    assert not slots.locked()
+
+
+class LengthLimitedRetriever(StubRetriever):
+    async def retrieve(self, query: str, **kwargs):  # type: ignore[no-untyped-def]
+        if len(query) > 40:
+            self.queries.append(query)
+            raise QueryTooLongError("over the token budget")
+        return await super().retrieve(query, **kwargs)
+
+
+async def test_a_rewrite_over_the_embedder_budget_retries_with_the_question() -> None:
+    retriever = LengthLimitedRetriever(hit())
+    generator = ScriptedGenerator(["x" * 60, "An answer."])
+    rag = RagPipeline(scope_over(retriever), generator, asyncio.Semaphore(4))
+
+    answer = await rag.answer("Which one?", history=HISTORY)
+
+    assert retriever.queries == ["x" * 60, "Which one?"]
+    assert answer.text == "An answer."
+
+
+async def test_a_question_over_the_budget_still_fails_as_too_long() -> None:
+    retriever = LengthLimitedRetriever(hit())
+    rag = RagPipeline(scope_over(retriever), FakeGenerator(), asyncio.Semaphore(4))
+
+    with pytest.raises(QueryTooLongError):
+        await rag.answer("y" * 60)
