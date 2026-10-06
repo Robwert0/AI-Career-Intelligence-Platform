@@ -214,6 +214,7 @@ def _analysis_response(view: AnalysisView) -> AnalysisStatusResponse:
             else None
         ),
         report=report,
+        expires_in_seconds=view.expires_in_seconds,
     )
 
 

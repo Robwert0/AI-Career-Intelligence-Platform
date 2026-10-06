@@ -36,6 +36,7 @@ class CvUpload:
 class AnalysisView:
     record: JobRecord
     queue_position: int | None
+    expires_in_seconds: int | None = None
 
 
 class AnalysisInProgressError(Exception):
@@ -251,7 +252,11 @@ class MatchService:
         if record is None or record.kind != ANALYSIS:
             return None
         view = self._analysis_view(record, now)
-        return AnalysisView(record=view, queue_position=await self._queue_position(view, now))
+        return AnalysisView(
+            record=view,
+            queue_position=await self._queue_position(view, now),
+            expires_in_seconds=await self._store.remaining_seconds(analysis_id),
+        )
 
     async def _resume(
         self,

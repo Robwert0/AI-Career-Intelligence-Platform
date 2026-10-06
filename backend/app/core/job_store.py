@@ -1,3 +1,4 @@
+import math
 import re
 import secrets
 from collections.abc import Callable, Sequence
@@ -144,6 +145,14 @@ class JobStore:
         if record is None or record.owner_id != owner_id:
             return None
         return record
+
+    async def remaining_seconds(self, job_id: str) -> int | None:
+        """The record's own Redis lifetime, never a value derived from created_at: resume() can
+        extend it, and reading it must never change it."""
+        if not _ID.fullmatch(job_id):
+            return None
+        remaining_ms = await self._redis.pttl(self._key(job_id))
+        return None if remaining_ms < 0 else math.ceil(remaining_ms / 1000)
 
     async def delete(self, job_id: str) -> None:
         if _ID.fullmatch(job_id):

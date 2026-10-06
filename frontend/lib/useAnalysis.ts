@@ -13,24 +13,31 @@ import {
 } from '@/lib/match'
 import { requestProblem, type Problem } from '@/lib/matchErrors'
 import { analysisProblem } from '@/lib/matchProgress'
+import { expiresAt as deadline } from '@/lib/matchRecovery'
 import { poll } from '@/lib/poll'
 
 const FINAL = new Set<AnalysisStatus>(['done', 'failed', 'needs_decision'])
 
 type Handlers = {
-  onReport: (report: MatchReport) => void
+  onReport: (report: MatchReport, expiresAt: number | null) => void
   onMoved: (analysisId: string) => void
   onDiscarded: () => void
+  onGone?: () => void
 }
 
-export function useAnalysis(analysisId: string, { onReport, onMoved, onDiscarded }: Handlers) {
+export function useAnalysis(
+  analysisId: string,
+  { onReport, onMoved, onDiscarded, onGone }: Handlers,
+) {
   const { sessionExpired } = useAuth()
   const [view, setView] = useState<AnalysisView | null>(null)
   const [problem, setProblem] = useState<Problem | null>(null)
   const [round, setRound] = useState(0)
   const [acting, setActing] = useState(false)
   const [skipped, setSkipped] = useState<CandidateSource[]>([])
+  const [expiresAt, setExpiresAt] = useState<number | null>(null)
   const deliver = useEffectEvent(onReport)
+  const forget = useEffectEvent(() => onGone?.())
 
   useEffect(() => {
     const controller = new AbortController()
@@ -38,17 +45,23 @@ export function useAnalysis(analysisId: string, { onReport, onMoved, onDiscarded
       load: () => getAnalysis(analysisId),
       isFinal: (next) => FINAL.has(next.status),
       onValue: (next) => {
+        const expiry = deadline(next.expires_in_seconds, Date.now())
         setView(next)
+        setExpiresAt(expiry)
         const problem = analysisProblem(next)
         if (problem !== null) {
           setProblem(problem)
           return
         }
-        if (next.status === 'done') deliver(next.report)
+        if (next.status === 'done') deliver(next.report, expiry)
       },
       onFailure: (failure) => {
-        if (failure.status === 401) sessionExpired()
-        else setProblem(requestProblem(failure))
+        if (failure.status === 401) {
+          sessionExpired()
+          return
+        }
+        if (failure.status === 404) forget()
+        setProblem(requestProblem(failure))
       },
       signal: controller.signal,
     })
@@ -117,6 +130,7 @@ export function useAnalysis(analysisId: string, { onReport, onMoved, onDiscarded
 
   return {
     view,
+    expiresAt,
     problem,
     acting,
     skipped,

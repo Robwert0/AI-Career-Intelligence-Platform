@@ -85,7 +85,11 @@ describe('matchFlow', () => {
       type: 'analysisStarted',
       analysisId: 'a1',
     })
-    const finished = matchFlow(started, { type: 'analysisFinished', report: REPORT })
+    const finished = matchFlow(started, {
+      type: 'analysisFinished',
+      report: REPORT,
+      expiresAt: null,
+    })
 
     expect(started).toMatchObject({ step: 'analysis', analysisId: 'a1' })
     expect(finished).toMatchObject({ step: 'report', report: REPORT })
@@ -94,7 +98,9 @@ describe('matchFlow', () => {
   it('ignores a late report once the user has moved on', () => {
     const state = at({ step: 'job', draft: DRAFT })
 
-    expect(matchFlow(state, { type: 'analysisFinished', report: REPORT })).toBe(state)
+    expect(matchFlow(state, { type: 'analysisFinished', report: REPORT, expiresAt: null })).toBe(
+      state,
+    )
   })
 
   it('goes back to the evidence step when an analysis is abandoned, keeping consent', () => {
@@ -141,6 +147,37 @@ describe('matchFlow', () => {
     expect(matchFlow(noDraft, { type: 'jobConfirmed' })).toBe(noDraft)
     expect(matchFlow(noDraft, { type: 'analysisStarted', analysisId: 'a1' })).toBe(noDraft)
     expect(matchFlow(noDraft, { type: 'analysisAbandoned' })).toBe(noDraft)
+  })
+
+  it('restores an analysis after a reload with no posting or CV to show', () => {
+    const restored = matchFlow(INITIAL_FLOW, { type: 'analysisRestored', analysisId: 'a1' })
+
+    expect(restored).toMatchObject({ step: 'analysis', analysisId: 'a1', draft: null })
+    expect(restored.candidate.cvFile).toBeNull()
+  })
+
+  it('shows a restored report with its server expiry', () => {
+    const restored = matchFlow(INITIAL_FLOW, { type: 'analysisRestored', analysisId: 'a1' })
+    const done = matchFlow(restored, { type: 'analysisFinished', report: REPORT, expiresAt: 5 })
+
+    expect(done).toMatchObject({ step: 'report', report: REPORT, expiresAt: 5, draft: null })
+  })
+
+  it('follows a restored analysis that moved to a new id', () => {
+    const restored = matchFlow(INITIAL_FLOW, { type: 'analysisRestored', analysisId: 'a1' })
+
+    expect(matchFlow(restored, { type: 'analysisStarted', analysisId: 'a2' })).toMatchObject({
+      step: 'analysis',
+      analysisId: 'a2',
+      draft: null,
+    })
+  })
+
+  it('sends an abandoned restored analysis back to entering the job', () => {
+    const restored = matchFlow(INITIAL_FLOW, { type: 'analysisRestored', analysisId: 'a1' })
+    const abandoned = matchFlow(restored, { type: 'analysisAbandoned' })
+
+    expect(abandoned).toMatchObject({ step: 'job', draft: null, analysisId: null })
   })
 
   it('starts over from nothing', () => {

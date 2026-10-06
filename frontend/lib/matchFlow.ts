@@ -4,9 +4,10 @@ import { EMPTY_CANDIDATE, EMPTY_JOB_INPUT, type CandidateInput, type JobInput } 
 
 export type Step = 'job' | 'candidate' | 'analysis' | 'report'
 
-// A union on `step`: only the job step can be draft-less, and only candidate/analysis/report
-// have a confirmed draft to show or re-run; only analysis/report have the analysis id that
-// produced them, and only report has the report itself.
+// A union on `step`: candidate needs a confirmed draft; analysis/report have one unless the
+// analysis was restored after a reload, where draft is null because the posting is never kept in
+// the browser. Only analysis/report have the analysis id that produced them, and only report has
+// the report itself.
 type FlowCommon = { jobInput: JobInput; candidate: CandidateInput }
 export type FlowState =
   | (FlowCommon & {
@@ -25,17 +26,19 @@ export type FlowState =
     })
   | (FlowCommon & {
       step: 'analysis'
-      draft: JobDraft
+      draft: JobDraft | null
       inputTruncated: boolean
       analysisId: string
       report: null
+      expiresAt: null
     })
   | (FlowCommon & {
       step: 'report'
-      draft: JobDraft
+      draft: JobDraft | null
       inputTruncated: boolean
       analysisId: string
       report: MatchReport
+      expiresAt: number | null
     })
 
 export type FlowAction =
@@ -47,7 +50,8 @@ export type FlowAction =
   | { type: 'candidateChanged'; candidate: Partial<CandidateInput> }
   | { type: 'backToJob' }
   | { type: 'analysisStarted'; analysisId: string }
-  | { type: 'analysisFinished'; report: MatchReport }
+  | { type: 'analysisRestored'; analysisId: string }
+  | { type: 'analysisFinished'; report: MatchReport; expiresAt: number | null }
   | { type: 'analysisAbandoned' }
   | { type: 'editJob' }
   | { type: 'startOver' }
@@ -97,7 +101,8 @@ export function matchFlow(state: FlowState, action: FlowAction): FlowState {
         report: null,
       }
     case 'analysisStarted':
-      return state.draft === null
+      // A moved or reopened analysis keeps whatever draft this tab still has, including none.
+      return state.step === 'job' && state.draft === null
         ? state
         : {
             step: 'analysis',
@@ -107,7 +112,19 @@ export function matchFlow(state: FlowState, action: FlowAction): FlowState {
             inputTruncated: state.inputTruncated,
             analysisId: action.analysisId,
             report: null,
+            expiresAt: null,
           }
+    case 'analysisRestored':
+      return {
+        step: 'analysis',
+        jobInput: EMPTY_JOB_INPUT,
+        candidate: EMPTY_CANDIDATE,
+        draft: null,
+        inputTruncated: false,
+        analysisId: action.analysisId,
+        report: null,
+        expiresAt: null,
+      }
     case 'analysisFinished':
       return state.step === 'analysis'
         ? {
@@ -118,20 +135,23 @@ export function matchFlow(state: FlowState, action: FlowAction): FlowState {
             inputTruncated: state.inputTruncated,
             analysisId: state.analysisId,
             report: action.report,
+            expiresAt: action.expiresAt,
           }
         : state
     case 'analysisAbandoned':
-      return state.draft === null
-        ? state
-        : {
-            step: 'candidate',
-            jobInput: state.jobInput,
-            candidate: state.candidate,
-            draft: state.draft,
-            inputTruncated: state.inputTruncated,
-            analysisId: null,
-            report: null,
-          }
+      if (state.draft === null) {
+        // A restored analysis has no posting to go back to: the job must be entered again.
+        return state.step === 'job' ? state : { ...INITIAL_FLOW, candidate: state.candidate }
+      }
+      return {
+        step: 'candidate',
+        jobInput: state.jobInput,
+        candidate: state.candidate,
+        draft: state.draft,
+        inputTruncated: state.inputTruncated,
+        analysisId: null,
+        report: null,
+      }
     case 'editJob':
       return {
         step: 'job',

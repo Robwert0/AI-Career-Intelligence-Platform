@@ -7,13 +7,16 @@ import { submitAnalysis, type JobView } from '@/lib/match'
 import { requestProblem, type Problem } from '@/lib/matchErrors'
 import { INITIAL_FLOW, matchFlow, type FlowAction, type Step } from '@/lib/matchFlow'
 import { buildAnalysisForm } from '@/lib/matchInputs'
+import { clearRecoveryId, INPUTS_NOT_KEPT } from '@/lib/matchRecovery'
+import { useAnalysisRecovery } from '@/lib/useAnalysisRecovery'
 import { useMatchConfig } from '@/lib/useMatchConfig'
 import { AnalysisProgress } from './AnalysisProgress'
+import { Availability } from './Availability'
 import { CandidateStep } from './CandidateStep'
 import { JobPreview } from './JobPreview'
 import { JobSourceForm } from './JobSourceForm'
 import { MatchReportView } from './MatchReportView'
-import { PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
+import { ALERT, PRIMARY_BUTTON, SECONDARY_BUTTON, TEXT_BUTTON } from './styles'
 import { ToolIntro } from './ToolIntro'
 
 const STEPS: { id: Step; label: string }[] = [
@@ -27,6 +30,7 @@ export function MatchAnalyzer() {
   const { sessionExpired } = useAuth()
   const limits = useMatchConfig()
   const [state, dispatch] = useReducer(matchFlow, INITIAL_FLOW)
+  const recovery = useAnalysisRecovery(state.analysisId, dispatch)
   const [submitting, setSubmitting] = useState(false)
   const [submitProblem, setSubmitProblem] = useState<Problem | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -64,6 +68,37 @@ export function MatchAnalyzer() {
   }
 
   const index = STEPS.findIndex((step) => step.id === state.step)
+  const { phase } = recovery
+
+  if (phase.type === 'checking' || phase.type === 'unreachable') {
+    return (
+      <section aria-labelledby="match-step-title" className="max-w-3xl space-y-8">
+        <ToolIntro />
+        <h2 id="match-step-title" className="sr-only">
+          Restoring your analysis
+        </h2>
+        {phase.type === 'checking' ? (
+          <p role="status" className="font-mono text-xs text-muted">
+            restoring your analysis…
+          </p>
+        ) : (
+          <div role="alert" className={ALERT}>
+            <p>{phase.message} It is still saved for this tab.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={recovery.retry} className={SECONDARY_BUTTON}>
+                Try again
+              </button>
+              <button type="button" onClick={recovery.abandon} className={TEXT_BUTTON}>
+                Start over
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  const inputsLost = (state.step === 'analysis' || state.step === 'report') && state.draft === null
 
   if (state.step === 'report' && state.report !== null) {
     return (
@@ -72,24 +107,42 @@ export function MatchAnalyzer() {
           report={state.report}
           job={state.draft === null ? null : toPosting(state.draft)}
           headingRef={headingRef}
-          actions={(placement) => (
-            <>
-              <button
-                type="button"
-                onClick={() => go({ type: 'editJob' })}
-                className={placement === 'header' ? PRIMARY_BUTTON : SECONDARY_BUTTON}
-              >
-                Edit job and re-run
-              </button>
+          notice={
+            <div className="space-y-1">
+              <Availability expiresAt={state.expiresAt} />
+              {inputsLost ? (
+                <p className="text-sm text-muted">Restored after a reload. {INPUTS_NOT_KEPT}</p>
+              ) : null}
+            </div>
+          }
+          actions={(placement) =>
+            inputsLost ? (
               <button
                 type="button"
                 onClick={() => go({ type: 'startOver' })}
-                className={SECONDARY_BUTTON}
+                className={placement === 'header' ? PRIMARY_BUTTON : SECONDARY_BUTTON}
               >
-                Start over
+                Start a new analysis
               </button>
-            </>
-          )}
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => go({ type: 'editJob' })}
+                  className={placement === 'header' ? PRIMARY_BUTTON : SECONDARY_BUTTON}
+                >
+                  Edit job and re-run
+                </button>
+                <button
+                  type="button"
+                  onClick={() => go({ type: 'startOver' })}
+                  className={SECONDARY_BUTTON}
+                >
+                  Start over
+                </button>
+              </>
+            )
+          }
         />
       </section>
     )
@@ -149,6 +202,13 @@ export function MatchAnalyzer() {
         {STEPS[index].label}
       </h2>
 
+      {phase.type === 'gone' && state.step === 'job' ? (
+        <p role="status" className="rounded-md border border-line px-4 py-3 text-sm text-muted">
+          Your previous analysis is no longer available. Results are deleted about an hour after
+          they are created, so enter the job again to run a new one.
+        </p>
+      ) : null}
+
       {state.step === 'job' && state.draft === null ? (
         <JobSourceForm
           input={state.jobInput}
@@ -188,8 +248,12 @@ export function MatchAnalyzer() {
           candidate={state.candidate}
           limits={limits}
           onCandidateChange={(candidate) => dispatch({ type: 'candidateChanged', candidate })}
-          onReport={(report) => dispatch({ type: 'analysisFinished', report })}
+          onReport={(report, expiresAt) =>
+            dispatch({ type: 'analysisFinished', report, expiresAt })
+          }
           onMoved={(analysisId) => go({ type: 'analysisStarted', analysisId })}
+          onGone={clearRecoveryId}
+          inputsLost={inputsLost}
           onResubmit={() => void analyze()}
           resubmitting={submitting}
           resubmitProblem={submitProblem}

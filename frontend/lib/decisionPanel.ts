@@ -16,3 +16,14 @@ export function decisionPanelKind(recovery: Recovery): DecisionPanelKind {
       return 'retry_or_continue'
   }
 }
+
+// The server needs the CV bytes again for any CV retry, and a reload dropped this tab's copy, so
+// a restored analysis must ask for the file instead of offering a retry that can only fail.
+export function restoredPanelKind(
+  recovery: Recovery,
+  source: 'cv' | 'github',
+  inputsLost: boolean,
+): DecisionPanelKind {
+  const kind = decisionPanelKind(recovery)
+  return inputsLost && source === 'cv' && kind === 'retry_or_continue' ? 'choose_file' : kind
+}

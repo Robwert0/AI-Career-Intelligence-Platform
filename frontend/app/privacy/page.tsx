@@ -92,6 +92,13 @@ export default function PrivacyPage() {
             When you run a match, the job posting, any CV file you upload and the report are held
             temporarily and expire automatically within about an hour.
           </p>
+          <p className="leading-relaxed">
+            So a reload does not lose a running analysis or its report, this browser tab keeps two
+            identifiers in its session storage: the analysis id and your account id. No CV, job text
+            or report is stored in the browser. Session storage is cleared when you close the tab or
+            sign out, or when another account signs in. Keeping the identifiers does not make the
+            analysis last longer: the report is still deleted on the server when it expires.
+          </p>
         </Section>
 
         <Section title="visit statistics">

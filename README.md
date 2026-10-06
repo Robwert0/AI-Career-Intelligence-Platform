@@ -35,6 +35,9 @@ scalable and explainable** before it counts as done.
 - A public sample report at `/match/sample` (fictional candidate and job, no account, no AI call)
   shows the real report before sign-up; `backend/tests/test_sample_report.py` proves its score,
   breakdown and coverage are exactly what the scoring code computes from its statuses
+- A reload resumes a running analysis or reopens its report: the tab keeps only the analysis id
+  (session storage, cleared on sign-out or when another account signs in), and the page shows the
+  record's real remaining lifetime from `expires_in_seconds`; recovery never extends the TTL
 - Add a job posting (a URL our server fetches, or pasted text) and a CV (PDF/DOCX upload, or
   pasted text) and/or a public GitHub profile; review and edit the extracted requirements before
   analysing
