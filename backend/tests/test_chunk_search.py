@@ -189,3 +189,26 @@ async def test_vector_search_still_fills_the_limit_after_index_churn(
     hits = await seeded.search_by_vector(vector_for("anything"), limit=4)
 
     assert len(hits) == 4
+
+
+async def test_document_contents_returns_one_document_in_chunk_order(
+    seeded: ChunkRepository,
+) -> None:
+    other = uuid.UUID("33333333-3333-3333-3333-333333333333")
+    embedder = FakeEmbedder()
+    await seeded.replace_document_chunks(
+        other,
+        [
+            Chunk(
+                document_id=other,
+                chunk_index=0,
+                content="Someone else's CV.",
+                section="summary",
+                embedding=embedder.embed_documents(["x"])[0],
+                embedding_model=embedder.model_name,
+            )
+        ],
+    )
+
+    assert await seeded.document_contents(DOCUMENT_ID) == [content for _, content in SEED]
+    assert await seeded.document_contents(uuid.uuid4()) == []

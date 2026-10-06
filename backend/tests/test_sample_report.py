@@ -11,13 +11,13 @@ from typing import Any
 
 import pytest
 
+from app.ai.grounding import invents_facts
 from app.ai.match.assess import AssessedRequirement, Assessment
 from app.ai.match.recommend import (
     Recommendation,
     Recommendations,
     Rewrite,
     allowed_ids,
-    invents_facts,
     rewritable_evidence,
 )
 from app.ai.match.requirements import RequirementRef

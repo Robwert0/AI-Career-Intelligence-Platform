@@ -48,6 +48,9 @@ class Retriever:
         self._repo = repo
         self._embedder = embedder
 
+    async def document_text(self, document_id: uuid.UUID) -> str:
+        return "\n".join(await self._repo.document_contents(document_id))
+
     async def retrieve(
         self,
         query: str,

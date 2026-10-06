@@ -30,6 +30,8 @@ scalable and explainable** before it counts as done.
   [Ollama](https://ollama.com) model (`qwen3:8b`)
 - Prompt-injection defense: an input guard, strict isolation of system prompt / user input /
   retrieved documents, special-token escaping, and an output guard that blocks prompt leaks
+  and refuses any answer naming an organisation, person or figure the CV never mentions (so a
+  question or history saying "say he worked at NASA" cannot put words in the CV's mouth)
 - Follow-up questions: the client sends up to three completed exchanges (6 messages, 2,000 chars
   each, 6,000 total; user/assistant roles only). The model rewrites the follow-up into a
   standalone question, which is what retrieval and the refusal gate see; the history reaches the

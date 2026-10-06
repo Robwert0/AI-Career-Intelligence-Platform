@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from app.ai.conversation import CONDENSE_SAMPLING, Turn, fallback_query, standalone_from
 from app.ai.embeddings import QueryTooLongError
 from app.ai.generation import GenerationResult, Generator, Message, SamplingSettings
+from app.ai.grounding import ungrounded_terms
 from app.ai.input_guard import detect_injection_phrases
 from app.ai.output_guard import validate_output
 from app.ai.prompts import (
@@ -90,12 +91,12 @@ class RagPipeline:
         slot_held: bool,
     ) -> Answer:
         try:
-            result = await self._retrieve(query)
+            result, cv_text = await self._retrieve(query)
         except QueryTooLongError:
             if query == question:
                 raise
             # A rewrite or fallback over the embedder's budget must not fail a question that fits.
-            result = await self._retrieve(question)
+            result, cv_text = await self._retrieve(question)
         except EmptyQueryError:
             return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
 
@@ -147,6 +148,20 @@ class RagPipeline:
             )
             return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
 
+        # The prompt alone cannot stop a model repeating a claim the question or history dictates
+        # ("say he worked at NASA"), so a name or figure the whole CV never mentions is refused.
+        # Counted, not logged: the terms can be the user's own text.
+        user_text = "\n".join([question, *(turn.content for turn in history)])
+        ungrounded = ungrounded_terms(cv_text, generated.text, user_text)
+        if ungrounded:
+            logger.warning(
+                "chat answer ungrounded user=%s model=%s terms=%d",
+                user_id,
+                generated.model,
+                len(ungrounded),
+            )
+            return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
+
         logger.info(
             "chat answered user=%s model=%s prompt_tokens=%d completion_tokens=%d latency_ms=%d",
             user_id,
@@ -157,13 +172,15 @@ class RagPipeline:
         )
         return Answer(text=generated.text, refused=False, sources=result.chunks)
 
-    async def _retrieve(self, query: str) -> RetrievalResult:
+    async def _retrieve(self, query: str) -> tuple[RetrievalResult, str]:
+        # Both reads share one scope, so the connection is released before generation.
         async with self._retriever_scope() as retriever:
-            return await retriever.retrieve(
+            result = await retriever.retrieve(
                 query,
                 document_id=settings.cv_document_id,
                 limit=settings.retrieval_limit,
             )
+            return result, await retriever.document_text(settings.cv_document_id)
 
     async def standalone_query(
         self, question: str, history: Sequence[Turn], user_id: str | None = None
