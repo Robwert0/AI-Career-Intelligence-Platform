@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from typing import cast
 
 import pytest
-from fakes import FakeGenerator, UnavailableGenerator
+from fakes import FakeGenerator, ScriptedGenerator, UnavailableGenerator
 
+from app.ai.conversation import MAX_STANDALONE_CHARS, Turn
 from app.ai.generation import FinishReason, GeneratorUnavailableError, Role
 from app.ai.prompts import CANARY, INCOMPLETE_TEXT, REFUSAL_TEXT
 from app.ai.rag import GenerationCapacityError, RagPipeline, RetrieverScope
@@ -342,3 +343,119 @@ async def test_an_injection_phrasing_is_logged_but_still_answered(
 
     assert answer.text == "He used FastAPI."
     assert "override_instructions" in caplog.text
+
+
+HISTORY = (
+    Turn(role="user", content="What backend experience does Robert have?"),
+    Turn(role="assistant", content="He built FastAPI services."),
+)
+
+
+def tracked(result: RetrievalResult, generator: object) -> tuple[RagPipeline, StubRetriever]:
+    retriever = StubRetriever(result)
+    rag = RagPipeline(scope_over(retriever), generator, asyncio.Semaphore(4))  # type: ignore[arg-type]
+    return rag, retriever
+
+
+async def test_a_follow_up_is_retrieved_by_its_standalone_rewrite() -> None:
+    generator = ScriptedGenerator(
+        ["Which project demonstrates Robert's backend experience?", "The ledger project."]
+    )
+    rag, retriever = tracked(hit(), generator)
+
+    answer = await rag.answer("Which project demonstrates that?", history=HISTORY)
+
+    assert retriever.queries == ["Which project demonstrates Robert's backend experience?"]
+    assert answer.text == "The ledger project."
+    assert answer.sources
+
+
+async def test_a_single_question_skips_condensation() -> None:
+    generator = FakeGenerator(text="He used FastAPI.")
+    rag, retriever = tracked(hit(), generator)
+
+    await rag.answer("what framework?")
+
+    assert retriever.queries == ["what framework?"]
+    assert len(generator.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("rewrite", "finish"),
+    [
+        ("", FinishReason.STOP),
+        ("x" * (MAX_STANDALONE_CHARS + 1), FinishReason.STOP),
+        ("Which project shows it?", FinishReason.LENGTH),
+    ],
+    ids=["empty", "too-long", "truncated"],
+)
+async def test_an_unusable_rewrite_falls_back_to_the_previous_question(
+    rewrite: str, finish: FinishReason
+) -> None:
+    generator = ScriptedGenerator([rewrite, "An answer."], [finish, FinishReason.STOP])
+    rag, retriever = tracked(hit(), generator)
+
+    await rag.answer("Which project demonstrates that?", history=HISTORY)
+
+    assert retriever.queries == [
+        "What backend experience does Robert have?\nWhich project demonstrates that?"
+    ]
+
+
+async def test_only_the_first_line_of_a_rewrite_is_used() -> None:
+    generator = ScriptedGenerator(['"Which project shows his backend work?"\nNote: x', "Ok."])
+    rag, retriever = tracked(hit(), generator)
+
+    await rag.answer("Which one?", history=HISTORY)
+
+    assert retriever.queries == ["Which project shows his backend work?"]
+
+
+async def test_an_off_topic_follow_up_is_still_refused_by_the_gate() -> None:
+    generator = ScriptedGenerator(["What is the weather in Paris?"])
+    rag, _ = tracked(miss(), generator)
+
+    answer = await rag.answer("and the weather there?", history=HISTORY)
+
+    assert answer.refused is True
+    assert answer.text == REFUSAL_TEXT
+    assert len(generator.calls) == 1
+
+
+async def test_the_answer_prompt_carries_history_as_data_after_the_extracts() -> None:
+    generator = ScriptedGenerator(["Which project?", "An answer."])
+    rag, _ = tracked(hit(), generator)
+
+    await rag.answer("Which one?", history=HISTORY)
+
+    roles = [message.role for message in generator.calls[1]]
+    assert roles == [Role.SYSTEM, Role.USER, Role.USER, Role.USER]
+    assert "He built FastAPI services." in generator.calls[1][2].content
+    assert generator.calls[1][3].content == "<question>Which one?</question>"
+
+
+async def test_condensation_uses_a_generation_slot_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "chat_queue_timeout_seconds", 0.01)
+    slots = asyncio.Semaphore(1)
+    await slots.acquire()
+    rag = RagPipeline(scope_over(StubRetriever(hit())), FakeGenerator(), slots)
+
+    with pytest.raises(GenerationCapacityError):
+        await rag.answer("Which one?", history=HISTORY)
+
+
+@pytest.mark.parametrize("text", [REFUSAL_TEXT, f"  {REFUSAL_TEXT.rstrip('.')}\n"])
+async def test_a_model_refusal_is_reported_as_a_refusal_without_sources(text: str) -> None:
+    answer = await pipeline(hit(), FakeGenerator(text=text)).answer("Does he know Rust?")
+
+    assert answer.refused is True
+    assert answer.text == REFUSAL_TEXT
+    assert answer.sources == []
+
+
+async def test_an_answer_that_merely_mentions_the_refusal_is_not_one() -> None:
+    text = f"{REFUSAL_TEXT} However, he lists Python."
+    answer = await pipeline(hit(), FakeGenerator(text=text)).answer("Does he know Rust?")
+
+    assert answer.refused is False
+    assert answer.sources

@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.ai.conversation import Turn
 from app.ai.embeddings import QueryTooLongError
 from app.ai.generation import (
     ContextOverflowError,
@@ -32,7 +33,11 @@ async def chat(
     pipeline: Annotated[RagPipeline, Depends(get_rag_pipeline)],
 ) -> ChatResponse:
     try:
-        answer = await pipeline.answer(payload.message, user_id=str(current_user.id))
+        answer = await pipeline.answer(
+            payload.message,
+            history=[Turn(role=turn.role, content=turn.content) for turn in payload.history],
+            user_id=str(current_user.id),
+        )
     except QueryTooLongError, ContextOverflowError:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

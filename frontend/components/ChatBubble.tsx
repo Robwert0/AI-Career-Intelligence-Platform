@@ -54,7 +54,7 @@ function LiveChat() {
   return (
     <>
       <div className="flex-1 overflow-y-auto p-4">
-        <Transcript turns={turns} pending={pending} />
+        <Transcript turns={turns} pending={pending} onAsk={ask} />
         <div ref={endRef} />
       </div>
       <div className="px-4 pb-3">
@@ -66,7 +66,7 @@ function LiveChat() {
 
 export function ChatBubble() {
   const pathname = usePathname()
-  const { status } = useAuth()
+  const { status, accountId } = useAuth()
   const [open, setOpen] = useState(false)
   const [entryInView, setEntryInView] = useState(false)
   const toggleRef = useRef<HTMLButtonElement>(null)
@@ -170,7 +170,8 @@ export function ChatBubble() {
             </span>
           </header>
           {status === 'authenticated' ? (
-            <LiveChat />
+            // Keyed by account so a sign-out or account switch never carries context over.
+            <LiveChat key={accountId ?? 'unknown'} />
           ) : status === 'anonymous' ? (
             <SignInPrompt />
           ) : (

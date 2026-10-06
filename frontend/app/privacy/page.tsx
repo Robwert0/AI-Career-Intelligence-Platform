@@ -47,10 +47,11 @@ export default function PrivacyPage() {
               Server logs: the server&apos;s request logs record your IP address and the page or API
               path requested. For chat they also record your pseudonymous account id, the AI model
               used, usage figures (token counts and response time) and technical details: whether
-              your message matched known prompt-injection phrasing (and which patterns), whether the
-              answer was refused or incomplete (with the search relevance score or the check that
-              failed), and, for a blocked answer, a short fingerprint and its length, never its
-              text. They are kept for security and troubleshooting and deleted after 30 days.
+              your message or an earlier one in the conversation matched known prompt-injection
+              phrasing (and which patterns), whether the answer was refused or incomplete (with the
+              search relevance score or the check that failed), and, for a blocked answer, a short
+              fingerprint and its length, never its text. They are kept for security and
+              troubleshooting and deleted after 30 days.
             </li>
           </ul>
         </Section>
@@ -84,6 +85,16 @@ export default function PrivacyPage() {
             Account data and server logs are processed on the basis of legitimate interest: running
             and securing the site, and letting Robert know who viewed his CV. The company and role
             are optional; you give them with your consent and can have them removed on request.
+          </p>
+        </Section>
+
+        <Section title="chat">
+          <p className="leading-relaxed">
+            So follow-up questions make sense, each question is sent with up to the last three
+            questions and answers of the conversation on that page. They are processed by the
+            locally hosted model like the question itself and are never stored, on the server or in
+            the browser. The conversation is gone when you leave or reload the page, sign out, or
+            switch accounts.
           </p>
         </Section>
 

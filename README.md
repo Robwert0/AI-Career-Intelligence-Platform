@@ -30,6 +30,11 @@ scalable and explainable** before it counts as done.
   [Ollama](https://ollama.com) model (`qwen3:8b`)
 - Prompt-injection defense: an input guard, strict isolation of system prompt / user input /
   retrieved documents, special-token escaping, and an output guard that blocks prompt leaks
+- Follow-up questions: the client sends up to three completed exchanges (6 messages, 2,000 chars
+  each, 6,000 total; user/assistant roles only). The model rewrites the follow-up into a
+  standalone question, which is what retrieval and the refusal gate see; the history reaches the
+  answer prompt only as escaped data, never as an assistant turn, and is not stored anywhere.
+  `scripts/eval_chat_followups.py` measures it against the real CV and model
 
 **Job Match Analyzer**
 - A public sample report at `/match/sample` (fictional candidate and job, no account, no AI call)
