@@ -12,6 +12,7 @@ export type UserRead = {
 }
 export type Source = { section: string; content: string }
 export type ChatResponse = { answer: string; refused: boolean; sources: Source[] }
+export type HistoryMessage = { role: 'user' | 'assistant'; content: string }
 
 function withToken(init: RequestInit, token: string | null): RequestInit {
   if (token === null) return init
@@ -35,9 +36,12 @@ export function me(): Promise<ApiResult<UserRead>> {
   return authedRequest<UserRead>('/users/me')
 }
 
-export function chat(message: string): Promise<ApiResult<ChatResponse>> {
+export function chat(
+  message: string,
+  history: HistoryMessage[] = [],
+): Promise<ApiResult<ChatResponse>> {
   return authedRequest<ChatResponse>('/chat', {
     method: 'POST',
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(history.length > 0 ? { message, history } : { message }),
   })
 }

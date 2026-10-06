@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.ai.conversation import Turn
 from app.ai.embeddings import QueryTooLongError
 from app.ai.generation import (
     ContextOverflowError,
@@ -11,7 +12,8 @@ from app.ai.generation import (
 from app.ai.rag import GenerationCapacityError, RagPipeline
 from app.core import policies
 from app.core.config import settings
-from app.deps import get_current_user, get_rag_pipeline, rate_limit
+from app.core.rate_limiter import Limiter
+from app.deps import enforce_rate_limit, get_current_user, get_limiter, get_rag_pipeline, rate_limit
 from app.models import User
 from app.schemas import ChatRequest, ChatResponse, Source
 
@@ -30,9 +32,18 @@ async def chat(
     payload: ChatRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     pipeline: Annotated[RagPipeline, Depends(get_rag_pipeline)],
+    limiter: Annotated[Limiter, Depends(get_limiter)],
 ) -> ChatResponse:
+    if payload.history:
+        # A follow-up costs two generations (the rewrite, then the answer), so it spends two
+        # tokens of the per-user budget.
+        await enforce_rate_limit(policies.CHAT_USER, str(current_user.id), limiter)
     try:
-        answer = await pipeline.answer(payload.message, user_id=str(current_user.id))
+        answer = await pipeline.answer(
+            payload.message,
+            history=[Turn(role=turn.role, content=turn.content) for turn in payload.history],
+            user_id=str(current_user.id),
+        )
     except QueryTooLongError, ContextOverflowError:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

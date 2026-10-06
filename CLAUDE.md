@@ -246,6 +246,8 @@ pytest -q
 
 # Ingest a CV into the chunks table (phase 4; run from backend/, needs DATABASE_URL)
 cd backend && python scripts/ingest_cv.py path/to/cv.pdf
+# Chat follow-ups against the real CV + Ollama: raw vs condensed retrieval, adversarial history
+python scripts/eval_chat_followups.py
 
 # Create a dedicated admin (prompts for a 16+ char password; refuses an existing email; run from backend/)
 cd backend && python scripts/make_admin.py --create admin@yourdomain.com
