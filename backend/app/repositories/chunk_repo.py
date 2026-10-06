@@ -30,6 +30,14 @@ class ChunkRepository:
 
         return len(chunks)
 
+    async def document_contents(self, document_id: uuid.UUID) -> list[str]:
+        stmt = (
+            select(Chunk.content)
+            .where(Chunk.document_id == document_id)
+            .order_by(Chunk.chunk_index)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def search_by_vector(
         self,
         embedding: list[float],

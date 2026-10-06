@@ -1,5 +1,4 @@
 import functools
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -7,13 +6,13 @@ from typing import Any
 from pydantic import Field, JsonValue, create_model
 
 from app.ai.generation import Generator, SamplingSettings
+from app.ai.grounding import invents_facts
 from app.ai.match.assess import Assessment
 from app.ai.match.prompts import build_recommend_messages
 from app.ai.match.schemas import EvidenceItem, RecommendationItem, RecommendReply, RewriteItem
 from app.ai.match.structured import generate_validated
 
 RECOMMEND_SAMPLING = SamplingSettings(temperature=0.0, seed=0, max_output_tokens=2048)
-_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
 
 def _choice(ids: tuple[str, ...]) -> Any:
@@ -90,96 +89,6 @@ def _recommendations(
         if item.requirement_id in allowed and item.title.strip()
     )
     return kept, len(items) - len(kept)
-
-
-_MAGNITUDE = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:k|m|bn|b|x|%)(?![a-z])", re.IGNORECASE)
-_QUANTITY_WORDS = frozenset(
-    [
-        "one",
-        "two",
-        "three",
-        "four",
-        "five",
-        "six",
-        "seven",
-        "eight",
-        "nine",
-        "ten",
-        "eleven",
-        "twelve",
-        "thirteen",
-        "fourteen",
-        "fifteen",
-        "sixteen",
-        "seventeen",
-        "eighteen",
-        "nineteen",
-        "twenty",
-        "thirty",
-        "forty",
-        "fifty",
-        "sixty",
-        "seventy",
-        "eighty",
-        "ninety",
-        "hundred",
-        "hundreds",
-        "thousand",
-        "thousands",
-        "million",
-        "millions",
-        "billion",
-        "billions",
-        "dozen",
-        "dozens",
-        "half",
-        "twice",
-        "thrice",
-        "double",
-        "doubled",
-        "doubling",
-        "triple",
-        "tripled",
-        "tripling",
-        "quadrupled",
-        "tenfold",
-    ]
-)
-_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#.]*[A-Za-z0-9+#]|[A-Za-z]")
-_SENTENCE_START = re.compile(r"(?:^|[.!?;:]\s+)$")
-
-
-def _names(text: str) -> list[tuple[str, bool]]:
-    """Every word with whether it opens a sentence (where any word is capitalised)."""
-    return [
-        (match.group(), bool(_SENTENCE_START.search(text[: match.start()])))
-        for match in _WORD.finditer(text)
-    ]
-
-
-def _is_name(word: str, opens_sentence: bool) -> bool:
-    # A capital mid-sentence is a name; at a sentence start only an inner capital or a digit
-    # ("PostgreSQL", "GraphQL", "AWS", "S3") marks one, since any first word is capitalised.
-    if any(char.isdigit() for char in word) or sum(char.isupper() for char in word) > 1:
-        return True
-    return word[0].isupper() and not opens_sentence
-
-
-def invents_facts(before: str, after: str) -> bool:
-    """True when `after` states a number, quantity or name that `before` does not contain."""
-    if not set(_NUMBER.findall(after)) <= set(_NUMBER.findall(before)):
-        return True
-    magnitude = {m.lower().replace(" ", "") for m in _MAGNITUDE.findall(after)}
-    if not magnitude <= {m.lower().replace(" ", "") for m in _MAGNITUDE.findall(before)}:
-        return True
-    known = {word.lower() for word, _ in _names(before)}
-    for word, opens_sentence in _names(after):
-        lowered = word.lower()
-        if lowered in known:
-            continue
-        if lowered in _QUANTITY_WORDS or _is_name(word, opens_sentence):
-            return True
-    return False
 
 
 def _rewrites(
