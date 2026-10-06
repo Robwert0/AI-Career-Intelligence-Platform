@@ -13,6 +13,7 @@ import { CandidateStep } from './CandidateStep'
 import { JobPreview } from './JobPreview'
 import { JobSourceForm } from './JobSourceForm'
 import { MatchReportView } from './MatchReportView'
+import { PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 import { ToolIntro } from './ToolIntro'
 
 const STEPS: { id: Step; label: string }[] = [
@@ -71,8 +72,24 @@ export function MatchAnalyzer() {
           report={state.report}
           job={state.draft === null ? null : toPosting(state.draft)}
           headingRef={headingRef}
-          onEditJob={() => go({ type: 'editJob' })}
-          onStartOver={() => go({ type: 'startOver' })}
+          actions={(placement) => (
+            <>
+              <button
+                type="button"
+                onClick={() => go({ type: 'editJob' })}
+                className={placement === 'header' ? PRIMARY_BUTTON : SECONDARY_BUTTON}
+              >
+                Edit job and re-run
+              </button>
+              <button
+                type="button"
+                onClick={() => go({ type: 'startOver' })}
+                className={SECONDARY_BUTTON}
+              >
+                Start over
+              </button>
+            </>
+          )}
         />
       </section>
     )

@@ -7,3 +7,4 @@ export const NAV_LINKS = [
   { href: '/#contact', label: 'Contact' },
   { href: '/match', label: 'Job Match Analyzer' },
 ]
+export const MATCH_SAMPLE_PATH = '/match/sample'

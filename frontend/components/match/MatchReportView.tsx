@@ -6,19 +6,28 @@ import { matchesFilter, requirementAnchor, type RequirementFilter } from '@/lib/
 import { NextSteps, SuggestedWording } from './ReportAdvice'
 import { ReportOverview } from './ReportOverview'
 import { RequirementBreakdown } from './RequirementBreakdown'
-import { PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
+
+export type ActionPlacement = 'header' | 'footer'
 
 type Props = {
   report: MatchReport
   job: Pick<JobPosting, 'title' | 'company'> | null
   headingRef: React.Ref<HTMLHeadingElement>
-  onStartOver: () => void
-  onEditJob: () => void
+  actions: (placement: ActionPlacement) => React.ReactNode
+  sample?: boolean
+  notice?: React.ReactNode
 }
 
 export type RevealRequirement = (requirementId: string) => void
 
-export function MatchReportView({ report, job, headingRef, onStartOver, onEditJob }: Props) {
+export function MatchReportView({
+  report,
+  job,
+  headingRef,
+  actions,
+  sample = false,
+  notice,
+}: Props) {
   const [filter, setFilter] = useState<RequirementFilter>('all')
   const [target, setTarget] = useState<{ id: string } | null>(null)
   const pendingScroll = useRef(false)
@@ -57,7 +66,9 @@ export function MatchReportView({ report, job, headingRef, onStartOver, onEditJo
       <header className="space-y-5 border-b border-line pb-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
-            <p className="font-mono text-xs text-accent">Job Match Analyzer · report</p>
+            <p className="font-mono text-xs text-accent">
+              Job Match Analyzer · {sample ? 'sample report' : 'report'}
+            </p>
             <h1
               id="match-step-title"
               ref={headingRef}
@@ -68,15 +79,9 @@ export function MatchReportView({ report, job, headingRef, onStartOver, onEditJo
             </h1>
             {job?.company ? <p className="text-lg text-muted">{job.company}</p> : null}
           </div>
-          <div className="flex flex-wrap gap-3">
-            <button type="button" onClick={onEditJob} className={PRIMARY_BUTTON}>
-              Edit job and re-run
-            </button>
-            <button type="button" onClick={onStartOver} className={SECONDARY_BUTTON}>
-              Start over
-            </button>
-          </div>
+          <div className="flex flex-wrap gap-3">{actions('header')}</div>
         </div>
+        {notice}
         {sections.length > 1 ? (
           <nav aria-label="Report sections">
             <ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
@@ -105,15 +110,12 @@ export function MatchReportView({ report, job, headingRef, onStartOver, onEditJo
       <SuggestedWording report={report} />
 
       <footer className="flex flex-col gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-mono text-xs text-muted">Assessed by {report.model}.</p>
-        <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={onEditJob} className={SECONDARY_BUTTON}>
-            Edit job and re-run
-          </button>
-          <button type="button" onClick={onStartOver} className={SECONDARY_BUTTON}>
-            Start over
-          </button>
-        </div>
+        <p className="font-mono text-xs text-muted">
+          {sample
+            ? 'Sample data: no model was run to produce this page.'
+            : `Assessed by ${report.model}.`}
+        </p>
+        <div className="flex flex-wrap gap-3">{actions('footer')}</div>
       </footer>
     </div>
   )
