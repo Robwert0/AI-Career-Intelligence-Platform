@@ -8,8 +8,9 @@ import { SECONDARY_BUTTON } from './styles'
 import { ToolIntro } from './ToolIntro'
 
 export function MatchGate() {
-  const { status, exitReason } = useAuth()
-  if (status === 'authenticated') return <MatchAnalyzer />
+  const { status, exitReason, accountId } = useAuth()
+  // Keyed by account: a different account never inherits this one's flow, polls or responses.
+  if (status === 'authenticated') return <MatchAnalyzer key={accountId ?? 'unknown'} />
   return (
     <div className="max-w-3xl space-y-8">
       <ToolIntro />

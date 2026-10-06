@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { describedBy } from '@/lib/aria'
-import { decisionPanelKind } from '@/lib/decisionPanel'
+import { restoredPanelKind } from '@/lib/decisionPanel'
 import type { Decision, FailureOut, MatchReport } from '@/lib/match'
 import { analysisFailureAction, type Problem } from '@/lib/matchErrors'
 import {
@@ -14,8 +14,10 @@ import {
   type CandidateInput,
 } from '@/lib/matchInputs'
 import { analysisAnnouncement, analysisStages, queueText } from '@/lib/matchProgress'
+import { INPUTS_NOT_KEPT } from '@/lib/matchRecovery'
 import { useAnalysis } from '@/lib/useAnalysis'
 import type { UploadLimits } from '@/lib/matchConfig'
+import { Availability } from './Availability'
 import { CvInput } from './CvInput'
 import { FieldError } from './Field'
 import { Announcer, StageList } from './StageList'
@@ -32,8 +34,11 @@ type Props = {
   candidate: CandidateInput
   limits: UploadLimits
   onCandidateChange: (patch: Partial<CandidateInput>) => void
-  onReport: (report: MatchReport) => void
+  onReport: (report: MatchReport, expiresAt: number | null) => void
   onMoved: (analysisId: string) => void
+  onGone: () => void
+  // Restored after a reload: the posting and CV this tab entered are not available any more.
+  inputsLost: boolean
   onResubmit: () => void
   resubmitting: boolean
   resubmitProblem: Problem | null
@@ -47,9 +52,13 @@ export function AnalysisProgress(props: Props) {
     onReport: props.onReport,
     onMoved: props.onMoved,
     onDiscarded: props.onStartOver,
+    onGone: props.onGone,
   })
   const { view } = analysis
-  const given = candidateSources(props.candidate)
+  // A restored analysis's sources are unknown here; a source stage shows only while it runs.
+  const given = props.inputsLost
+    ? { cv: view?.stage === 'reading_cv', github: view?.stage === 'reading_github' }
+    : candidateSources(props.candidate)
   const stages = analysisStages(
     {
       cv: given.cv && !analysis.skipped.includes('cv'),
@@ -69,14 +78,20 @@ export function AnalysisProgress(props: Props) {
 
   return (
     <div className="space-y-6">
+      {props.inputsLost ? (
+        <p role="note" className="rounded-md border border-line px-4 py-3 text-sm text-muted">
+          Restored after a reload. {INPUTS_NOT_KEPT}
+        </p>
+      ) : null}
       <StageList items={stages} />
       <Announcer text={analysisAnnouncement(view, stages)} />
       {queue ? <p className="text-sm">{queue}</p> : null}
       {working && analysis.problem === null ? (
         <p className="text-sm text-muted">
-          This usually takes a few minutes. Keep this tab open until the report is ready.
+          This usually takes a few minutes. You can reload this tab; the analysis keeps running.
         </p>
       ) : null}
+      {analysis.problem === null ? <Availability expiresAt={analysis.expiresAt} /> : null}
 
       {decision ? (
         <DecisionPanel
@@ -84,6 +99,7 @@ export function AnalysisProgress(props: Props) {
           candidate={props.candidate}
           limits={props.limits}
           onCandidateChange={props.onCandidateChange}
+          inputsLost={props.inputsLost}
           acting={analysis.acting}
           onRetry={analysis.retry}
           onContinue={() => void analysis.continueWithout()}
@@ -95,32 +111,53 @@ export function AnalysisProgress(props: Props) {
         <div role="alert" className={ALERT}>
           <p>{failure.message}</p>
           <ResubmitNote problem={props.resubmitProblem} onOpen={props.onMoved} />
-          <div className="flex flex-wrap items-center gap-2">
-            <FailureAction
-              failure={failure}
-              onResubmit={props.onResubmit}
-              resubmitting={props.resubmitting}
-              onEditCandidate={props.onEditCandidate}
-              onEditJob={props.onEditJob}
-            />
-            <button
-              type="button"
-              disabled={analysis.acting}
-              onClick={() => void analysis.startOver()}
-              className={TEXT_BUTTON}
-            >
-              Start over
-            </button>
-          </div>
+          {props.inputsLost ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={analysis.acting}
+                onClick={() => void analysis.startOver()}
+                className={SECONDARY_BUTTON}
+              >
+                Start a new analysis
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <FailureAction
+                failure={failure}
+                onResubmit={props.onResubmit}
+                resubmitting={props.resubmitting}
+                onEditCandidate={props.onEditCandidate}
+                onEditJob={props.onEditJob}
+              />
+              <button
+                type="button"
+                disabled={analysis.acting}
+                onClick={() => void analysis.startOver()}
+                className={TEXT_BUTTON}
+              >
+                Start over
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
 
       {analysis.problem ? (
         <div role="alert" className={ALERT}>
-          <p>{analysis.problem.message}</p>
+          <p>
+            {analysis.problem.expired && props.inputsLost
+              ? 'This analysis has expired or no longer exists. Results are deleted about an hour after they are created.'
+              : analysis.problem.message}
+          </p>
           <ResubmitNote problem={props.resubmitProblem} onOpen={props.onMoved} />
           <div className="flex flex-wrap items-center gap-2">
-            {analysis.problem.expired ? (
+            {analysis.problem.expired && props.inputsLost ? (
+              <button type="button" onClick={props.onStartOver} className={SECONDARY_BUTTON}>
+                Start a new analysis
+              </button>
+            ) : analysis.problem.expired ? (
               <button
                 type="button"
                 onClick={props.onResubmit}
@@ -154,6 +191,7 @@ type DecisionPanelProps = {
   candidate: CandidateInput
   limits: UploadLimits
   onCandidateChange: (patch: Partial<CandidateInput>) => void
+  inputsLost: boolean
   acting: boolean
   onRetry: (form?: FormData) => Promise<void>
   onContinue: () => void
@@ -169,13 +207,14 @@ function DecisionPanel({
   candidate,
   limits,
   onCandidateChange,
+  inputsLost,
   acting,
   onRetry,
   onContinue,
   onStartOver,
 }: DecisionPanelProps) {
-  const kind = decisionPanelKind(decision.error.recovery)
   const isCv = decision.failed_source === 'cv'
+  const kind = restoredPanelKind(decision.error.recovery, decision.failed_source, inputsLost)
 
   useEffect(() => {
     if (!isCv) return
@@ -190,6 +229,9 @@ function DecisionPanel({
         {isCv ? "We couldn't read your CV" : "We couldn't read your GitHub profile"}
       </h3>
       <p>{decision.error.message}</p>
+      {inputsLost && isCv ? (
+        <p>Your CV is not kept in this browser, so choose or paste it again to retry.</p>
+      ) : null}
 
       {isCv && (kind === 'choose_file' || kind === 'paste_cv') ? (
         <CvRetryPanel

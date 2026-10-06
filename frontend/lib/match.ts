@@ -52,7 +52,12 @@ export type MatchConfig = {
 // done => report, needs_decision => decision, failed => error, and
 // queue_position is set only while queued. `stage` stays uniformly nullable -- it is not one of
 // the guaranteed invariants (a resumed analysis carries stage: null until it runs again).
-type AnalysisCommon = { analysis_id: string; stage: AnalysisStage | null }
+type AnalysisCommon = {
+  analysis_id: string
+  stage: AnalysisStage | null
+  // Seconds left on the server record; the authoritative clock for how long it can be recovered.
+  expires_in_seconds: number | null
+}
 export type AnalysisView =
   | (AnalysisCommon & {
       status: 'queued'

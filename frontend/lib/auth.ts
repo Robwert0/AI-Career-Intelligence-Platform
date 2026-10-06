@@ -15,6 +15,24 @@ export function setAccessToken(token: string | null): void {
   accessToken = token
 }
 
+// Read, never verified: the id only tags this tab's state with the account it belongs to. The
+// server checks ownership on every request, so a forged claim gains nothing.
+export function accountIdFrom(token: string | null): string | null {
+  const payload = token?.split('.')[1]
+  if (!payload) return null
+  try {
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+    const sub = (JSON.parse(json) as { sub?: unknown }).sub
+    return typeof sub === 'string' && sub !== '' ? sub : null
+  } catch {
+    return null
+  }
+}
+
+export function currentAccountId(): string | null {
+  return accountIdFrom(accessToken)
+}
+
 function tokenFrom(data: unknown): string | null {
   if (typeof data !== 'object' || data === null) return null
   const candidate = (data as { access_token?: unknown }).access_token

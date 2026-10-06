@@ -121,6 +121,9 @@ async def env(
         headers = await _login(client, f"{uuid.uuid4().hex[:10]}@test.dev")
         allow_all_limiter.calls.clear()
         yield Env(client, queue, store, registry, headers, allow_all_limiter)
+    # Queued test analyses would otherwise count towards the shared Redis cap of waiting analyses
+    # until they go stale, so repeated runs start failing with queue_full.
+    await registry.forget(*(job_id for _, job_id in queue.enqueued))
     app.dependency_overrides.clear()
 
 
@@ -959,3 +962,38 @@ async def test_the_golden_full_report_round_trips_through_the_api(env: Env) -> N
     statuses = {requirement["status"] for requirement in golden["requirements"]}
     assert statuses == {"demonstrated", "partial", "unmet", "not_demonstrated", "not_assessed"}
     assert golden["rewrites"] and golden["recommendations"]["immediate"]
+
+
+async def test_an_analysis_reports_the_records_remaining_lifetime(
+    env: Env, redis_client: Redis
+) -> None:
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    await redis_client.expire(f"job:{analysis_id}", 600)
+
+    body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
+
+    assert 595 <= body["expires_in_seconds"] <= 600
+
+
+async def test_polling_never_extends_an_analysis_lifetime(env: Env, redis_client: Redis) -> None:
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    await env.store.mark_done(
+        analysis_id, result={"report": json.loads(GOLDEN_REPORT.read_text())}, now=time.time()
+    )
+    await redis_client.expire(f"job:{analysis_id}", 120)
+
+    for _ in range(3):
+        body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
+        assert body["status"] == "done"
+        assert body["expires_in_seconds"] <= 120
+    assert 0 < await redis_client.ttl(f"job:{analysis_id}") <= 120
+
+
+async def test_an_expired_analysis_is_404_to_its_owner(env: Env, redis_client: Redis) -> None:
+    analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
+    await redis_client.delete(f"job:{analysis_id}")
+
+    response = await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)
+
+    assert response.status_code == 404
+    assert detail_code(response) == "analysis_not_found"

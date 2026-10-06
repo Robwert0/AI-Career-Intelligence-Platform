@@ -219,6 +219,8 @@ class AnalysisStatusResponse(BaseModel):
     error: FailureOut | None
     decision: DecisionOut | None
     report: MatchReport | None
+    # Relative, not a timestamp, so a skewed client clock cannot misplace the deadline.
+    expires_in_seconds: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _status_carries_its_payload(self) -> Self:

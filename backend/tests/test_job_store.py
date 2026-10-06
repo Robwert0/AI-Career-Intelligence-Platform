@@ -442,3 +442,20 @@ async def test_the_first_stage_can_be_left_unset(store: JobStore, owner: str) ->
 
     assert running is not None
     assert running.stage is None
+
+
+async def test_remaining_seconds_reads_the_records_ttl_without_changing_it(
+    store: JobStore, owner: str, redis_client: Redis
+) -> None:
+    record = await store.create("match_analysis", owner, now=NOW)
+    await redis_client.expire(f"job:{record.id}", 90)
+
+    assert 85 <= (await store.remaining_seconds(record.id) or 0) <= 90
+    assert await redis_client.ttl(f"job:{record.id}") <= 90
+
+
+async def test_remaining_seconds_is_none_for_a_missing_or_malformed_record(
+    store: JobStore,
+) -> None:
+    assert await store.remaining_seconds("A" * 22) is None
+    assert await store.remaining_seconds("../job:x") is None
