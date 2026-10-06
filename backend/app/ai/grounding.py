@@ -151,6 +151,22 @@ def _lenient(word: str, known: set[str]) -> bool:
     return any(stem + suffix in known for stem in stems for suffix in _SUFFIXES)
 
 
+def _script(char: str) -> str:
+    # "CYRILLIC CAPITAL LETTER EM" -> "CYRILLIC"; accented Latin letters stay "LATIN".
+    return unicodedata.name(char, "UNKNOWN").split(" ", 1)[0]
+
+
+def _foreign_letters(source: str, answer: str) -> list[str]:
+    """Letters from a script the CV never uses: _WORD only reads ASCII, so a Cyrillic "М" in
+    "Мicrosoft" would otherwise hide the name from every other check."""
+    scripts = {_script(char) for char in source if char.isalpha() and not char.isascii()}
+    return [
+        char
+        for char in answer
+        if char.isalpha() and not char.isascii() and _script(char) not in scripts | {"LATIN"}
+    ]
+
+
 def _dictated_name(word: str, dictated: set[str]) -> bool:
     lowered = word.lower()
     return word[0].isupper() and lowered in dictated and lowered not in _FUNCTION_WORDS
@@ -172,7 +188,8 @@ def ungrounded_terms(source: str, answer: str, user_text: str = "") -> list[str]
     answer = unicodedata.normalize("NFKC", answer)
     dictated = {word.lower() for word, _ in _names(unicodedata.normalize("NFKC", user_text))}
     numbers = set(_NUMBER.findall(source))
-    terms = [number for number in _NUMBER.findall(answer) if number not in numbers]
+    terms = _foreign_letters(source, answer)
+    terms += [number for number in _NUMBER.findall(answer) if number not in numbers]
     known = {word.lower() for word, _ in _names(source)}
     for word, opens_sentence in _names(answer):
         lowered = word.lower()

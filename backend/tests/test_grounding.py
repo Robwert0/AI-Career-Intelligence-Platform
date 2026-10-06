@@ -145,3 +145,16 @@ def test_words_a_question_shares_with_an_ordinary_answer_are_grounded(
 
 def test_an_opening_word_the_user_never_wrote_is_still_just_a_first_word() -> None:
     assert ungrounded_terms(CV, "Notably, he uses Python.", "What does he use?") == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["He worked at \u041cicrosoft.", "He worked at \u0406ntel.", "\u039cicrosoft hired him."],
+)
+def test_lookalike_letters_from_another_script_are_ungrounded(answer: str) -> None:
+    assert ungrounded_terms(CV, answer, answer) != []
+
+
+def test_accented_latin_letters_are_not_a_foreign_script() -> None:
+    cv = CV + "\nLocation: Timi\u0219oara, Bra\u0219ov"
+    assert ungrounded_terms(cv, "He studied in Bra\u0219ov and lives in Timi\u0219oara.") == []
