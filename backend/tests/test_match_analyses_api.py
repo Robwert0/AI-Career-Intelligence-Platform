@@ -121,6 +121,9 @@ async def env(
         headers = await _login(client, f"{uuid.uuid4().hex[:10]}@test.dev")
         allow_all_limiter.calls.clear()
         yield Env(client, queue, store, registry, headers, allow_all_limiter)
+    # Queued test analyses would otherwise count towards the shared Redis cap of waiting analyses
+    # until they go stale, so repeated runs start failing with queue_full.
+    await registry.forget(*(job_id for _, job_id in queue.enqueued))
     app.dependency_overrides.clear()
 
 
