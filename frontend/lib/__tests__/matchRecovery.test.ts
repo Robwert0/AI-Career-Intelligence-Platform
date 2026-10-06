@@ -109,6 +109,15 @@ describe('tab session ownership', () => {
     expect(Object.fromEntries(store.data)).toEqual({ 'aci:owner': 'bob', theme: 'dark' })
   })
 
+  it('wipes state that no account owns before the first claim', () => {
+    const store = memoryStore({ 'aci:match:analysis': ID })
+
+    claimTabSession('bob', store)
+
+    expect(readRecoveryId(store)).toBeNull()
+    expect(store.data.get('aci:owner')).toBe('bob')
+  })
+
   it('keeps the state when the same account signs back in', () => {
     const store = memoryStore({ 'aci:owner': 'alice', 'aci:match:analysis': ID })
 

@@ -21,8 +21,9 @@ export type RestorePhase =
 // with whichever analysis is on screen.
 export function useAnalysisRecovery(analysisId: string | null, dispatch: Dispatch<FlowAction>) {
   const { accountId, sessionExpired } = useAuth()
+  // No account id means no restore could ever be accepted, so none is attempted.
   const [phase, setPhase] = useState<RestorePhase>(() =>
-    readRecoveryId() === null ? { type: 'none' } : { type: 'checking' },
+    readRecoveryId() === null || accountId === null ? { type: 'none' } : { type: 'checking' },
   )
 
   useEffect(() => {
@@ -69,9 +70,10 @@ export function useAnalysisRecovery(analysisId: string | null, dispatch: Dispatc
   // Until a pending restore settles, the stored id is the only copy of it and must not be cleared.
   useEffect(() => {
     if (phase.type === 'checking' || phase.type === 'unreachable') return
-    if (analysisId === null) clearRecoveryId()
+    // Without an account to own it, an id could later be claimed by whoever signs in next.
+    if (analysisId === null || accountId === null) clearRecoveryId()
     else saveRecoveryId(analysisId)
-  }, [analysisId, phase.type])
+  }, [analysisId, phase.type, accountId])
 
   return {
     phase,

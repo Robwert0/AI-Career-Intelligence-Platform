@@ -33,8 +33,8 @@ export function clearTabSession(store: KeyValueStore | null = tabStorage()): voi
   })
 }
 
-// Called whenever a session is established: state left by a different account is wiped before
-// anything can read it.
+// Called whenever a session is established: state left by a different account, or by no known
+// account, is wiped before anything can read it.
 export function claimTabSession(
   accountId: string,
   store: KeyValueStore | null = tabStorage(),
@@ -42,7 +42,7 @@ export function claimTabSession(
   if (store === null) return
   attempt(() => {
     const owner = store.getItem(OWNER_KEY)
-    if (owner !== null && owner !== accountId) clearTabSession(store)
+    if (owner !== accountId) clearTabSession(store)
     store.setItem(OWNER_KEY, accountId)
   })
 }

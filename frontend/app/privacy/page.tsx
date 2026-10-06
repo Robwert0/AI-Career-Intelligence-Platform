@@ -95,9 +95,12 @@ export default function PrivacyPage() {
           <p className="leading-relaxed">
             So a reload does not lose a running analysis or its report, this browser tab keeps two
             identifiers in its session storage: the analysis id and your account id. No CV, job text
-            or report is stored in the browser. Session storage is cleared when you close the tab or
-            sign out, or when another account signs in. Keeping the identifiers does not make the
-            analysis last longer: the report is still deleted on the server when it expires.
+            or report is stored in the browser. They are cleared when you sign out, or when another
+            account signs in in that tab, and normally when you close the tab (a browser that
+            restores closed tabs may restore them too). If your session times out they are kept, so
+            signing back in to the same account resumes the analysis. Keeping the identifiers does
+            not make the analysis last longer: the report is still deleted on the server when it
+            expires.
           </p>
         </Section>
 
