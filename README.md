@@ -169,10 +169,10 @@ Open `.env` and set these. The rest already have working defaults:
 SECRET_KEY=<paste the output of: openssl rand -hex 32>
 
 POSTGRES_USER=career
-POSTGRES_PASSWORD=<any password>
+POSTGRES_PASSWORD=<letters and digits only, e.g. openssl rand -hex 16>
 POSTGRES_DB=career
 POSTGRES_PORT=5432
-# must match the four values above
+# must match the four values above; the password goes into the URL unencoded, hence no symbols
 DATABASE_URL=postgresql+asyncpg://career:<the same password>@localhost:5432/career
 
 # Temporary placeholder. The backend refuses to load config while this is empty, and that includes
@@ -180,8 +180,8 @@ DATABASE_URL=postgresql+asyncpg://career:<the same password>@localhost:5432/care
 CV_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
 ```
 
-If port 5432 or 6379 is already in use on your machine, change `POSTGRES_PORT` and the port in
-`DATABASE_URL` together. Redis is always published on 6379.
+If port 5432 is already in use on your machine, change `POSTGRES_PORT` and the port in
+`DATABASE_URL` together. Redis is always published on 6379, so stop any local Redis already using it.
 
 ### 3. Start Postgres and Redis
 
@@ -258,7 +258,8 @@ accepts the `localhost` origin by default.
 | `cv_document_id ... Input should be a valid UUID` | `CV_DOCUMENT_ID` is empty; use the placeholder from step 2 |
 | `Connection refused` on 5432 / 6379 | Docker containers not running: `docker compose up -d database redis` |
 | `password authentication failed` | `DATABASE_URL` does not match `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`; if you changed them after the first start, the old volume keeps the old ones (`docker compose down -v` resets it, **deleting the data**) |
-| Chat returns 503 | Ollama not running, `qwen3:8b` not pulled, or the first cold model load exceeded `CHAT_TIMEOUT_SECONDS`; retry |
+| Chat returns 503 | Ollama is not running, or the first cold model load exceeded `CHAT_TIMEOUT_SECONDS` (retry), or all generation slots are busy |
+| Chat returns 500 | the model is not pulled: `ollama pull qwen3:8b` (Ollama answers 404, which the API treats as a rejected request) |
 | Chat refuses every question | the chat is scoped to `CV_DOCUMENT_ID`; check it matches the id `ingest_cv.py` printed, then restart uvicorn |
 | A match analysis never leaves the queue | the Celery worker is not running |
 | Register / login fail with 403 | you opened `127.0.0.1:3000` instead of `localhost:3000`; the origin check blocks every POST from an unlisted origin |
