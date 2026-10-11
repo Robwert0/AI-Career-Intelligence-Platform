@@ -14,6 +14,7 @@ scalable and explainable** before it counts as done.
 - A detail page for every project (statically generated), and a printable `/cv` page
 - Dark/light theme toggle with no flash of the wrong theme on load
 - Register / login UI and a chat interface, plus an always-present chat bubble on the landing page
+- A `/privacy` page listing everything the site stores, linked from the footer and the register form
 
 **Authentication (FastAPI, async SQLAlchemy, PostgreSQL)**
 - Register and login with bcrypt password hashing
@@ -71,6 +72,17 @@ scalable and explainable** before it counts as done.
   check, and frontend lint, format, tests and build
 - Backend dependencies are installed from `uv.lock`, so CI tests exactly what runs locally
 
+**Admin, analytics and data retention**
+- Registration optionally asks for company and role; login and token refresh record last activity
+- An admin-only `/admin` page lists registered users (paginated, `Cache-Control: no-store`)
+- Admins are created with `scripts/make_admin.py --create`, which refuses existing emails and
+  requires a 16+ character password; granting admin to an existing account also needs its password
+- Optional [Umami](https://umami.is) analytics: the tracker is vendored and served from our own
+  origin (a test pins its sha256), and the CSP only opens `connect-src` to the collector when a
+  website id is configured
+- A daily Celery beat task deletes non-admin accounts inactive for `ACCOUNT_RETENTION_DAYS`
+  (default 365); `scripts/delete_account.py` handles individual erasure requests
+
 ## Roadmap
 
 | Phase | Area | Status |
@@ -85,7 +97,7 @@ scalable and explainable** before it counts as done.
 | 8 | Job matching: CV vs job description | ✅ Done: the Job Match Analyzer (job intake, CV + GitHub evidence, hybrid retrieval, multi-stage LLM assessment, transparent scoring). The per-source similarity gates (CV 0.605, GitHub 0.583) are calibrated against one real CV and one GitHub profile; the eval quality gate (`scripts/eval_match.py`) has not yet passed against hand-labelled postings |
 | 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Planned |
 | 10 | Security hardening | 🟡 Partial: rate limiting, prompt-injection defense and file-upload validation done for chat and the Job Match Analyzer; queue/worker-concurrency hardening (a global cap of 20 waiting analyses and separate intake/analysis queues exist; stale-queue edge cases remain) still open |
-| 11 | Observability | 🟡 Partial: logging done; error tracking and token usage pending |
+| 11 | Observability | 🟡 Partial: structured logging, admin visitor insights and optional Umami analytics done; error tracking and token-usage tracking pending |
 | 12 | Deployment | ⏳ Planned |
 
 RAG was deliberately built before the frontend, so the chat had a real backend to talk to.
@@ -119,28 +131,142 @@ what lets the refresh cookie be `SameSite=Strict`.
 
 ## Running locally
 
-Prerequisites: Docker, [uv](https://docs.astral.sh/uv/), Node 24, and [Ollama](https://ollama.com)
-with the `qwen3:8b` model pulled.
+This walks you from a fresh clone to the site running on `http://localhost:3000`, with a CV you can
+chat with. Everything runs on your machine: generation uses a local Ollama model, so you need no API
+key. Plan for about 15 minutes, plus model downloads.
+
+### 1. Install the prerequisites
+
+| Tool | Why | Check |
+|---|---|---|
+| [Git](https://git-scm.com) | clone the repo | `git --version` |
+| [Docker](https://docs.docker.com/get-docker/) with Compose | runs Postgres + pgvector and Redis | `docker compose version` |
+| [uv](https://docs.astral.sh/uv/) | Python deps; downloads Python 3.14 for you if missing | `uv --version` |
+| [Node.js 24](https://nodejs.org) | the Next.js frontend | `node --version` |
+| [Ollama](https://ollama.com) | the local LLM that writes chat answers and runs job analysis | `ollama --version` |
+
+Pull the generation model once (about 5 GB; a GPU helps a lot, but CPU works, slowly):
 
 ```bash
-cp .env.example .env                  # then fill in SECRET_KEY etc.
+ollama pull qwen3:8b
+```
+
+You also need a CV as a **text-based PDF** (one you can select text in; scanned images will not
+parse). That is the document the chat answers from.
+
+### 2. Clone and configure
+
+```bash
+git clone https://github.com/Robwert0/AI-Career-Intelligence-Platform.git
+cd AI-Career-Intelligence-Platform
+cp .env.example .env
 cp frontend/.env.example frontend/.env.local
+```
 
-docker compose up -d database redis   # Postgres + Redis
+Open `.env` and set these. The rest already have working defaults:
 
+```bash
+SECRET_KEY=<paste the output of: openssl rand -hex 32>
+
+POSTGRES_USER=career
+POSTGRES_PASSWORD=<letters and digits only, e.g. openssl rand -hex 16>
+POSTGRES_DB=career
+POSTGRES_PORT=5432
+# must match the four values above; the password goes into the URL unencoded, hence no symbols
+DATABASE_URL=postgresql+asyncpg://career:<the same password>@localhost:5432/career
+
+# Temporary placeholder. The backend refuses to load config while this is empty, and that includes
+# the migration and ingest commands below. You replace it in step 5.
+CV_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
+```
+
+If port 5432 is already in use on your machine, change `POSTGRES_PORT` and the port in
+`DATABASE_URL` together. Redis is always published on 6379, so stop any local Redis already using it.
+
+### 3. Start Postgres and Redis
+
+```bash
+docker compose up -d database redis
+docker compose ps        # both should show "healthy" after a few seconds
+```
+
+### 4. Install the backend and create the tables
+
+```bash
 cd backend
 uv sync --extra dev
 uv run alembic upgrade head
-uv run python scripts/ingest_cv.py path/to/cv.pdf   # load a CV into the chunks table
-uv run uvicorn app.main:app --reload
-uv run celery -A app.workers.celery_app worker --loglevel=info   # background jobs (separate terminal); consumes every queue
-
-cd ../frontend
-npm ci
-npm run dev
 ```
 
-Job Match Analyzer env lines worth calling out (see `.env.example` for the rest):
+### 5. Load your CV
+
+```bash
+uv run python scripts/ingest_cv.py /path/to/your-cv.pdf
+# my-cv.pdf: 7 chunks -> document 3f2a...-....
+```
+
+The first run downloads the embedding model (`bge-small-en-v1.5`, about 130 MB). Copy the document
+id it prints into `.env`, replacing the placeholder:
+
+```bash
+CV_DOCUMENT_ID=<the id it printed>
+```
+
+The id comes from the file's contents, so re-ingesting the same PDF prints the same id and replaces
+its chunks instead of duplicating them.
+
+### 6. Run the services
+
+Each command runs in its own terminal, from `backend/`. Ollama must also be running; the desktop app
+runs it for you, otherwise start it with `ollama serve`.
+
+```bash
+uv run uvicorn app.main:app --reload                              # API on :8000
+uv run celery -A app.workers.celery_app worker --loglevel=info    # background jobs (Job Match Analyzer)
+uv run celery -A app.workers.celery_app beat --loglevel=info      # optional locally: daily retention purge
+```
+
+Then the frontend, from `frontend/`:
+
+```bash
+npm ci
+npm run dev                                                       # site on :3000
+```
+
+Use `http://localhost:3000`, not `127.0.0.1:3000`: the backend's CORS and CSRF allowlist only
+accepts the `localhost` origin by default.
+
+### 7. Try it
+
+1. Open `http://localhost:3000`. The landing page and the public sample report at `/match/sample`
+   work without an account.
+2. Register at `/register`, then ask the chat something your CV answers ("What did they work on
+   most recently?"). The first answer can take ~20 s while Ollama loads the model; later ones are
+   quicker.
+3. Open `/match`, paste a job posting, and add your CV PDF or a public GitHub username. You can
+   watch the analysis move through its stages; this needs the Celery worker from step 6.
+4. Optional: create an admin account and open `/admin`:
+
+   ```bash
+   uv run python scripts/make_admin.py --create admin@example.com   # from backend/; asks for a 16+ char password
+   ```
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| `cv_document_id ... Input should be a valid UUID` | `CV_DOCUMENT_ID` is empty; use the placeholder from step 2 |
+| `Connection refused` on 5432 / 6379 | Docker containers not running: `docker compose up -d database redis` |
+| `password authentication failed` | `DATABASE_URL` does not match `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`; if you changed them after the first start, the old volume keeps the old ones (`docker compose down -v` resets it, **deleting the data**) |
+| Chat returns 503 | Ollama is not running, or the first cold model load exceeded `CHAT_TIMEOUT_SECONDS` (retry), or all generation slots are busy |
+| Chat returns 500 | the model is not pulled: `ollama pull qwen3:8b` (Ollama answers 404, which the API treats as a rejected request) |
+| Chat refuses every question | the chat is scoped to `CV_DOCUMENT_ID`; check it matches the id `ingest_cv.py` printed, then restart uvicorn |
+| A match analysis never leaves the queue | the Celery worker is not running |
+| Register / login fail with 403 | you opened `127.0.0.1:3000` instead of `localhost:3000`; the origin check blocks every POST from an unlisted origin |
+
+### Configuration worth knowing
+
+Job Match Analyzer settings (see `.env.example` for the rest, each with its reasoning):
 - `MATCH_PRESELECT_MIN_SIMILARITY=0.605` (CV) and `MATCH_PRESELECT_MIN_SIMILARITY_GITHUB=0.583` —
   the refusal gate is per source and both have committed defaults. The statistic is each source's
   mean, over the posting's requirements, of that requirement's best evidence match ("relatedness").
@@ -168,4 +294,4 @@ cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd frontend && npm run lint && npm run test && npm run build
 ```
 
-The suite has 1377 backend tests (pytest) and 412 frontend tests (Vitest).
+The suite has 1541 backend tests (pytest) and 501 frontend tests (Vitest).
