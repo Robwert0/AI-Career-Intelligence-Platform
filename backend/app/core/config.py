@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     generation_timeout_seconds: int = 180
     generation_connect_timeout_seconds: int = 5
     # Optional so migrations and ingest run before the id exists; chat reads it only through
-    # require_cv_document_id, because document_id=None would search every user's uploads.
+    # require_cv_document_id, since retrieval takes a concrete document id, never "all".
     cv_document_id: uuid.UUID | None = None
     retrieval_limit: int = Field(default=5, ge=1, le=20)
     retrieval_similarity_threshold: float = Field(default=0.48, ge=-1.0, le=1.0)

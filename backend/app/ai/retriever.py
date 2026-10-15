@@ -55,7 +55,7 @@ class Retriever:
         self,
         query: str,
         *,
-        document_id: uuid.UUID | None,
+        document_id: uuid.UUID,
         limit: int = 5,
         section: str | None = None,
     ) -> RetrievalResult:
@@ -68,8 +68,12 @@ class Retriever:
 
         window = limit * RANK_WINDOW_MULTIPLIER
         vector = await asyncio.to_thread(self._embedder.embed_query, query)
-        vector_hits = await self._repo.search_by_vector(vector, window, section, document_id)
-        text_result = await self._repo.search_by_text(query, window, section, document_id)
+        vector_hits = await self._repo.search_by_vector(
+            vector, window, document_id=document_id, section=section
+        )
+        text_result = await self._repo.search_by_text(
+            query, window, document_id=document_id, section=section
+        )
         vector_result = [chunk for chunk, _ in vector_hits]
 
         return RetrievalResult(

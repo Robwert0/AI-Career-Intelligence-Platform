@@ -43,7 +43,7 @@ def vector_for(content: str) -> list[float]:
 
 
 async def test_vector_search_puts_the_exact_match_first(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_vector(vector_for(SEED[2][1]), limit=4)
+    hits = await seeded.search_by_vector(vector_for(SEED[2][1]), limit=4, document_id=DOCUMENT_ID)
     assert hits[0][0].content == SEED[2][1]
 
 
@@ -56,7 +56,7 @@ async def test_vector_search_orders_by_ascending_distance(seeded: ChunkRepositor
         return 1.0 - sum(a * b for a, b in zip(vector, probe, strict=True))
 
     expected = [content for _, content in sorted(SEED, key=lambda row: distance(row[1]))]
-    hits = await seeded.search_by_vector(probe, limit=4)
+    hits = await seeded.search_by_vector(probe, limit=4, document_id=DOCUMENT_ID)
     assert [chunk.content for chunk, _ in hits] == expected
 
 
@@ -87,38 +87,77 @@ async def test_text_search_can_narrow_to_one_document(seeded: ChunkRepository) -
     assert await seeded.search_by_text("Terraform", limit=4, document_id=DOCUMENT_ID) != []
 
 
+async def test_a_better_match_in_another_document_is_never_returned(
+    seeded: ChunkRepository,
+) -> None:
+    other = uuid.uuid4()
+    lure = "Terraform Terraform Terraform expert."
+    embedder = FakeEmbedder()
+    await seeded.replace_document_chunks(
+        other,
+        [
+            Chunk(
+                document_id=other,
+                chunk_index=0,
+                content=lure,
+                section="skills",
+                embedding=embedder.embed_documents([lure])[0],
+                embedding_model=embedder.model_name,
+            )
+        ],
+    )
+
+    vector_hits = await seeded.search_by_vector(vector_for(lure), limit=10, document_id=DOCUMENT_ID)
+    text_hits = await seeded.search_by_text(lure, limit=10, document_id=DOCUMENT_ID)
+
+    assert {chunk.document_id for chunk, _ in vector_hits} == {DOCUMENT_ID}
+    assert {chunk.document_id for chunk in text_hits} == {DOCUMENT_ID}
+
+
 async def test_vector_search_respects_the_limit(seeded: ChunkRepository) -> None:
-    assert len(await seeded.search_by_vector(vector_for("anything"), limit=2)) == 2
+    assert (
+        len(await seeded.search_by_vector(vector_for("anything"), limit=2, document_id=DOCUMENT_ID))
+        == 2
+    )
 
 
 async def test_vector_search_can_narrow_to_one_section(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_vector(vector_for("anything"), limit=4, section="skills")
+    hits = await seeded.search_by_vector(
+        vector_for("anything"), limit=4, document_id=DOCUMENT_ID, section="skills"
+    )
     assert [chunk.section for chunk, _ in hits] == ["skills"]
 
 
 async def test_text_search_matches_a_stemmed_word(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_text("engineers", limit=4)
+    hits = await seeded.search_by_text("engineers", limit=4, document_id=DOCUMENT_ID)
     assert [hit.section for hit in hits] == ["experience"]
 
 
 async def test_text_search_finds_a_rare_exact_token(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_text("Terraform", limit=4)
+    hits = await seeded.search_by_text("Terraform", limit=4, document_id=DOCUMENT_ID)
     assert [hit.section for hit in hits] == ["skills"]
 
 
 async def test_text_search_returns_nothing_without_lexical_overlap(
     seeded: ChunkRepository,
 ) -> None:
-    assert await seeded.search_by_text("cloud infrastructure", limit=4) == []
+    assert (
+        await seeded.search_by_text("cloud infrastructure", limit=4, document_id=DOCUMENT_ID) == []
+    )
 
 
 async def test_text_search_accepts_raw_punctuation_from_a_user(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_text("does he know Kubernetes?", limit=4)
+    hits = await seeded.search_by_text("does he know Kubernetes?", limit=4, document_id=DOCUMENT_ID)
     assert [hit.section for hit in hits] == ["skills"]
 
 
 async def test_text_search_can_narrow_to_one_section(seeded: ChunkRepository) -> None:
-    assert await seeded.search_by_text("Kubernetes", limit=4, section="education") == []
+    assert (
+        await seeded.search_by_text(
+            "Kubernetes", limit=4, document_id=DOCUMENT_ID, section="education"
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -137,17 +176,17 @@ async def test_text_search_can_narrow_to_one_section(seeded: ChunkRepository) ->
 async def test_punctuation_inside_a_url_lexeme_stays_literal(
     seeded: ChunkRepository, query: str
 ) -> None:
-    assert await seeded.search_by_text(query, limit=4) == []
+    assert await seeded.search_by_text(query, limit=4, document_id=DOCUMENT_ID) == []
 
 
 async def test_a_query_of_only_stopwords_is_not_an_error(seeded: ChunkRepository) -> None:
-    assert await seeded.search_by_text("the and or of", limit=4) == []
+    assert await seeded.search_by_text("the and or of", limit=4, document_id=DOCUMENT_ID) == []
 
 
 async def test_vector_search_returns_the_cosine_distance(seeded: ChunkRepository) -> None:
     target = SEED[2][1]
 
-    hits = await seeded.search_by_vector(vector_for(target), limit=4)
+    hits = await seeded.search_by_vector(vector_for(target), limit=4, document_id=DOCUMENT_ID)
 
     chunk, distance = hits[0]
     assert chunk.content == target
@@ -155,7 +194,7 @@ async def test_vector_search_returns_the_cosine_distance(seeded: ChunkRepository
 
 
 async def test_vector_search_distances_ascend(seeded: ChunkRepository) -> None:
-    hits = await seeded.search_by_vector(vector_for("anything"), limit=4)
+    hits = await seeded.search_by_vector(vector_for("anything"), limit=4, document_id=DOCUMENT_ID)
 
     distances = [distance for _, distance in hits]
     assert distances == sorted(distances)
@@ -186,7 +225,7 @@ async def test_vector_search_still_fills_the_limit_after_index_churn(
         )
         await db_session.execute(delete(Chunk).where(Chunk.document_id == churn))
 
-    hits = await seeded.search_by_vector(vector_for("anything"), limit=4)
+    hits = await seeded.search_by_vector(vector_for("anything"), limit=4, document_id=DOCUMENT_ID)
 
     assert len(hits) == 4
 

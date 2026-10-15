@@ -42,18 +42,21 @@ class ChunkRepository:
         self,
         embedding: list[float],
         limit: int,
+        *,
+        document_id: uuid.UUID,
         section: str | None = None,
-        document_id: uuid.UUID | None = None,
     ) -> list[tuple[Chunk, float]]:
         await self._session.execute(text("SET LOCAL hnsw.iterative_scan = 'relaxed_order'"))
 
         distance = Chunk.embedding.cosine_distance(embedding)
-        stmt = select(Chunk, distance).order_by(distance).limit(limit)
-
+        stmt = (
+            select(Chunk, distance)
+            .where(Chunk.document_id == document_id)
+            .order_by(distance)
+            .limit(limit)
+        )
         if section is not None:
             stmt = stmt.where(Chunk.section == section)
-        if document_id is not None:
-            stmt = stmt.where(Chunk.document_id == document_id)
 
         result = await self._session.execute(stmt)
 
@@ -63,19 +66,21 @@ class ChunkRepository:
         self,
         query: str,
         limit: int,
+        *,
+        document_id: uuid.UUID,
         section: str | None = None,
-        document_id: uuid.UUID | None = None,
     ) -> list[Chunk]:
         tsquery = _any_word_tsquery(query)
         rank = func.ts_rank(Chunk.search_vector, tsquery).desc()
 
         stmt = (
-            select(Chunk).where(Chunk.search_vector.op("@@")(tsquery)).order_by(rank).limit(limit)
+            select(Chunk)
+            .where(Chunk.document_id == document_id, Chunk.search_vector.op("@@")(tsquery))
+            .order_by(rank)
+            .limit(limit)
         )
         if section is not None:
             stmt = stmt.where(Chunk.section == section)
-        if document_id is not None:
-            stmt = stmt.where(Chunk.document_id == document_id)
 
         result = await self._session.execute(stmt)
 
