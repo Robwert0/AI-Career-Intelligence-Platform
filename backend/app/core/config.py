@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     )
     @classmethod
     def _blank_is_none(cls, value: object) -> object:
-        # GITHUB_TOKEN= in .env must mean "no token", not a Bearer header with an empty secret.
+        # A blank .env value means unset: no empty Bearer token, no UUID parse failure.
         return None if isinstance(value, str) and not value.strip() else value
 
     @property

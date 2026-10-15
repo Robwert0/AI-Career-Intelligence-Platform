@@ -161,14 +161,16 @@ def test_require_cv_document_id_returns_the_configured_id(
 
 def test_migrations_and_ingest_start_without_a_cv_document_id(tmp_path: Path) -> None:
     backend = Path(__file__).resolve().parents[1]
-    env = {**os.environ, "CV_DOCUMENT_ID": ""}
+    # PYTHONPATH pins `app` to this checkout; a shared editable venv may point elsewhere.
+    env = {**os.environ, "CV_DOCUMENT_ID": "", "PYTHONPATH": str(backend)}
 
     migrate = subprocess.run(
-        ["alembic", "upgrade", "head", "--sql"],
+        [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
         cwd=backend,
         env=env,
         capture_output=True,
         text=True,
+        timeout=120,
     )
     ingest = subprocess.run(
         [sys.executable, "scripts/ingest_cv.py", str(tmp_path / "absent.pdf")],
@@ -176,6 +178,7 @@ def test_migrations_and_ingest_start_without_a_cv_document_id(tmp_path: Path) ->
         env=env,
         capture_output=True,
         text=True,
+        timeout=120,
     )
 
     assert migrate.returncode == 0, migrate.stderr
