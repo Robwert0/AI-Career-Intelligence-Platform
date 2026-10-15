@@ -68,12 +68,8 @@ class Retriever:
 
         window = limit * RANK_WINDOW_MULTIPLIER
         vector = await asyncio.to_thread(self._embedder.embed_query, query)
-        # relaxed_order iterative scans can return filtered rows slightly out of distance order
-        vector_hits = sorted(
-            await self._repo.search_by_vector(
-                vector, window, document_id=document_id, section=section
-            ),
-            key=lambda hit: hit[1],
+        vector_hits = await self._repo.search_by_vector(
+            vector, window, document_id=document_id, section=section
         )
         text_result = await self._repo.search_by_text(
             query, window, document_id=document_id, section=section

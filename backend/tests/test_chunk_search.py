@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 from fakes import FakeEmbedder
-from sqlalchemy import delete
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk
@@ -197,6 +197,40 @@ async def test_vector_search_distances_ascend(seeded: ChunkRepository) -> None:
     hits = await seeded.search_by_vector(vector_for("anything"), limit=4, document_id=DOCUMENT_ID)
 
     distances = [distance for _, distance in hits]
+    assert distances == sorted(distances)
+
+
+async def test_a_filtered_index_scan_still_returns_nearest_first(
+    seeded: ChunkRepository, db_session: AsyncSession
+) -> None:
+    crowded = uuid.uuid4()
+    embedder = FakeEmbedder()
+    contents = [f"crowded row {index}" for index in range(120)]
+    await seeded.replace_document_chunks(
+        crowded,
+        [
+            Chunk(
+                document_id=crowded,
+                chunk_index=index,
+                content=content,
+                section="skills" if index % 4 == 0 else "other",
+                embedding=vector,
+                embedding_model=embedder.model_name,
+            )
+            for index, (content, vector) in enumerate(
+                zip(contents, embedder.embed_documents(contents), strict=True)
+            )
+        ],
+    )
+    await db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    await db_session.execute(text("SET LOCAL enable_bitmapscan = off"))
+
+    hits = await seeded.search_by_vector(
+        vector_for("anything"), limit=20, document_id=crowded, section="skills"
+    )
+
+    distances = [distance for _, distance in hits]
+    assert len(hits) == 20
     assert distances == sorted(distances)
 
 
