@@ -41,7 +41,8 @@ export default function PrivacyPage() {
             <li>
               Rate limiting: your IP address is held briefly in Redis to protect the site from
               abuse, and expires automatically within about an hour. If you are signed in, your
-              account id is used the same way.
+              account id is used the same way. Failed sign-in attempts are counted against a keyed
+              hash of the account (or of the email typed, if no account exists) for about an hour.
             </li>
             <li>
               Server logs: the server&apos;s request logs record your IP address and the page or API

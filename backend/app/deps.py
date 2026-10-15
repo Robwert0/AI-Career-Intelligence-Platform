@@ -248,6 +248,7 @@ async def reserved_rate_limit(
 async def failure_rate_limit(
     policy: Policy, identity: str, limiter: Limiter
 ) -> AsyncIterator[None]:
+    # A failure must raise: a handler that returns an error response would be refunded.
     # The inverse of reserved_rate_limit: taken up front for the same burst-safety, refunded only
     # when the block completes, so only failed attempts stay spent.
     await enforce_rate_limit(policy, identity, limiter)
