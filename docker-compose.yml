@@ -53,12 +53,15 @@ services:
     env_file: ${APP_ENV_FILE:-.env}
     environment:
       <<: *backend-env
-      # uvicorn reads this itself. Next's rewrite proxy forwards the client's X-Forwarded-For
-      # untouched, so trusting the frontend lets any visitor pick their own rate-limit key.
-      # Raise it only once a reverse proxy that overwrites X-Forwarded-For fronts Next.
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # uvicorn reads this itself and takes the client from X-Forwarded-For only when the TCP
+      # peer is listed here. Only the frontend: Caddy overwrites the header with the real client
+      # IP and Next passes it on untouched. Set in compose, so a value in .env cannot widen it.
+      FORWARDED_ALLOW_IPS: ${FRONTEND_PROXY_IP:-10.254.253.10}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - api_proxy
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -120,8 +123,15 @@ services:
         NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${NEXT_PUBLIC_UMAMI_WEBSITE_ID:-}
         NEXT_PUBLIC_UMAMI_DOMAINS: ${NEXT_PUBLIC_UMAMI_DOMAINS:-}
         NEXT_PUBLIC_UMAMI_DASHBOARD_URL: ${NEXT_PUBLIC_UMAMI_DASHBOARD_URL:-}
+    # Loopback only, for local development. This port bypasses Caddy, and the API trusts
+    # whatever X-Forwarded-For reaches it through the frontend, so it must never be public:
+    # the production override unpublishes it. The same holds for anything joining `edge`.
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    networks:
+      edge: {}
+      api_proxy:
+        ipv4_address: ${FRONTEND_PROXY_IP:-10.254.253.10}
     depends_on:
       api:
         condition: service_healthy
@@ -133,7 +143,44 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2.11.7-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys: losing them means re-issuing, and Let's Encrypt
+      # rate-limits that.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    depends_on:
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+
+
+# Three networks so each hop sees only its neighbour: Caddy reaches only the frontend, and the
+# frontend reaches only the API. api_proxy has a fixed subnet because the API trusts
+# X-Forwarded-For from one address, the frontend's (FRONTEND_PROXY_IP must sit inside
+# API_PROXY_SUBNET; compose refuses to start otherwise). The fixed address means one frontend
+# replica.
+networks:
+  default:
+  edge:
+  api_proxy:
+    ipam:
+      config:
+        - subnet: ${API_PROXY_SUBNET:-10.254.253.0/28}
 
 volumes:
   pgdata:
   celerybeat:
+  caddy_data:
+  caddy_config:

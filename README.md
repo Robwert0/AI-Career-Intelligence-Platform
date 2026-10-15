@@ -300,14 +300,20 @@ The suite has 1541 backend tests (pytest) and 501 frontend tests (Vitest).
 
 The same `.env` drives a fully containerized stack: Postgres, Redis, a one-shot `migrate`, the API,
 one Celery worker, exactly one Celery beat (never scale it: the daily retention purge runs from it),
-and the frontend. Do step 2 above first; you need Docker and Ollama, not uv or Node.
+the frontend and Caddy in front of it. Do step 2 above first; you need Docker and Ollama, not uv or
+Node.
 
 ```bash
 docker compose up -d --build        # first build takes minutes: CPU-only torch + the embedding model
 docker compose ps                   # all healthy; migrate shows "Exited (0)"
 ```
 
-Then open `http://localhost:3000` (`FRONTEND_PORT` changes the host port). Notes:
+Then open `http://localhost:3000` (bound to 127.0.0.1; `FRONTEND_PORT` changes it), or go through
+Caddy at `https://localhost` exactly as production does. Locally Caddy signs `localhost` with its own
+internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
+`CORS_ALLOWED_ORIGINS` to log in that way. If 80/443 are taken on your machine, set
+`CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` (the origin then carries the port, e.g.
+`https://localhost:8443`). Notes:
 - The containers override the `localhost` URLs in `.env` (`DATABASE_URL`, `REDIS_URL`,
   `CELERY_BROKER_URL`) with service names, so the same `.env` still serves the local flow.
 - Generation reaches Ollama on the host at `http://host.docker.internal:11434`; override it with
@@ -326,18 +332,42 @@ Then open `http://localhost:3000` (`FRONTEND_PORT` changes the host port). Notes
   docker compose run --rm api python scripts/make_admin.py --create admin@example.com
   ```
 
-For production on one host, add the override. It unpublishes Postgres and Redis, so only the
-frontend is reachable:
+### Production on one host
+
+1. Point a DNS **A record** for your domain at the server's public IPv4 address. Skip the AAAA
+   record unless Docker's IPv6 is enabled: otherwise IPv6 visitors reach Caddy through Docker's
+   userland proxy and all appear as one address, sharing one rate-limit bucket.
+2. Open **80/tcp and 443/tcp** (and 443/udp for HTTP/3) in the firewall. Port 80 must stay open:
+   Let's Encrypt validates through it, and Caddy redirects it to HTTPS.
+3. In `.env`: `DOMAIN=cv.example.com` and `CORS_ALLOWED_ORIGINS=https://cv.example.com` (the
+   API refuses state-changing requests from any other origin, so a mismatch fails every login).
+4. Start with the override. Only Caddy is published; the frontend, API, Postgres and Redis are
+   reachable on the compose networks alone. Caddy fetches the certificate on the first request and
+   keeps it in the `caddy_data` volume (don't `down -v` in production: re-issuing is rate-limited).
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-Two things it does not solve yet:
-- **TLS.** The refresh cookie is always `Secure`, so a reverse proxy with HTTPS has to sit in front
-  of the frontend before logins stick on a real domain.
-- **Per-IP rate limits.** Next's `/api/*` proxy forwards the client's own `X-Forwarded-For`
-  untouched, so trusting it would let any visitor pick their own rate-limit key. That is why
-  `FORWARDED_ALLOW_IPS` stays `127.0.0.1` (trust nothing) and every visitor shares the frontend's
-  per-IP bucket. Only once a reverse proxy that overwrites `X-Forwarded-For` is in front should it
-  be set to the compose network's subnet.
+The override also turns on HSTS for one year (`HSTS_MAX_AGE`); there is no ACME email, which
+Let's Encrypt does not require.
+
+**How the API sees the real client IP.** Per-IP rate limits key on `request.client.host`, so it has
+to be the visitor, not a proxy, and not something the visitor can choose:
+
+```
+visitor ─TLS─▶ Caddy ──▶ Next (frontend) ──▶ uvicorn (api)
+              │          │                  │
+              │          │                  └ FORWARDED_ALLOW_IPS = the frontend's fixed IP only:
+              │          │                    takes the client from X-Forwarded-For only on that hop
+              │          └ rewrites /api/* and forwards X-Forwarded-For untouched
+              └ no trusted_proxies: replaces any client-sent X-Forwarded-For with the TCP peer
+```
+
+`FORWARDED_ALLOW_IPS` is the list of peers uvicorn believes about `X-Forwarded-For`. Compose sets it
+to `FRONTEND_PROXY_IP` (default `10.254.253.10`, inside `API_PROXY_SUBNET`, default
+`10.254.253.0/28`); change those two only if the subnet collides with one on your host. Each network
+holds only the two hops it connects, so nothing else can talk to the frontend or the API. Two
+consequences: the frontend is a single replica (fixed address), and anything that reaches the
+frontend without going through Caddy can forge its IP, which is why port 3000 is loopback-only in
+development and unpublished in production.

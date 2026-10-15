@@ -1,0 +1,16 @@
+# The only public entry point. DOMAIN unset means `localhost`, served from Caddy's internal CA.
+# A real domain gets a Let's Encrypt certificate automatically (A record + ports 80/443 open).
+# No ACME email: it is optional, and Let's Encrypt no longer sends expiry mail anyway.
+{$DOMAIN:localhost} {
+	# Next already sends the CSP, nosniff, Referrer-Policy and X-Frame-Options; HSTS is the one
+	# header only the TLS terminator can honestly promise. max-age=0 (the default) keeps
+	# `localhost` from being pinned to https in a dev browser.
+	header {
+		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:0}"
+		-Server
+	}
+
+	# No trusted_proxies, here or globally: every request is treated as coming from the internet,
+	# so a client-sent X-Forwarded-For is replaced by the TCP peer address, never appended to.
+	reverse_proxy frontend:3000
+}

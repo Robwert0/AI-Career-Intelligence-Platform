@@ -1,10 +1,8 @@
 # Production override for the single-VPS deploy:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-# Only the frontend is published; Postgres, Redis and the API are reachable on the compose
-# network alone. `!reset` needs Docker Compose 2.24 or newer.
-#
-# Still needed before real traffic: TLS in front of the frontend. The refresh cookie is always
-# Secure, so over plain http on a public IP the browser drops it and sessions never stick.
+# Only Caddy is published (80 and 443, with a Let's Encrypt certificate for DOMAIN); the frontend,
+# API, Postgres and Redis are reachable on the compose networks alone. `!reset` needs Docker
+# Compose 2.24 or newer.
 
 services:
   database:
@@ -17,3 +15,13 @@ services:
     # limiter depends on it: an evicted bucket is reborn full.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
     restart: unless-stopped
+
+  frontend:
+    ports: !reset []
+
+  caddy:
+    environment:
+      # Required: without it Caddy serves `localhost` from its internal CA and no browser trusts it.
+      DOMAIN: ${DOMAIN:?set DOMAIN to the public hostname in .env}
+      # One year. No includeSubDomains or preload: those would bind every other subdomain too.
+      HSTS_MAX_AGE: ${HSTS_MAX_AGE:-31536000}
