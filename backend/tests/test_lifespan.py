@@ -6,6 +6,7 @@ from fastapi import Request
 
 from app.ai.ollama import OllamaGenerator
 from app.ai.openai import OpenAIGenerator
+from app.ai.spend_guard import BudgetedGenerator
 from app.core.config import settings
 from app.deps import get_generator
 from app.main import app, lifespan
@@ -17,9 +18,10 @@ async def test_the_lifespan_opens_a_usable_limiter_and_closes_the_pool() -> None
         assert app.state.limiter is not None
 
 
-async def test_the_lifespan_owns_one_generator() -> None:
+async def test_the_lifespan_owns_one_guarded_generator() -> None:
     async with lifespan(app):
-        expected = OpenAIGenerator if settings.generation_provider == "openai" else OllamaGenerator
+        provider = OpenAIGenerator if settings.generation_provider == "openai" else OllamaGenerator
+        expected = BudgetedGenerator if settings.llm_spend_guard_enabled else provider
         assert isinstance(app.state.generator, expected)
 
 

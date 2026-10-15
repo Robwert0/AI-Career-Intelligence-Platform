@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
     app.state.task_queue = CeleryTaskQueue()
-    app.state.generator = build_generator(settings.chat_timeout_seconds)
+    app.state.generator = build_generator(settings.chat_timeout_seconds, app.state.redis)
     app.state.generation_slots = asyncio.Semaphore(settings.chat_max_concurrent_generations)
     yield
     await app.state.generator.aclose()

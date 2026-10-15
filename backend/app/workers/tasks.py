@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from celery.exceptions import SoftTimeLimitExceeded
+from redis.asyncio import Redis
 
 from app.ai.embeddings import BgeEmbedder
 from app.ai.generation import ClosableGenerator
@@ -206,7 +207,8 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
     # Pasted text has nothing to read, so it must never be shown as "reading".
     await on_stage("reading" if intake.url is not None else "extracting")
 
-    generator = build_generator(settings.job_extract_generation_timeout_seconds)
+    redis = create_redis()
+    generator = build_generator(settings.job_extract_generation_timeout_seconds, redis)
     try:
         return await run_job_intake(
             intake, fetcher=SafeFetcher(), generator=generator, on_stage=on_stage
@@ -215,6 +217,7 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
         raise JobError(exc.code) from None
     finally:
         await generator.aclose()
+        await redis.aclose()
 
 
 @celery_app.task(name="jobs.extract_job")
@@ -237,12 +240,12 @@ class AnalysisGenerators:
             await generator.aclose()
 
 
-def build_analysis_generators() -> AnalysisGenerators:
+def build_analysis_generators(redis: Redis) -> AnalysisGenerators:
     # One client per stage: each timeout is part of the budget the settings validator checks.
     return AnalysisGenerators(
-        evidence=build_generator(settings.evidence_extract_generation_timeout_seconds),
-        assess=build_generator(settings.match_assess_generation_timeout_seconds),
-        recommend=build_generator(settings.match_recommend_generation_timeout_seconds),
+        evidence=build_generator(settings.evidence_extract_generation_timeout_seconds, redis),
+        assess=build_generator(settings.match_assess_generation_timeout_seconds, redis),
+        recommend=build_generator(settings.match_recommend_generation_timeout_seconds, redis),
     )
 
 
@@ -294,8 +297,8 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
     async def checkpoint(sources: SourcesState) -> None:
         await store.attach_blob(record.id, "sources", sources.model_dump_json().encode())
 
-    generators = build_analysis_generators()
     redis = create_redis()
+    generators = build_analysis_generators(redis)
     github = GitHubClient(token=_github_token())
     cache = GitHubCache(redis, ttl_seconds=settings.github_cache_ttl_seconds)
 

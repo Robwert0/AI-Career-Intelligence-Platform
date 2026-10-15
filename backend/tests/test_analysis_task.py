@@ -91,7 +91,7 @@ class Models:
             recommend=ScriptedGenerator(recommend),
         )
 
-    def __call__(self) -> tasks.AnalysisGenerators:
+    def __call__(self, redis: Any) -> tasks.AnalysisGenerators:
         return self.generators
 
 
