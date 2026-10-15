@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.generation import GenerationResult, Message, SamplingSettings
+from app.ai.match.assess import MAX_ASSESS_BATCHES
 from app.ai.match.job_extract import extract_job
 from app.ai.match.preselect import NO_SIMILARITY, preselect
 from app.ai.match.prompts import correction_message
@@ -406,12 +407,25 @@ async def _analyse_once(
     )
 
 
+def max_model_calls(postings: int, runs: int) -> int:
+    """Upper bound: every structured call is retried once, every posting uses all assess batches."""
+    attempts = 2
+    per_posting = (MAX_ASSESS_BATCHES + 1) * attempts
+    return runs * (attempts + postings * per_posting)
+
+
 async def run_eval(args: argparse.Namespace) -> int:
     # --unlabelled measures time, retries and citations before Robert has labelled anything.
     files = [f for f in load_label_files(args.postings) if args.unlabelled or f.compared()]
     if not files:
         print(f"no labelled postings in {args.postings}; label the templates first")
         return 2
+    planned = max_model_calls(len(files), args.runs)
+    if args.provider == "openai":
+        print(f"{len(files)} posting(s) x {args.runs} run(s): at most {planned} billed model calls")
+        if args.max_calls is not None and planned > args.max_calls:
+            print(f"refusing: {planned} exceeds --max-calls {args.max_calls}")
+            return 2
     embedder = BgeEmbedder()
     evidence_gen = CountingGenerator(args, settings.evidence_extract_generation_timeout_seconds)
     assess_gen = CountingGenerator(args, settings.match_assess_generation_timeout_seconds)
@@ -514,6 +528,12 @@ def main() -> int:
         help="a directory of real off-domain postings, prepared like --postings",
     )
     commands.choices["run"].add_argument("--runs", type=int, default=3)
+    commands.choices["run"].add_argument(
+        "--max-calls",
+        type=int,
+        default=None,
+        help="with --provider openai, refuse to start if the upper bound of calls exceeds this",
+    )
     commands.choices["run"].add_argument(
         "--unlabelled", action="store_true", help="also run postings that have no labels yet"
     )

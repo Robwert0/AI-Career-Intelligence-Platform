@@ -3,7 +3,8 @@
 The provider is a flag, not GENERATION_PROVIDER, so an eval never bills OpenAI unless asked to.
 It is deliberately not wrapped in the spend guard: the guard's daily pools are the live budget
 visitors draw on, and a local eval would drain it (or be cut off by it halfway through a run).
-The run's cost is bounded by its fixed cases and printed instead.
+Instead, the run's token usage is printed, priced only when the prices in settings are known
+to belong to the model that ran.
 """
 
 import argparse
@@ -13,6 +14,7 @@ from app.ai.generation import ClosableGenerator, GenerationResult, Message, Samp
 from app.ai.ollama import OllamaGenerator
 from app.ai.openai import OpenAIGenerator
 from app.ai.spend_guard import cost_micro_usd
+from app.core.config import settings
 
 Provider = Literal["ollama", "openai"]
 
@@ -75,6 +77,16 @@ def usage_line(generators: list[MeteredGenerator]) -> str:
     models = sorted({g.model_name for g in generators})
     line = f"model={','.join(models)} calls={calls} prompt_tokens={prompt} "
     line += f"completion_tokens={completion}"
-    if any(model.startswith("openai/") for model in models):
-        line += f" cost_usd={cost_micro_usd(prompt, completion) / 1_000_000:.4f}"
-    return line
+    paid = [g for g in generators if g.model_name.startswith("openai/")]
+    if not paid:
+        return line
+    configured = f"openai/{settings.openai_chat_model}"
+    # The LLM_*_USD_PER_MTOK prices are those of OPENAI_CHAT_MODEL; --model does not change them.
+    if any(g.model_name != configured for g in paid):
+        return line + f" cost_usd=unknown (prices are for {configured})"
+    cost = cost_micro_usd(
+        sum(g.prompt_tokens for g in paid), sum(g.completion_tokens for g in paid)
+    )
+    line += f" cost_usd={cost / 1_000_000:.4f}"
+    line += f" priced_at={settings.llm_input_usd_per_mtok:.2f}/"
+    return line + f"{settings.llm_output_usd_per_mtok:.2f} per Mtok"

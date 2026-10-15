@@ -71,6 +71,7 @@ async def test_metered_generator_sums_usage_across_calls() -> None:
 
 
 async def test_usage_line_prices_only_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "openai_chat_model", "gpt-6-luna")
     monkeypatch.setattr(settings, "llm_input_usd_per_mtok", 0.10)
     monkeypatch.setattr(settings, "llm_output_usd_per_mtok", 0.50)
     local = MeteredGenerator(FakeGenerator())
@@ -79,4 +80,17 @@ async def test_usage_line_prices_only_openai(monkeypatch: pytest.MonkeyPatch) ->
     await paid.generate([Message(Role.USER, "hello " * 1000)])
 
     assert "cost_usd" not in usage_line([local])
-    assert usage_line([paid]).endswith("cost_usd=0.0006")
+    assert usage_line([paid]).endswith("cost_usd=0.0006 priced_at=0.10/0.50 per Mtok")
+
+
+async def test_usage_line_refuses_to_price_an_overridden_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "openai_chat_model", "gpt-6-mini")
+    paid = MeteredGenerator(OpenAINamedGenerator("x " * 1000))
+    await paid.generate([Message(Role.USER, "hello " * 1000)])
+
+    line = usage_line([paid])
+
+    assert line.endswith("cost_usd=unknown (prices are for openai/gpt-6-mini)")
+    assert "priced_at" not in line
