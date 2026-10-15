@@ -13,7 +13,7 @@ export type DecideOutcome =
 // unit-testable without mounting the hook: a stale 409 (the analysis already moved past the
 // decision the user was acting on -- e.g. a slow double click) just means re-poll it, not an
 // error to show; retry spends a scarce 5/hour token so its 429 needs its own wording, while
-// continue only spends the ordinary poll limit.
+// continue spends no analysis token (its daily cap sits above every legitimate pause).
 export function decideOutcome(
   action: 'continue' | 'retry',
   analysisId: string,

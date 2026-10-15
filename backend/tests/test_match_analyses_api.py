@@ -496,7 +496,25 @@ async def test_continue_requeues_a_paused_analysis(env: Env) -> None:
     assert record is not None
     assert (record.status, record.resume) == (JobStatus.QUEUED, "continue")
     assert env.queue.enqueued[-1] == ("jobs.run_analysis", analysis_id)
-    assert [name for name, _ in env.limiter.calls][-1] == "match_poll_user"
+    assert [name for name, _ in env.limiter.calls][-2:] == [
+        "match_poll_user",
+        "match_continue_user_daily",
+    ]
+
+
+async def test_a_continue_does_not_spend_an_analysis_token(env: Env) -> None:
+    analysis_id = (await env.submit(cv_text=CV_TEXT, github_url="https://github.com/jane")).json()[
+        "analysis_id"
+    ]
+    await env.pause(analysis_id, "cv", "scanned_pdf_suspected")
+    env.limiter.calls.clear()
+
+    response = await env.client.post(f"/match/analyses/{analysis_id}/continue", headers=env.headers)
+
+    assert response.status_code == 202
+    names = [name for name, _ in env.limiter.calls]
+    assert "match_analysis_user" not in names
+    assert "match_analysis_user_daily" not in names
 
 
 async def test_a_resume_near_the_end_of_the_ttl_gets_time_to_queue_and_run(

@@ -286,7 +286,10 @@ async def get_analysis(
 @router.post(
     "/analyses/{analysis_id}/continue",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(rate_limit(policies.MATCH_POLL_USER))],
+    dependencies=[
+        Depends(rate_limit(policies.MATCH_POLL_USER)),
+        Depends(rate_limit(policies.MATCH_CONTINUE_USER_DAILY)),
+    ],
 )
 async def continue_analysis(
     analysis_id: str,
