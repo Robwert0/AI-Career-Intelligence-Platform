@@ -79,21 +79,25 @@ class RecordingRepository(ChunkRepository):
         self,
         embedding: list[float],
         limit: int,
+        *,
+        document_id: uuid.UUID,
         section: str | None = None,
-        document_id: uuid.UUID | None = None,
     ) -> list[tuple[Chunk, float]]:
         self.limits.append(limit)
-        return await super().search_by_vector(embedding, limit, section, document_id)
+        return await super().search_by_vector(
+            embedding, limit, document_id=document_id, section=section
+        )
 
     async def search_by_text(
         self,
         query: str,
         limit: int,
+        *,
+        document_id: uuid.UUID,
         section: str | None = None,
-        document_id: uuid.UUID | None = None,
     ) -> list[Chunk]:
         self.limits.append(limit)
-        return await super().search_by_text(query, limit, section, document_id)
+        return await super().search_by_text(query, limit, document_id=document_id, section=section)
 
 
 @pytest.fixture
@@ -126,20 +130,20 @@ async def test_a_query_with_no_searchable_text_is_rejected(
     retriever: Retriever, query: str
 ) -> None:
     with pytest.raises(EmptyQueryError):
-        await retriever.retrieve(query, document_id=None)
+        await retriever.retrieve(query, document_id=DOCUMENT_ID)
 
 
 async def test_a_query_past_the_character_cap_is_rejected_before_anything_scans_it(
     retriever: Retriever,
 ) -> None:
     with pytest.raises(QueryTooLongError):
-        await retriever.retrieve("k" * (MAX_QUERY_CHARS + 1), document_id=None)
+        await retriever.retrieve("k" * (MAX_QUERY_CHARS + 1), document_id=DOCUMENT_ID)
 
 
 @pytest.mark.parametrize("limit", [0, -1, MAX_LIMIT + 1])
 async def test_an_out_of_range_limit_is_rejected(retriever: Retriever, limit: int) -> None:
     with pytest.raises(ValueError):
-        await retriever.retrieve("kubernetes", document_id=None, limit=limit)
+        await retriever.retrieve("kubernetes", document_id=DOCUMENT_ID, limit=limit)
 
 
 async def test_retrieve_can_narrow_to_one_document(
@@ -172,23 +176,25 @@ def test_fusion_rejects_out_of_range_parameters(k: int, limit: int) -> None:
 async def test_each_leg_is_searched_wider_than_the_final_limit(
     retriever: Retriever, recording_repo: RecordingRepository
 ) -> None:
-    await retriever.retrieve("kubernetes", document_id=None, limit=2)
+    await retriever.retrieve("kubernetes", document_id=DOCUMENT_ID, limit=2)
     assert recording_repo.limits == [2 * RANK_WINDOW_MULTIPLIER] * 2
 
 
 async def test_retrieve_returns_no_more_than_the_limit(retriever: Retriever) -> None:
-    result = await retriever.retrieve("engineer kubernetes", document_id=None, limit=2)
+    result = await retriever.retrieve("engineer kubernetes", document_id=DOCUMENT_ID, limit=2)
     assert len(result.chunks) <= 2
 
 
 async def test_retrieve_still_answers_when_the_text_leg_finds_nothing(
     retriever: Retriever,
 ) -> None:
-    assert (await retriever.retrieve("zzzznonexistenttoken", document_id=None)).chunks != []
+    assert (await retriever.retrieve("zzzznonexistenttoken", document_id=DOCUMENT_ID)).chunks != []
 
 
 async def test_retrieve_can_narrow_to_one_section(retriever: Retriever) -> None:
-    result = await retriever.retrieve("engineer kubernetes", document_id=None, section="skills")
+    result = await retriever.retrieve(
+        "engineer kubernetes", document_id=DOCUMENT_ID, section="skills"
+    )
     assert [hit.section for hit in result.chunks] == ["skills"]
 
 
@@ -196,9 +202,11 @@ async def test_best_similarity_comes_from_the_nearest_vector_hit(
     retriever: Retriever, recording_repo: RecordingRepository
 ) -> None:
     target = SEED[1][1]
-    hits = await recording_repo.search_by_vector(FakeEmbedder().embed_query(target), limit=1)
+    hits = await recording_repo.search_by_vector(
+        FakeEmbedder().embed_query(target), limit=1, document_id=DOCUMENT_ID
+    )
 
-    result = await retriever.retrieve(target, document_id=None)
+    result = await retriever.retrieve(target, document_id=DOCUMENT_ID)
 
     assert result.best_similarity == pytest.approx(1.0 - hits[0][1], abs=1e-6)
 
@@ -212,13 +220,13 @@ async def test_best_similarity_is_minus_one_when_the_vector_arm_is_empty(
 
 
 async def test_text_hit_count_is_zero_when_no_lexeme_matches(retriever: Retriever) -> None:
-    result = await retriever.retrieve("zzzznonexistenttoken", document_id=None)
+    result = await retriever.retrieve("zzzznonexistenttoken", document_id=DOCUMENT_ID)
 
     assert result.text_hit_count == 0
 
 
 async def test_text_hit_count_counts_the_full_text_rows(retriever: Retriever) -> None:
-    result = await retriever.retrieve("kubernetes", document_id=None)
+    result = await retriever.retrieve("kubernetes", document_id=DOCUMENT_ID)
 
     assert result.text_hit_count == 1
 

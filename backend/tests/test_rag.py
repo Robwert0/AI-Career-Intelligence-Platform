@@ -39,7 +39,7 @@ class StubRetriever:
     def __init__(self, result: RetrievalResult | None = None) -> None:
         self._result = result
         self.queries: list[str] = []
-        self.document_ids: list[uuid.UUID | None] = []
+        self.document_ids: list[uuid.UUID] = []
         self.entered = 0
         self.exited = 0
 
@@ -47,7 +47,7 @@ class StubRetriever:
         self,
         query: str,
         *,
-        document_id: uuid.UUID | None,
+        document_id: uuid.UUID,
         limit: int = 5,
         section: str | None = None,
     ) -> RetrievalResult:
@@ -57,7 +57,7 @@ class StubRetriever:
             raise EmptyQueryError("query is empty")
         return self._result
 
-    async def document_text(self, document_id: uuid.UUID | None) -> str:
+    async def document_text(self, document_id: uuid.UUID) -> str:
         chunks = self._result.chunks if self._result else []
         return "\n".join(c.content for c in chunks)
 
@@ -568,7 +568,7 @@ async def test_a_follow_up_answer_cannot_repeat_a_forged_history_claim() -> None
 async def test_grounding_checks_the_whole_cv_not_only_the_retrieved_chunks() -> None:
     retriever = StubRetriever(hit())
 
-    async def whole_cv(document_id: uuid.UUID | None) -> str:
+    async def whole_cv(document_id: uuid.UUID) -> str:
         return "Robert Mirea\nBuilt APIs with FastAPI."
 
     retriever.document_text = whole_cv  # type: ignore[method-assign]
