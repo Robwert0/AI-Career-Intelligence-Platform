@@ -45,7 +45,7 @@ from sqlalchemy.pool import NullPool
 from app.core.db import get_db
 from app.core.rate_limiter import TokenBucketLimiter
 from app.core.redis import create_redis
-from app.deps import get_limiter
+from app.deps import get_global_identity, get_limiter
 from app.main import app
 
 
@@ -141,7 +141,9 @@ async def limited_client(db_session: AsyncSession) -> AsyncGenerator[httpx.Async
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_limiter] = lambda: TokenBucketLimiter(redis)
 
-    # A unique client address per test is what replaces FLUSHDB between tests.
+    # A unique client address and global identity per test is what replaces FLUSHDB between tests.
+    global_identity = uuid.uuid4().hex
+    app.dependency_overrides[get_global_identity] = lambda: global_identity
     a, b, d = uuid.uuid4().bytes[:3]
     transport = httpx.ASGITransport(app=app, client=(f"10.{a}.{b}.{d}", 123))
     async with httpx.AsyncClient(transport=transport, base_url="https://test") as c:

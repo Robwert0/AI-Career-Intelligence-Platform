@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,9 +11,11 @@ from app.ai.generation import (
     GeneratorUnavailableError,
 )
 from app.ai.rag import GenerationCapacityError, RagPipeline
+from app.ai.spend_guard import SpendBudgetExceededError
 from app.core import policies
 from app.core.config import settings
 from app.core.rate_limiter import Limiter
+from app.core.spend_ledger import seconds_until_reset
 from app.deps import enforce_rate_limit, get_current_user, get_limiter, get_rag_pipeline, rate_limit
 from app.models import User
 from app.schemas import ChatRequest, ChatResponse, Source
@@ -26,6 +29,7 @@ router = APIRouter()
     dependencies=[
         Depends(rate_limit(policies.CHAT_IP)),
         Depends(rate_limit(policies.CHAT_USER)),
+        Depends(rate_limit(policies.CHAT_USER_DAILY)),
     ],
 )
 async def chat(
@@ -36,8 +40,9 @@ async def chat(
 ) -> ChatResponse:
     if payload.history:
         # A follow-up costs two generations (the rewrite, then the answer), so it spends two
-        # tokens of the per-user budget.
+        # tokens of each per-user budget.
         await enforce_rate_limit(policies.CHAT_USER, str(current_user.id), limiter)
+        await enforce_rate_limit(policies.CHAT_USER_DAILY, str(current_user.id), limiter)
     try:
         answer = await pipeline.answer(
             payload.message,
@@ -59,6 +64,12 @@ async def chat(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Service unavailable",
             headers={"Retry-After": str(settings.chat_timeout_seconds)},
+        ) from None
+    except SpendBudgetExceededError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Service unavailable",
+            headers={"Retry-After": str(seconds_until_reset(datetime.now(UTC)))},
         ) from None
     except GeneratorUnavailableError:
         raise HTTPException(

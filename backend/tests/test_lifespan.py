@@ -1,12 +1,15 @@
+import logging
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi import Request
 
 from app.ai.ollama import OllamaGenerator
 from app.ai.openai import OpenAIGenerator
+from app.ai.spend_guard import BudgetedGenerator
 from app.core.config import settings
+from app.core.spend_ledger import RedisSpendLedger, SpendPool
 from app.deps import get_generator
 from app.main import app, lifespan
 
@@ -17,9 +20,10 @@ async def test_the_lifespan_opens_a_usable_limiter_and_closes_the_pool() -> None
         assert app.state.limiter is not None
 
 
-async def test_the_lifespan_owns_one_generator() -> None:
+async def test_the_lifespan_owns_one_guarded_generator() -> None:
     async with lifespan(app):
-        expected = OpenAIGenerator if settings.generation_provider == "openai" else OllamaGenerator
+        provider = OpenAIGenerator if settings.generation_provider == "openai" else OllamaGenerator
+        expected = BudgetedGenerator if settings.llm_spend_guard_enabled else provider
         assert isinstance(app.state.generator, expected)
 
 
@@ -30,9 +34,13 @@ async def test_get_generator_hands_out_the_shared_instance() -> None:
         assert get_generator(cast(Request, request)) is app.state.generator
 
 
+def _provider(generator: Any) -> Any:
+    return generator._inner if isinstance(generator, BudgetedGenerator) else generator
+
+
 async def test_the_generator_uses_the_chat_timeout_not_the_script_timeout() -> None:
     async with lifespan(app):
-        timeout = app.state.generator._client.timeout
+        timeout = _provider(app.state.generator)._client.timeout
 
         assert timeout.read == float(settings.chat_timeout_seconds)
         assert timeout.connect == float(settings.generation_connect_timeout_seconds)
@@ -40,7 +48,7 @@ async def test_the_generator_uses_the_chat_timeout_not_the_script_timeout() -> N
 
 async def test_the_generator_client_is_closed_on_shutdown() -> None:
     async with lifespan(app):
-        generator = app.state.generator
+        generator = _provider(app.state.generator)
 
     assert generator._client.is_closed
 
@@ -60,3 +68,23 @@ async def test_the_lifespan_refuses_to_start_without_a_cv_document_id(
     with pytest.raises(RuntimeError, match="CV_DOCUMENT_ID"):
         async with lifespan(app):
             pass
+
+
+async def test_the_lifespan_generator_draws_on_the_chat_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", True)
+    async with lifespan(app):
+        ledger = app.state.generator._ledger
+        assert isinstance(ledger, RedisSpendLedger)
+        assert ledger._pool is SpendPool.CHAT
+
+
+async def test_the_lifespan_logs_the_chat_budget_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", True)
+    with caplog.at_level(logging.INFO, logger="app.ai.spend_guard"):
+        async with lifespan(app):
+            pass
+    assert caplog.text.count("llm spend guard pool=chat") == 1

@@ -569,3 +569,67 @@ def test_a_loopback_openai_base_url_still_cannot_carry_credentials(
 
     with pytest.raises(ValidationError, match="credentials"):
         Settings(_env_file=None)
+
+
+def test_the_spend_pools_default_to_the_previous_two_dollar_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("LLM_DAILY_BUDGET_CHAT_USD", "LLM_DAILY_BUDGET_ANALYSIS_USD"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_daily_budget_chat_usd == 0.75
+    assert settings.llm_daily_budget_analysis_usd == 1.25
+    assert settings.llm_daily_budget_chat_usd + settings.llm_daily_budget_analysis_usd == 2.0
+
+
+@pytest.mark.parametrize("name", ["LLM_DAILY_BUDGET_CHAT_USD", "LLM_DAILY_BUDGET_ANALYSIS_USD"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_spend_pool_without_a_positive_budget_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match=name.lower()):
+        Settings(_env_file=None)
+
+
+def _openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENERATION_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("LLM_SPEND_GUARD_ENABLED", "true")
+
+
+@pytest.mark.parametrize("name", ["LLM_INPUT_USD_PER_MTOK", "LLM_OUTPUT_USD_PER_MTOK"])
+def test_a_zero_price_cannot_silently_disable_the_guard_on_openai(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    _openai(monkeypatch)
+    monkeypatch.setenv(name, "0")
+
+    with pytest.raises(ValidationError, match=name):
+        Settings(_env_file=None)
+
+
+def test_a_zero_price_is_allowed_when_the_guard_is_off_or_the_model_is_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_INPUT_USD_PER_MTOK", "0")
+    monkeypatch.setenv("LLM_OUTPUT_USD_PER_MTOK", "0")
+    monkeypatch.setenv("GENERATION_PROVIDER", "ollama")
+    assert Settings(_env_file=None).llm_input_usd_per_mtok == 0
+
+    _openai(monkeypatch)
+    monkeypatch.setenv("LLM_SPEND_GUARD_ENABLED", "false")
+    assert Settings(_env_file=None).llm_spend_guard_enabled is False
+
+
+def test_openai_with_priced_calls_and_positive_budgets_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _openai(monkeypatch)
+    monkeypatch.setenv("LLM_INPUT_USD_PER_MTOK", "0.10")
+    monkeypatch.setenv("LLM_OUTPUT_USD_PER_MTOK", "0.50")
+
+    assert Settings(_env_file=None).llm_spend_guard_enabled is True

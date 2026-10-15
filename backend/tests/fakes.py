@@ -15,8 +15,10 @@ from app.ai.generation import (
     SamplingSettings,
     Usage,
 )
+from app.ai.spend_guard import SpendBudgetExceededError
 from app.core.config import settings
 from app.core.rate_limiter import Decision, Policy
+from app.core.spend_ledger import SpendPool
 
 
 class FakeEmbedder:
@@ -108,6 +110,22 @@ class UnavailableGenerator:
         response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         raise GeneratorUnavailableError("the fake provider is down")
+
+
+class BudgetSpentGenerator:
+    @property
+    def model_name(self) -> str:
+        return "budget-spent-generator"
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> GenerationResult:
+        raise SpendBudgetExceededError(SpendPool.ANALYSIS)
 
 
 class RejectingGenerator:

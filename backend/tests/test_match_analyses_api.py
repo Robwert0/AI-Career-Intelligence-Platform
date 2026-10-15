@@ -146,7 +146,10 @@ async def test_a_github_only_analysis_is_accepted_and_enqueued(env: Env) -> None
         "github_url": "https://github.com/jane",
         "cv_provided": False,
     }
-    assert [name for name, _ in env.limiter.calls] == ["match_analysis_user"]
+    assert [name for name, _ in env.limiter.calls] == [
+        "match_analysis_user",
+        "match_analysis_user_daily",
+    ]
 
 
 async def test_an_uploaded_cv_is_kept_in_redis_for_fifteen_minutes_only(
@@ -542,7 +545,10 @@ async def test_a_github_retry_needs_no_body(env: Env) -> None:
     assert response.status_code == 202
     record = await env.store.load(analysis_id)
     assert record is not None and record.resume == "retry"
-    assert [name for name, _ in env.limiter.calls][-1] == "match_analysis_user"
+    assert [name for name, _ in env.limiter.calls][-2:] == [
+        "match_analysis_user",
+        "match_analysis_user_daily",
+    ]
 
 
 async def test_a_cv_retry_needs_the_cv_again(env: Env) -> None:

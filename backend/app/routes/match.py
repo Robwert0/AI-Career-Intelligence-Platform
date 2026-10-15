@@ -128,7 +128,10 @@ def _in_progress(job_id: str) -> JSONResponse:
     "/jobs",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=JobSubmitted,
-    dependencies=[Depends(rate_limit(policies.MATCH_JOB_USER))],
+    dependencies=[
+        Depends(rate_limit(policies.MATCH_JOB_USER)),
+        Depends(rate_limit(policies.MATCH_JOB_USER_DAILY)),
+    ],
 )
 async def submit_job(
     payload: JobIntakeRequest,
@@ -233,7 +236,10 @@ def _analysis_in_progress(analysis_id: str) -> JSONResponse:
     "/analyses",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AnalysisSubmitted,
-    dependencies=[Depends(rate_limit(policies.MATCH_ANALYSIS_USER))],
+    dependencies=[
+        Depends(rate_limit(policies.MATCH_ANALYSIS_USER)),
+        Depends(rate_limit(policies.MATCH_ANALYSIS_USER_DAILY)),
+    ],
 )
 async def submit_analysis(
     request: Request,
@@ -303,7 +309,10 @@ async def continue_analysis(
 @router.post(
     "/analyses/{analysis_id}/retry",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(rate_limit(policies.MATCH_ANALYSIS_USER))],
+    dependencies=[
+        Depends(rate_limit(policies.MATCH_ANALYSIS_USER)),
+        Depends(rate_limit(policies.MATCH_ANALYSIS_USER_DAILY)),
+    ],
 )
 async def retry_analysis(
     analysis_id: str,

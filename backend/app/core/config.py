@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     match_assess_generation_timeout_seconds: int = Field(default=60, ge=10)
     match_recommend_generation_timeout_seconds: int = Field(default=90, ge=10)
     match_analysis_soft_time_limit_seconds: int = Field(default=1800, ge=60)
+    llm_spend_guard_enabled: bool = True
+    # Separate pools, so abuse of the match pipeline can never take chat down with it.
+    llm_daily_budget_chat_usd: float = Field(default=0.75, gt=0.0)
+    llm_daily_budget_analysis_usd: float = Field(default=1.25, gt=0.0)
+    llm_input_usd_per_mtok: float = Field(default=0.10, ge=0.0)
+    llm_output_usd_per_mtok: float = Field(default=0.50, ge=0.0)
 
     @property
     def match_preselect_thresholds(self) -> dict[str, float]:
@@ -130,6 +136,20 @@ class Settings(BaseSettings):
     def _openai_has_a_key(self) -> Settings:
         if self.generation_provider == "openai" and self.openai_api_key is None:
             raise ValueError("GENERATION_PROVIDER=openai needs OPENAI_API_KEY")
+        return self
+
+    @model_validator(mode="after")
+    def _spend_guard_prices_every_call(self) -> Settings:
+        # A zero price makes every call cost nothing to the guard, silently disabling it.
+        if (
+            self.generation_provider == "openai"
+            and self.llm_spend_guard_enabled
+            and (self.llm_input_usd_per_mtok <= 0 or self.llm_output_usd_per_mtok <= 0)
+        ):
+            raise ValueError(
+                "GENERATION_PROVIDER=openai with the spend guard on needs LLM_INPUT_USD_PER_MTOK "
+                "and LLM_OUTPUT_USD_PER_MTOK above 0"
+            )
         return self
 
     @model_validator(mode="after")

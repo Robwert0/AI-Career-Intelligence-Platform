@@ -57,6 +57,11 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
         "The analysis model is unavailable right now. Try again in a few minutes.",
         "retry",
     ),
+    # The pool resets at 00:00 UTC; a retry before then fails again and spends a rate-limit token.
+    "ai_budget_exhausted": (
+        "The analysis model has reached its daily limit. You can try again after 00:00 UTC.",
+        "wait",
+    ),
     "ai_invalid_output": (
         "We couldn't extract this posting reliably. Try again, or paste a "
         "cleaner copy of the description.",

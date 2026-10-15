@@ -2,7 +2,13 @@ import json
 from typing import Any
 
 import pytest
-from fakes import OverflowingGenerator, RejectingGenerator, ScriptedGenerator, UnavailableGenerator
+from fakes import (
+    BudgetSpentGenerator,
+    OverflowingGenerator,
+    RejectingGenerator,
+    ScriptedGenerator,
+    UnavailableGenerator,
+)
 
 from app.ai.generation import Role
 from app.ai.match.evidence_extract import (
@@ -329,7 +335,11 @@ async def test_a_prompt_leak_fails_without_retry() -> None:
 
 @pytest.mark.parametrize(
     ("generator", "code"),
-    [(UnavailableGenerator(), "ai_unavailable"), (RejectingGenerator(), "internal_error")],
+    [
+        (UnavailableGenerator(), "ai_unavailable"),
+        (BudgetSpentGenerator(), "ai_budget_exhausted"),
+        (RejectingGenerator(), "internal_error"),
+    ],
 )
 async def test_provider_failures_map_to_codes(generator: Any, code: str) -> None:
     with pytest.raises(ExtractionError) as caught:

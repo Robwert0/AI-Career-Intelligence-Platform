@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 import pytest
 from pydantic import SecretStr
+from redis.asyncio import Redis
 
 from app.ai import generators
 from app.ai.generation import (
@@ -20,9 +21,12 @@ from app.ai.generation import (
     TokenLogprob,
     Usage,
 )
+from app.ai.json_schema import strict_schema
 from app.ai.ollama import OllamaGenerator
-from app.ai.openai import OpenAIGenerator, strict_schema
+from app.ai.openai import OpenAIGenerator
+from app.ai.spend_guard import BudgetedGenerator
 from app.core.config import settings
+from app.core.spend_ledger import RedisSpendLedger, SpendPool
 
 MESSAGES = [
     Message(Role.SYSTEM, "Answer in exactly one word."),
@@ -390,10 +394,12 @@ def test_without_a_key_it_cannot_be_built(monkeypatch: pytest.MonkeyPatch) -> No
 
 async def test_the_factory_builds_the_configured_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "openai_api_key", SecretStr(KEY))
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", False)
+    redis = Redis()
     monkeypatch.setattr(settings, "generation_provider", "openai")
-    openai = generators.build_generator(12)
+    openai = generators.build_generator(12, redis, pool=SpendPool.CHAT)
     monkeypatch.setattr(settings, "generation_provider", "ollama")
-    ollama = generators.build_generator(12)
+    ollama = generators.build_generator(12, redis, pool=SpendPool.CHAT)
     try:
         assert isinstance(openai, OpenAIGenerator)
         assert isinstance(ollama, OllamaGenerator)
@@ -403,6 +409,22 @@ async def test_the_factory_builds_the_configured_provider(monkeypatch: pytest.Mo
     finally:
         await openai.aclose()
         await ollama.aclose()
+
+
+async def test_the_factory_puts_the_spend_guard_in_front_of_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "openai_api_key", SecretStr(KEY))
+    monkeypatch.setattr(settings, "generation_provider", "openai")
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", True)
+    generator = generators.build_generator(12, Redis(), pool=SpendPool.CHAT)
+    try:
+        assert isinstance(generator, BudgetedGenerator)
+        assert generator.model_name == f"openai/{settings.openai_chat_model}"
+        assert isinstance(generator._ledger, RedisSpendLedger)
+        assert generator._ledger._pool is SpendPool.CHAT
+    finally:
+        await generator.aclose()
 
 
 @pytest.mark.skipif(

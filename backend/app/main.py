@@ -8,10 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.generators import build_generator
+from app.ai.spend_guard import log_spend_guard_config
 from app.core.config import settings
 from app.core.log_config import configure_logging
 from app.core.rate_limiter import TokenBucketLimiter
 from app.core.redis import create_redis
+from app.core.spend_ledger import SpendPool
 from app.deps import verify_trusted_origin
 from app.routes.admin import router as admin_router
 from app.routes.auth import router as auth_router
@@ -29,7 +31,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
     app.state.task_queue = CeleryTaskQueue()
-    app.state.generator = build_generator(settings.chat_timeout_seconds)
+    log_spend_guard_config(SpendPool.CHAT)
+    app.state.generator = build_generator(
+        settings.chat_timeout_seconds, app.state.redis, pool=SpendPool.CHAT
+    )
     app.state.generation_slots = asyncio.Semaphore(settings.chat_max_concurrent_generations)
     yield
     await app.state.generator.aclose()

@@ -33,9 +33,10 @@ def test_every_declared_policy_is_valid() -> None:
         assert policy.refill_per_second > 0
 
 
-def test_register_is_the_strictest_sustained_limit() -> None:
+def test_register_is_the_strictest_sustained_per_ip_limit() -> None:
+    # Per-user daily caps refill slower on purpose; they bound spend, not request bursts.
     assert policies.REGISTER.refill_per_second == min(
-        p.refill_per_second for p in _declared_policies()
+        p.refill_per_second for p in _declared_policies() if p.scope is Scope.IP
     )
 
 
@@ -84,3 +85,41 @@ def test_analyses_are_limited_to_five_an_hour_per_user() -> None:
     assert policies.MATCH_ANALYSIS_USER.capacity == 5
     assert policies.MATCH_ANALYSIS_USER.refill_per_second == pytest.approx(5 / 3600)
     assert policies.MATCH_ANALYSIS_USER.scope is Scope.USER
+
+
+def test_chat_has_a_daily_cap_per_user() -> None:
+    daily = policies.CHAT_USER_DAILY
+    assert daily.scope is Scope.USER
+    assert daily.refill_per_second * 86400 == pytest.approx(daily.capacity)
+    assert daily.capacity < policies.CHAT_USER.refill_per_second * 86400
+
+
+def test_registration_has_a_global_ceiling() -> None:
+    ceiling = policies.REGISTER_GLOBAL
+    assert ceiling.scope is Scope.GLOBAL
+    assert ceiling.capacity > policies.REGISTER.capacity
+
+
+def test_a_global_policy_depends_on_neither_the_ip_nor_the_user() -> None:
+    parameters = inspect.signature(rate_limit(policies.REGISTER_GLOBAL)).parameters
+    assert "user" not in parameters
+    assert "request" not in parameters
+
+
+@pytest.mark.parametrize(
+    ("daily", "hourly"),
+    [
+        (policies.MATCH_ANALYSIS_USER_DAILY, policies.MATCH_ANALYSIS_USER),
+        (policies.MATCH_JOB_USER_DAILY, policies.MATCH_JOB_USER),
+    ],
+)
+def test_the_match_pipeline_has_a_daily_cap_per_user(daily: Policy, hourly: Policy) -> None:
+    assert daily.scope is Scope.USER
+    assert daily.refill_per_second * 86400 == pytest.approx(daily.capacity)
+    assert daily.capacity < hourly.refill_per_second * 86400
+    assert daily.capacity >= hourly.capacity
+
+
+def test_a_day_of_analyses_is_a_minority_of_the_analysis_pool() -> None:
+    assert policies.MATCH_ANALYSIS_USER_DAILY.capacity == 8
+    assert policies.MATCH_JOB_USER_DAILY.capacity == 30

@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -22,8 +23,10 @@ from app.ai.generation import Role
 from app.ai.prompts import CANARY, CONVERSATION_TAG, REFUSAL_TEXT
 from app.ai.rag import RagPipeline
 from app.ai.retriever import Retriever
+from app.ai.spend_guard import BudgetedGenerator
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.spend_ledger import Reservation, SpendPool, seconds_until_reset
 from app.deps import (
     get_embedder,
     get_generation_slots,
@@ -156,6 +159,32 @@ async def test_an_unavailable_generator_returns_503(chat_client: ChatFixture) ->
 
     assert response.status_code == 503
     assert int(response.headers["Retry-After"]) >= 1
+
+
+class _SpentLedger:
+    pool = SpendPool.CHAT
+
+    async def reserve(self, micro_usd: int) -> Reservation | None:
+        return None
+
+    async def settle(self, reservation: Reservation, actual_micro_usd: int) -> None:
+        return None
+
+
+@pytest.mark.generator(BudgetedGenerator(FakeGenerator(), _SpentLedger()))
+async def test_an_exhausted_daily_budget_returns_503_until_utc_midnight(
+    chat_client: ChatFixture,
+) -> None:
+    client, _, headers = chat_client
+
+    before = seconds_until_reset(datetime.now(UTC))
+    response = await client.post("/chat", json={"message": "Kubernetes"}, headers=headers)
+    after = seconds_until_reset(datetime.now(UTC))
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Service unavailable"}
+    retry_after = int(response.headers["Retry-After"])
+    assert after <= retry_after <= before or (before < 5 and retry_after > 86_000)
 
 
 async def test_the_route_passes_the_user_to_the_pipeline(chat_client: ChatFixture) -> None:

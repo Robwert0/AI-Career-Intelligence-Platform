@@ -9,12 +9,14 @@ import pytest_asyncio
 import redis.exceptions
 from celery.exceptions import SoftTimeLimitExceeded
 from celery.schedules import crontab
+from celery.signals import worker_ready
 from fakes import ScriptedGenerator
 from redis.asyncio import Redis
 
 from app.core.config import settings
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
+from app.core.spend_ledger import SpendPool
 from app.integrations.safe_fetch import FetchResult
 from app.schemas.match import JobIntakeRequest
 from app.workers import tasks
@@ -349,6 +351,10 @@ _POSTING_REPLY = (
 )
 
 
+def _posting_generator(*_: Any, **__: Any) -> ScriptedGenerator:
+    return ScriptedGenerator([_POSTING_REPLY])
+
+
 def _create_intake_job(intake: JobIntakeRequest | None) -> str:
     async def create() -> str:
         redis = create_redis()
@@ -369,7 +375,7 @@ def _create_intake_job(intake: JobIntakeRequest | None) -> str:
 def test_the_extract_task_turns_pasted_text_into_a_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(tasks, "build_generator", lambda _: ScriptedGenerator([_POSTING_REPLY]))
+    monkeypatch.setattr(tasks, "build_generator", _posting_generator)
     job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
 
     tasks.extract_job_task.apply(args=(job_id,))
@@ -383,7 +389,7 @@ def test_the_extract_task_turns_pasted_text_into_a_posting(
 
 
 def test_the_extract_task_consumes_its_input_blob(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tasks, "build_generator", lambda _: ScriptedGenerator([_POSTING_REPLY]))
+    monkeypatch.setattr(tasks, "build_generator", _posting_generator)
     job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
 
     tasks.extract_job_task.apply(args=(job_id,))
@@ -411,6 +417,65 @@ def test_an_intake_job_without_its_input_fails_as_input_expired() -> None:
 
 def test_the_extract_task_is_registered() -> None:
     assert "jobs.extract_job" in celery_app.tasks
+
+
+def test_an_intake_draws_on_the_analysis_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    pools: list[SpendPool] = []
+
+    def factory(timeout_seconds: int, redis: Any, *, pool: SpendPool) -> ScriptedGenerator:
+        pools.append(pool)
+        return ScriptedGenerator([_POSTING_REPLY])
+
+    monkeypatch.setattr(tasks, "build_generator", factory)
+    job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    assert pools == [SpendPool.ANALYSIS]
+
+
+def test_an_intake_whose_generator_fails_to_build_still_closes_its_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def factory(timeout_seconds: int, redis: Any, *, pool: SpendPool) -> ScriptedGenerator:
+        raise RuntimeError("the generator could not be built")
+
+    job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
+    created: list[Redis] = []
+    closed: list[Redis] = []
+
+    def tracked() -> Redis:
+        client = create_redis()
+        close = client.aclose
+
+        async def aclose() -> None:
+            closed.append(client)
+            await close()
+
+        monkeypatch.setattr(client, "aclose", aclose)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(tasks, "build_generator", factory)
+    monkeypatch.setattr(tasks, "create_redis", tracked)
+
+    tasks.extract_job_task.apply(args=(job_id,))
+
+    failed = _load(job_id)
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "internal_error")
+    assert len(created) >= 2
+    assert {id(client) for client in closed} >= {id(client) for client in created}
+
+
+def test_a_worker_logs_the_analysis_budget_when_ready(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", True)
+    assert tasks._log_spend_guard in [ref() for _, ref in worker_ready.receivers]
+    with caplog.at_level(logging.INFO, logger="app.ai.spend_guard"):
+        tasks._log_spend_guard()
+    assert "llm spend guard pool=analysis" in caplog.text
 
 
 _STAGES: list[str | None] = []
@@ -444,7 +509,7 @@ def test_an_intake_starts_at_the_stage_its_input_kind_needs(
     _STAGES.clear()
     monkeypatch.setattr(tasks, "JobStore", _StageRecordingStore)
     monkeypatch.setattr(tasks, "SafeFetcher", _PlainTextFetcher)
-    monkeypatch.setattr(tasks, "build_generator", lambda _: ScriptedGenerator([_POSTING_REPLY]))
+    monkeypatch.setattr(tasks, "build_generator", _posting_generator)
     job_id = _create_intake_job(intake)
 
     tasks.extract_job_task.apply(args=(job_id,))
