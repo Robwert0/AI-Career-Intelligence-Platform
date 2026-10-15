@@ -158,8 +158,28 @@ class JobStore:
         if _ID.fullmatch(job_id):
             await self._redis.delete(self._key(job_id))
 
-    async def mark_running(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
-        return await self._transition(job_id, now, status=JobStatus.RUNNING, stage=stage)
+    async def claim(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
+        """queued -> running, atomically; None means another delivery got there first (or the
+        job is no longer queued), and the caller must not run it."""
+
+        def change(record: JobRecord) -> JobRecord | None:
+            if record.status is not JobStatus.QUEUED:
+                return None
+            return record.model_copy(
+                update={"status": JobStatus.RUNNING, "stage": stage, "updated_at": now}
+            )
+
+        return await self._compare_and_set(job_id, change)
+
+    async def set_stage(self, job_id: str, *, stage: str, now: float) -> JobRecord | None:
+        """Only a claimed job has stages; any other status means this run must stop."""
+
+        def change(record: JobRecord) -> JobRecord:
+            if record.status is not JobStatus.RUNNING:
+                raise JobStateError(f"job {job_id} is {record.status}, not running")
+            return record.model_copy(update={"stage": stage, "updated_at": now})
+
+        return await self._compare_and_set(job_id, change)
 
     async def mark_done(
         self, job_id: str, *, result: dict[str, Any], now: float
