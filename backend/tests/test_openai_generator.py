@@ -57,7 +57,7 @@ def stub(
     raises: Exception | None = None,
     text: str | None = None,
     headers: dict[str, str] | None = None,
-    reasoning_effort: str | None = "none",
+    **generator_options: Any,
 ) -> tuple[OpenAIGenerator, list[httpx.Request]]:
     seen: list[httpx.Request] = []
 
@@ -76,8 +76,7 @@ def stub(
         base_url="https://openai.test/v1",
         headers={"Authorization": f"Bearer {KEY}"},
     )
-    generator = OpenAIGenerator(client=client, model="gpt-6-luna")
-    generator._reasoning_effort = reasoning_effort
+    generator = OpenAIGenerator(client=client, model="gpt-6-luna", **generator_options)
     return generator, seen
 
 
@@ -145,13 +144,26 @@ async def test_top_k_is_refused_rather_than_silently_dropped() -> None:
     assert seen == []
 
 
-async def test_reasoning_effort_is_sent_when_configured() -> None:
-    generator, seen = stub(reasoning_effort="none")
+async def test_an_explicit_reasoning_effort_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "openai_reasoning_effort", "none")
+    generator, seen = stub(reasoning_effort="low")
     await generator.generate(MESSAGES)
-    assert sent_body(seen)["reasoning_effort"] == "none"
+    assert sent_body(seen)["reasoning_effort"] == "low"
 
 
-async def test_reasoning_effort_is_omitted_for_models_without_it() -> None:
+async def test_an_omitted_reasoning_effort_falls_back_to_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "openai_reasoning_effort", "medium")
+    generator, seen = stub()
+    await generator.generate(MESSAGES)
+    assert sent_body(seen)["reasoning_effort"] == "medium"
+
+
+async def test_an_explicit_none_omits_reasoning_effort_despite_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "openai_reasoning_effort", "none")
     generator, seen = stub(reasoning_effort=None)
     await generator.generate(MESSAGES)
     assert "reasoning_effort" not in sent_body(seen)
