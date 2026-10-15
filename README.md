@@ -308,16 +308,21 @@ docker compose up -d --build        # first build takes minutes: CPU-only torch 
 docker compose ps                   # all healthy; migrate shows "Exited (0)"
 ```
 
-Then open `http://localhost:3000` (bound to 127.0.0.1; `FRONTEND_PORT` changes it), or go through
-Caddy at `https://localhost` exactly as production does. Locally Caddy signs `localhost` with its own
-internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
+Then open `http://localhost:3000` (bound to 127.0.0.1; `FRONTEND_PORT` changes it, and then
+`http://localhost:<port>` must be added to `CORS_ALLOWED_ORIGINS`, or every POST gets a 403), or go
+through Caddy at `https://localhost` exactly as production does. Locally Caddy signs `localhost`
+with its own internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
 `CORS_ALLOWED_ORIGINS` to log in that way. If 80/443 are taken on your machine, set
 `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` (the origin then carries the port, e.g.
 `https://localhost:8443`). Notes:
+- Every backend service reads `env_file: ${APP_ENV_FILE:-.env}`, so the file must exist: `config`, a
+  bare `up` and any `run` fail without it. `APP_ENV_FILE` changes only the containers' environment;
+  the `${POSTGRES_*}` and other `${...}` values in the compose files are still read from `.env`.
 - The containers override the `localhost` URLs in `.env` (`DATABASE_URL`, `REDIS_URL`,
   `CELERY_BROKER_URL`) with service names, so the same `.env` still serves the local flow.
-- Postgres and Redis are published on 127.0.0.1 only (Docker Desktop still forwards those ports
-  into WSL2, so host-side tests and uvicorn reach them unchanged).
+- Postgres, Redis and Caddy are published on 127.0.0.1 only; the production override publishes
+  Caddy alone, on every interface. Docker Desktop still forwards 127.0.0.1 ports into WSL2, so
+  host-side tests and uvicorn reach them unchanged.
 - Local development only: generation reaches Ollama on your machine at
   `http://host.docker.internal:11434` (Docker Desktop resolves it); override it with
   `DOCKER_OLLAMA_BASE_URL` in `.env`. Ollama has no authentication, so whoever reaches its port can
@@ -328,15 +333,26 @@ internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
   rebuilding the backend image.
 - `BACKEND_ORIGIN` and the `NEXT_PUBLIC_UMAMI_*` values are inlined by `next build`, so they are
   build args: put the Umami values in the root `.env`, then `docker compose build frontend`.
-- CV ingestion and admin creation run as one-off containers:
+- CV ingestion and admin creation run as one-off containers. The image holds no CVs (the
+  `.dockerignore` keeps every PDF out, and it must stay that way), so the PDF is piped in on stdin
+  rather than bind-mounted: a `-v` whose source path is mistyped silently creates an empty
+  directory on the host and mounts that instead.
 
   ```bash
-  docker compose run --rm -v "$PWD/my-cv.pdf:/tmp/cv.pdf:ro" api python scripts/ingest_cv.py /tmp/cv.pdf
-  docker compose up -d api worker     # after setting CV_DOCUMENT_ID in .env
+  docker compose run --rm -T api sh -c 'cat > /tmp/cv.pdf && python scripts/ingest_cv.py /tmp/cv.pdf' < my-cv.pdf
+  docker compose up -d                # after setting CV_DOCUMENT_ID in .env to the id it printed
   docker compose run --rm api python scripts/make_admin.py --create admin@example.com
   ```
 
+  `run` starts `database`, `redis` and `migrate` first if they are not up. The API needs
+  `CV_DOCUMENT_ID` to start, and the frontend and Caddy wait for a healthy API, so a first `up`
+  before ingesting leaves those three down.
+
 ### Production on one host
+
+**Deploy only once #51 (OpenAI generator), #52 (optional `CV_DOCUMENT_ID` for migrate, ingest and
+the worker) and #54 (LLM spend guard) are merged.** Before them, the settings below are silently
+ignored (Settings drops unknown keys) and the stack would try to reach Ollama with no spending cap.
 
 1. Point a DNS **A record** for your domain at the server's public IPv4 address. Skip the AAAA
    record unless Docker's IPv6 is enabled: otherwise IPv6 visitors reach Caddy through Docker's
@@ -348,7 +364,8 @@ internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
      every bare `docker compose …` (including the one-off `run` commands above) gets the
      production override. Without it a plain `docker compose up` would start the development
      setup. An explicit `-f` on the command line replaces it, so don't pass one.
-   - `ENV=production`.
+   - `ENV=production`. It is only a label that `/health` echoes back; nothing else reads it, so it
+     switches no security behaviour on or off.
    - A new `SECRET_KEY` (`openssl rand -hex 32`) and a new `POSTGRES_PASSWORD`, letters and digits
      only (`openssl rand -hex 16`), since it goes into `DATABASE_URL` unencoded.
    - `DOMAIN=cv.example.com` and `CORS_ALLOWED_ORIGINS=https://cv.example.com`, exactly that one
@@ -360,18 +377,35 @@ internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
    - `LLM_DAILY_BUDGET_CHAT_USD` and `LLM_DAILY_BUDGET_ANALYSIS_USD` set low (e.g. `0.2` and `0.3`,
      $0.50/day in total), and on the OpenAI side prepaid credits with
      auto-recharge off, so a bug or an abuser can spend at most what is on the account.
-
-   The OpenAI and budget settings come from the OpenAI generator and spend-cap branches; deploy only
-   once those are merged.
-4. Start it. Only Caddy is published; the frontend, API, Postgres and Redis are reachable on the
-   compose networks alone (a published Docker port bypasses UFW, so nothing else is published).
-   Caddy fetches the certificate on the first request and keeps it in the `caddy_data` volume
-   (don't `down -v` in production: re-issuing is rate-limited).
+   - `LLM_INPUT_USD_PER_MTOK` / `LLM_OUTPUT_USD_PER_MTOK` equal to the current list price of
+     `OPENAI_CHAT_MODEL` per million tokens (the defaults, `0.10` / `0.50`, match `gpt-6-luna`), and
+     `LLM_SPEND_GUARD_ENABLED=true` (the default). The daily caps are counted at these prices, so a
+     stale price after a model change lets real spend run past the cap.
+   - `CV_DOCUMENT_ID` empty for now; step 4 fills it in.
+4. Start it in this order. The API refuses to start without `CV_DOCUMENT_ID`, and the frontend and
+   Caddy only start once the API is healthy, so the CV goes in before the rest comes up. The image
+   holds no CVs (`.dockerignore` excludes every PDF; never bake one in), so the PDF is piped in on
+   stdin; a `-v` bind mount with a mistyped source would silently mount an empty directory.
 
 ```bash
 docker compose config | grep maxmemory    # prints a line only when the override is active
-docker compose up -d --build
+docker compose build
+docker compose up -d database redis migrate worker beat
+docker compose run --rm -T api sh -c 'cat > /tmp/cv.pdf && python scripts/ingest_cv.py /tmp/cv.pdf' < my-cv.pdf
+# put the printed document id in .env as CV_DOCUMENT_ID=<id>, then:
+docker compose up -d                       # recreates the backend services with the new .env
+docker compose ps                          # all healthy; migrate shows "Exited (0)"
+docker compose run --rm api python scripts/make_admin.py --create admin@cv.example.com
 ```
+
+   Only Caddy is published; the frontend, API, Postgres and Redis are reachable on the compose
+   networks alone (a published Docker port bypasses UFW, so nothing else is published). Caddy
+   fetches the certificate on the first request and keeps it in the `caddy_data` volume (don't
+   `down -v` in production: re-issuing is rate-limited).
+5. Back up the database: `pgdata` is the only copy of accounts and the ingested CV. For example,
+   from a script cron runs nightly in the repo directory (so compose finds `.env`), writing off the
+   volume and ideally copied off the host:
+   `docker compose exec -T database pg_dump -U <POSTGRES_USER> -Fc <POSTGRES_DB> > /var/backups/career-$(date +%F).dump`
 
 The override also fixes HSTS at one year, whatever `.env` says, caps Redis at 256 MB, and refuses
 to start without `DOMAIN`. There is no ACME email, which Let's Encrypt does not require.

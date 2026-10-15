@@ -100,6 +100,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    # Reporting only: plain Compose does not restart an unhealthy container, just an exited one.
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10"]
       interval: 60s
@@ -109,7 +110,7 @@ services:
     restart: unless-stopped
 
   # Exactly one beat process: none means the retention purge never runs, two run it twice.
-  # The fixed container_name makes `--scale beat=2` a no-op: compose warns and keeps one.
+  # The fixed container_name prevents a second beat container: `--scale beat=2` is refused.
   beat:
     <<: *hardening
     container_name: ${COMPOSE_PROJECT_NAME}-beat
@@ -168,10 +169,11 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-localhost}
       HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}
+    # Loopback in development; the production override publishes these on every interface.
     ports:
-      - "${CADDY_HTTP_PORT:-80}:80"
-      - "${CADDY_HTTPS_PORT:-443}:443"
-      - "${CADDY_HTTPS_PORT:-443}:443/udp"
+      - "127.0.0.1:${CADDY_HTTP_PORT:-80}:80"
+      - "127.0.0.1:${CADDY_HTTPS_PORT:-443}:443"
+      - "127.0.0.1:${CADDY_HTTPS_PORT:-443}:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Certificates and ACME account keys: losing them means re-issuing, and Let's Encrypt
