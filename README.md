@@ -1,8 +1,8 @@
 # AI Career Intelligence Platform
 
 An interactive, RAG-based "AI version of my CV": a portfolio site where visitors can read my CV and
-projects, then ask a chat assistant questions answered from the CV itself. The longer-term goal is
-a CV analysis and job-matching engine built on a multi-agent system.
+projects, then ask a chat assistant questions answered from the CV itself, and match the CV against
+a job posting. A multi-agent layer (recruiter, career coach, interviewer) is the next phase.
 
 It is built as a production-grade system, not a demo: every feature has to be **secure, async,
 scalable and explainable** before it counts as done.
