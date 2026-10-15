@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -8,6 +9,7 @@ from app.ai.ollama import OllamaGenerator
 from app.ai.openai import OpenAIGenerator
 from app.ai.spend_guard import BudgetedGenerator
 from app.core.config import settings
+from app.core.spend_ledger import RedisSpendLedger, SpendPool
 from app.deps import get_generator
 from app.main import app, lifespan
 
@@ -66,3 +68,23 @@ async def test_the_lifespan_refuses_to_start_without_a_cv_document_id(
     with pytest.raises(RuntimeError, match="CV_DOCUMENT_ID"):
         async with lifespan(app):
             pass
+
+
+async def test_the_lifespan_generator_draws_on_the_chat_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", True)
+    async with lifespan(app):
+        ledger = app.state.generator._ledger
+        assert isinstance(ledger, RedisSpendLedger)
+        assert ledger._pool is SpendPool.CHAT
+
+
+async def test_the_lifespan_logs_the_chat_budget_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "llm_spend_guard_enabled", True)
+    with caplog.at_level(logging.INFO, logger="app.ai.spend_guard"):
+        async with lifespan(app):
+            pass
+    assert caplog.text.count("llm spend guard pool=chat") == 1

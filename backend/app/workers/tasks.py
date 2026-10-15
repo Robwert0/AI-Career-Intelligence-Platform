@@ -8,12 +8,14 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from celery.exceptions import SoftTimeLimitExceeded
+from celery.signals import worker_ready
 from redis.asyncio import Redis
 
 from app.ai.embeddings import BgeEmbedder
 from app.ai.generation import ClosableGenerator
 from app.ai.generators import build_generator
 from app.ai.match.structured import ExtractionError
+from app.ai.spend_guard import log_spend_guard_config
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
 from app.core.job_store import (
@@ -26,6 +28,7 @@ from app.core.job_store import (
 )
 from app.core.redis import create_redis
 from app.core.retention_marker import RetentionMarker
+from app.core.spend_ledger import SpendPool
 from app.integrations.github import GitHubCache, GitHubClient
 from app.integrations.safe_fetch import SafeFetcher
 from app.repositories import UserRepository
@@ -207,17 +210,19 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
     # Pasted text has nothing to read, so it must never be shown as "reading".
     await on_stage("reading" if intake.url is not None else "extracting")
 
-    redis = create_redis()
-    generator = build_generator(settings.job_extract_generation_timeout_seconds, redis)
-    try:
-        return await run_job_intake(
-            intake, fetcher=SafeFetcher(), generator=generator, on_stage=on_stage
+    async with contextlib.AsyncExitStack() as stack:
+        redis = create_redis()
+        stack.push_async_callback(redis.aclose)
+        generator = build_generator(
+            settings.job_extract_generation_timeout_seconds, redis, pool=SpendPool.ANALYSIS
         )
-    except IntakeError as exc:
-        raise JobError(exc.code) from None
-    finally:
-        await generator.aclose()
-        await redis.aclose()
+        stack.push_async_callback(generator.aclose)
+        try:
+            return await run_job_intake(
+                intake, fetcher=SafeFetcher(), generator=generator, on_stage=on_stage
+            )
+        except IntakeError as exc:
+            raise JobError(exc.code) from None
 
 
 @celery_app.task(name="jobs.extract_job")
@@ -235,18 +240,24 @@ class AnalysisGenerators:
     assess: ClosableGenerator
     recommend: ClosableGenerator
 
-    async def aclose(self) -> None:
-        for generator in (self.evidence, self.assess, self.recommend):
-            await generator.aclose()
 
-
-def build_analysis_generators(redis: Redis) -> AnalysisGenerators:
+def build_analysis_generators(redis: Redis, stack: contextlib.AsyncExitStack) -> AnalysisGenerators:
     # One client per stage: each timeout is part of the budget the settings validator checks.
+    def build(timeout_seconds: int) -> ClosableGenerator:
+        generator = build_generator(timeout_seconds, redis, pool=SpendPool.ANALYSIS)
+        stack.push_async_callback(generator.aclose)
+        return generator
+
     return AnalysisGenerators(
-        evidence=build_generator(settings.evidence_extract_generation_timeout_seconds, redis),
-        assess=build_generator(settings.match_assess_generation_timeout_seconds, redis),
-        recommend=build_generator(settings.match_recommend_generation_timeout_seconds, redis),
+        evidence=build(settings.evidence_extract_generation_timeout_seconds),
+        assess=build(settings.match_assess_generation_timeout_seconds),
+        recommend=build(settings.match_recommend_generation_timeout_seconds),
     )
+
+
+@worker_ready.connect
+def _log_spend_guard(**_: Any) -> None:
+    log_spend_guard_config(SpendPool.ANALYSIS)
 
 
 def _github_token() -> str | None:
@@ -297,47 +308,48 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
     async def checkpoint(sources: SourcesState) -> None:
         await store.attach_blob(record.id, "sources", sources.model_dump_json().encode())
 
-    redis = create_redis()
-    generators = build_analysis_generators(redis)
-    github = GitHubClient(token=_github_token())
-    cache = GitHubCache(redis, ttl_seconds=settings.github_cache_ttl_seconds)
+    async with contextlib.AsyncExitStack() as stack:
+        redis = create_redis()
+        stack.push_async_callback(redis.aclose)
+        generators = build_analysis_generators(redis, stack)
+        github = GitHubClient(token=_github_token())
+        cache = GitHubCache(redis, ttl_seconds=settings.github_cache_ttl_seconds)
 
-    async def read_cv_source(*, file: bytes | None = None, text: str | None = None) -> CvReading:
-        return await read_cv(file=file, text=text, generator=generators.evidence)
+        async def read_cv_source(
+            *, file: bytes | None = None, text: str | None = None
+        ) -> CvReading:
+            return await read_cv(file=file, text=text, generator=generators.evidence)
 
-    async def read_github_source(url: str) -> GitHubReading:
-        return await read_github(url, fetcher=github, cache=cache)
+        async def read_github_source(url: str) -> GitHubReading:
+            return await read_github(url, fetcher=github, cache=cache)
 
-    try:
-        state = await read_sources(
-            state,
-            take_cv=take_cv,
-            read_cv=read_cv_source,
-            read_github=read_github_source,
-            on_stage=on_stage,
-            checkpoint=checkpoint,
-            fatal=(SoftTimeLimitExceeded,),
-        )
-        verdict = decide(state)
-        if isinstance(verdict, Pause):
-            raise NeedsDecision(verdict.source, verdict.code, reset_at=verdict.reset_at)
-        if isinstance(verdict, Fail):
-            raise JobError(verdict.code)
-        outcome = await analyse(
-            request.posting,
-            state,
-            embedder=BgeEmbedder(),
-            assess_generator=generators.assess,
-            recommend_generator=generators.recommend,
-            on_stage=on_stage,
-            top_k=settings.match_preselect_top_k,
-            min_similarity=settings.match_preselect_thresholds,
-        )
-    except ExtractionError as exc:
-        raise JobError(analysis_failure_code(exc.code)) from None
-    finally:
-        await generators.aclose()
-        await redis.aclose()
+        try:
+            state = await read_sources(
+                state,
+                take_cv=take_cv,
+                read_cv=read_cv_source,
+                read_github=read_github_source,
+                on_stage=on_stage,
+                checkpoint=checkpoint,
+                fatal=(SoftTimeLimitExceeded,),
+            )
+            verdict = decide(state)
+            if isinstance(verdict, Pause):
+                raise NeedsDecision(verdict.source, verdict.code, reset_at=verdict.reset_at)
+            if isinstance(verdict, Fail):
+                raise JobError(verdict.code)
+            outcome = await analyse(
+                request.posting,
+                state,
+                embedder=BgeEmbedder(),
+                assess_generator=generators.assess,
+                recommend_generator=generators.recommend,
+                on_stage=on_stage,
+                top_k=settings.match_preselect_top_k,
+                min_similarity=settings.match_preselect_thresholds,
+            )
+        except ExtractionError as exc:
+            raise JobError(analysis_failure_code(exc.code)) from None
 
     metrics = outcome.metrics
     logger.info(

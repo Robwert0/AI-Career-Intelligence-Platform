@@ -12,6 +12,7 @@ from fakes import NearEmbedder, ScriptedGenerator
 from app.core.config import settings
 from app.core.job_store import JobRecord, JobStatus, JobStore
 from app.core.redis import create_redis
+from app.core.spend_ledger import SpendPool
 from app.integrations.errors import GitHubError, GitHubFailure
 from app.integrations.github import GitHubProfile, GitHubRepo, GitHubSnapshot
 from app.schemas.match import AnalysisInput
@@ -91,7 +92,7 @@ class Models:
             recommend=ScriptedGenerator(recommend),
         )
 
-    def __call__(self, redis: Any) -> tasks.AnalysisGenerators:
+    def __call__(self, redis: Any, stack: Any) -> tasks.AnalysisGenerators:
         return self.generators
 
 
@@ -379,3 +380,78 @@ def test_a_timed_out_analysis_fails_as_timeout_and_forgets_its_inputs(
     assert load(job_id).error_code == "timeout"
     for name in tasks.ANALYSIS_BLOBS:
         assert blob(job_id, name) is None
+
+
+class ClosingGenerator(ScriptedGenerator):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def track_redis_clients(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Any], list[Any]]:
+    created: list[Any] = []
+    closed: list[Any] = []
+
+    def tracked() -> Any:
+        client = create_redis()
+        close = client.aclose
+
+        async def aclose() -> None:
+            closed.append(client)
+            await close()
+
+        monkeypatch.setattr(client, "aclose", aclose)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(tasks, "create_redis", tracked)
+    return created, closed
+
+
+def test_a_stage_that_fails_to_build_closes_everything_built_before_it(
+    monkeypatch: pytest.MonkeyPatch, fetcher: Fetcher
+) -> None:
+    built: list[ClosingGenerator] = []
+    pools: list[SpendPool] = []
+
+    def factory(timeout_seconds: int, redis: Any, *, pool: SpendPool) -> ClosingGenerator:
+        pools.append(pool)
+        if built:
+            raise RuntimeError("the second stage could not be built")
+        built.append(ClosingGenerator())
+        return built[0]
+
+    monkeypatch.setattr(tasks, "build_generator", factory)
+    job_id = submit()
+    created, closed = track_redis_clients(monkeypatch)
+
+    run(job_id)
+
+    record = load(job_id)
+    assert (record.status, record.error_code) == (JobStatus.FAILED, "internal_error")
+    assert built[0].closed
+    assert created
+    assert {id(client) for client in closed} >= {id(client) for client in created}
+    assert pools == [SpendPool.ANALYSIS, SpendPool.ANALYSIS]
+
+
+def test_every_analysis_stage_draws_on_the_analysis_pool(
+    monkeypatch: pytest.MonkeyPatch, fetcher: Fetcher
+) -> None:
+    pools: list[SpendPool] = []
+    replies = iter([[ASSESS_REPLY], [ASSESS_REPLY], [ADVICE_REPLY]])
+
+    def factory(timeout_seconds: int, redis: Any, *, pool: SpendPool) -> ScriptedGenerator:
+        pools.append(pool)
+        return ScriptedGenerator(next(replies))
+
+    monkeypatch.setattr(tasks, "build_generator", factory)
+    job_id = submit()
+
+    run(job_id)
+
+    assert load(job_id).status is JobStatus.DONE
+    assert pools == [SpendPool.ANALYSIS] * 3

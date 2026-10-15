@@ -103,3 +103,22 @@ def test_a_global_policy_depends_on_neither_the_ip_nor_the_user() -> None:
     parameters = inspect.signature(rate_limit(policies.REGISTER_GLOBAL)).parameters
     assert "user" not in parameters
     assert "request" not in parameters
+
+
+@pytest.mark.parametrize(
+    ("daily", "hourly"),
+    [
+        (policies.MATCH_ANALYSIS_USER_DAILY, policies.MATCH_ANALYSIS_USER),
+        (policies.MATCH_JOB_USER_DAILY, policies.MATCH_JOB_USER),
+    ],
+)
+def test_the_match_pipeline_has_a_daily_cap_per_user(daily: Policy, hourly: Policy) -> None:
+    assert daily.scope is Scope.USER
+    assert daily.refill_per_second * 86400 == pytest.approx(daily.capacity)
+    assert daily.capacity < hourly.refill_per_second * 86400
+    assert daily.capacity >= hourly.capacity
+
+
+def test_a_day_of_analyses_is_a_minority_of_the_analysis_pool() -> None:
+    assert policies.MATCH_ANALYSIS_USER_DAILY.capacity == 8
+    assert policies.MATCH_JOB_USER_DAILY.capacity == 30

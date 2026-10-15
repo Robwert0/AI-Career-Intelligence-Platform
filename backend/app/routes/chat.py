@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,9 +11,11 @@ from app.ai.generation import (
     GeneratorUnavailableError,
 )
 from app.ai.rag import GenerationCapacityError, RagPipeline
+from app.ai.spend_guard import SpendBudgetExceededError
 from app.core import policies
 from app.core.config import settings
 from app.core.rate_limiter import Limiter
+from app.core.spend_ledger import seconds_until_reset
 from app.deps import enforce_rate_limit, get_current_user, get_limiter, get_rag_pipeline, rate_limit
 from app.models import User
 from app.schemas import ChatRequest, ChatResponse, Source
@@ -61,6 +64,12 @@ async def chat(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Service unavailable",
             headers={"Retry-After": str(settings.chat_timeout_seconds)},
+        ) from None
+    except SpendBudgetExceededError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Service unavailable",
+            headers={"Retry-After": str(seconds_until_reset(datetime.now(UTC)))},
         ) from None
     except GeneratorUnavailableError:
         raise HTTPException(

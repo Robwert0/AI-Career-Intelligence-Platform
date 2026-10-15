@@ -178,3 +178,34 @@ async def test_a_denied_ip_does_not_spend_the_global_registration_budget(
     assert left is not None
     spent = policies.REGISTER_GLOBAL.capacity - float(left)
     assert spent == pytest.approx(policies.REGISTER.capacity, abs=0.1)
+
+
+async def _login(client: httpx.AsyncClient) -> tuple[str, dict[str, str]]:
+    registered = await client.post("/auth/register", json={"email": EMAIL, "password": PASSWORD})
+    login = await client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD})
+    return registered.json()["id"], {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+async def test_job_intake_is_capped_per_user_per_day(limited_client: httpx.AsyncClient) -> None:
+    user_id, headers = await _login(limited_client)
+    await _drain(policies.MATCH_JOB_USER_DAILY, user_id)
+
+    response = await limited_client.post(
+        "/match/jobs", json={"text": "We build payment systems in Go. " * 5}, headers=headers
+    )
+
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) > 60
+
+
+@pytest.mark.parametrize("path", ["/match/analyses", f"/match/analyses/{uuid.uuid4()}/retry"])
+async def test_analyses_are_capped_per_user_per_day(
+    limited_client: httpx.AsyncClient, path: str
+) -> None:
+    user_id, headers = await _login(limited_client)
+    await _drain(policies.MATCH_ANALYSIS_USER_DAILY, user_id)
+
+    response = await limited_client.post(path, headers=headers)
+
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) > 3600

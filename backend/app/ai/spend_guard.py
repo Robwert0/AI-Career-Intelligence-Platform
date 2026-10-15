@@ -14,8 +14,9 @@ from app.ai.generation import (
     Message,
     SamplingSettings,
 )
+from app.ai.json_schema import strict_schema
 from app.core.config import settings
-from app.core.spend_ledger import RedisSpendLedger, Reservation
+from app.core.spend_ledger import RedisSpendLedger, Reservation, SpendPool
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,11 @@ def prompt_token_ceiling(messages: list[Message], response_schema: dict[str, Any
     # Byte-level BPE never emits more tokens than input bytes, so UTF-8 length is an upper bound.
     tokens = sum(len(m.content.encode()) + MESSAGE_OVERHEAD_TOKENS for m in messages)
     if response_schema is not None:
-        tokens += len(json.dumps(response_schema).encode())
+        # A strict-mode provider sends the tightened schema, which is the larger of the two.
+        tokens += max(
+            len(json.dumps(schema).encode())
+            for schema in (response_schema, strict_schema(response_schema))
+        )
     return tokens
 
 
@@ -114,15 +119,45 @@ class BudgetedGenerator:
 
 
 def _provider_refused(exc: GenerationRequestError | GeneratorUnavailableError) -> bool:
-    # Only an error status proves nothing was billed. A timeout, a cancellation or a dropped
-    # connection may have been generated and charged in full, so those keep the worst case booked.
-    return exc.status_code is not None and exc.status_code >= 400
+    # Only a 4xx proves nothing was billed. A 5xx can come from a gateway after the provider
+    # already generated, and a timeout, cancellation or dropped connection may have been charged
+    # in full, so those keep the worst case booked.
+    return exc.status_code is not None and 400 <= exc.status_code < 500
 
 
-def guarded[G: Generator](generator: G, redis: Redis) -> G | BudgetedGenerator:
+def daily_budget_usd(pool: SpendPool) -> float:
+    match pool:
+        case SpendPool.CHAT:
+            return settings.llm_daily_budget_chat_usd
+        case SpendPool.ANALYSIS:
+            return settings.llm_daily_budget_analysis_usd
+
+
+def guarded[G: Generator](generator: G, redis: Redis, pool: SpendPool) -> G | BudgetedGenerator:
     if not settings.llm_spend_guard_enabled:
         return generator
     ledger = RedisSpendLedger(
-        redis, daily_budget_micro_usd=math.floor(settings.llm_daily_budget_usd * 1_000_000)
+        redis,
+        pool=pool,
+        daily_budget_micro_usd=math.floor(daily_budget_usd(pool) * 1_000_000),
     )
     return BudgetedGenerator(generator, ledger)
+
+
+def log_spend_guard_config(pool: SpendPool) -> None:
+    if not settings.llm_spend_guard_enabled:
+        if settings.generation_provider == "openai":
+            logger.warning(
+                "llm spend guard disabled with generation_provider=openai; no daily budget "
+                "caps the bill pool=%s",
+                pool,
+            )
+        return
+    logger.info(
+        "llm spend guard pool=%s daily_budget_usd=%.2f input_usd_per_mtok=%.4f "
+        "output_usd_per_mtok=%.4f",
+        pool,
+        daily_budget_usd(pool),
+        settings.llm_input_usd_per_mtok,
+        settings.llm_output_usd_per_mtok,
+    )
