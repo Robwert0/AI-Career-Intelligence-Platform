@@ -200,7 +200,7 @@ async def test_vector_search_distances_ascend(seeded: ChunkRepository) -> None:
     assert distances == sorted(distances)
 
 
-async def test_a_filtered_index_scan_still_returns_nearest_first(
+async def test_a_filtered_index_scan_fills_the_limit_end_to_end(
     seeded: ChunkRepository, db_session: AsyncSession
 ) -> None:
     crowded = uuid.uuid4()
