@@ -39,7 +39,7 @@ class Limiter(Protocol):
 
 
 def ip_identity(host: str) -> str:
-    # Whoever holds an IPv6 address holds its whole /64, so per-address buckets are unlimited.
+    # One IPv6 subscriber holds at least a /64; keying per address would hand them 2**64 buckets.
     try:
         address = ipaddress.ip_address(host)
     except ValueError:

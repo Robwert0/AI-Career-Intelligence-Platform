@@ -191,6 +191,9 @@ async def _decide(
 
 
 def _log_ceiling_refusal(policy: Policy, decision: Decision) -> None:
+    # Only global ceilings: per-IP and per-user refusals are routine and would name a client.
+    if policy.scope is not Scope.GLOBAL:
+        return
     if decision.first_refusal:
         logger.warning(
             "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
@@ -204,8 +207,7 @@ def _log_ceiling_refusal(policy: Policy, decision: Decision) -> None:
 async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
     decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
     if not decision.allowed:
-        if policy.scope is Scope.GLOBAL:
-            _log_ceiling_refusal(policy, decision)
+        _log_ceiling_refusal(policy, decision)
         raise _too_many_requests(decision)
 
 
