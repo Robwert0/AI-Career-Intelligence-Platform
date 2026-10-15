@@ -6,7 +6,13 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from app.core.rate_limiter import REFUSAL_NOTICE_SECONDS, Policy, Scope, TokenBucketLimiter
+from app.core.rate_limiter import (
+    REFUSAL_NOTICE_SECONDS,
+    Policy,
+    Scope,
+    TokenBucketLimiter,
+    ip_identity,
+)
 from app.core.redis import create_redis
 
 NOW = 1_000_000.0
@@ -218,3 +224,32 @@ async def test_only_the_first_refusal_in_a_notice_window_is_flagged(
     later = await limiter.check(spec, identity, now=NOW + REFUSAL_NOTICE_SECONDS)
     assert flags == [True, False, False]
     assert later.first_refusal is True
+
+
+def test_an_ipv4_client_keeps_its_address_as_the_key() -> None:
+    assert ip_identity("203.0.113.7") == "203.0.113.7"
+
+
+def test_an_ipv6_client_is_keyed_by_its_64() -> None:
+    assert ip_identity("2001:db8:1:2:aaaa:bbbb:cccc:dddd") == "2001:db8:1:2::/64"
+
+
+def test_two_addresses_in_one_64_share_a_key() -> None:
+    assert ip_identity("2001:db8:1:2::1") == ip_identity("2001:db8:1:2:ffff:ffff:ffff:ffff")
+
+
+def test_addresses_in_different_64s_get_different_keys() -> None:
+    assert ip_identity("2001:db8:1:2::1") != ip_identity("2001:db8:1:3::1")
+
+
+def test_an_ipv4_mapped_ipv6_client_shares_the_ipv4_key() -> None:
+    assert ip_identity("::ffff:203.0.113.7") == ip_identity("203.0.113.7") == "203.0.113.7"
+
+
+def test_a_scoped_ipv6_address_drops_its_zone() -> None:
+    assert ip_identity("fe80::1%eth0") == "fe80::/64"
+
+
+@pytest.mark.parametrize("host", ["testclient", "", "unix:/run/api.sock"])
+def test_a_host_that_is_not_an_ip_keeps_its_own_key(host: str) -> None:
+    assert ip_identity(host) == host

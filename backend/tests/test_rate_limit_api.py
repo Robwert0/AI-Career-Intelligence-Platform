@@ -212,6 +212,31 @@ async def _register_burst(count: int) -> list[int]:
     return [response.status_code for response in responses]
 
 
+def _ipv6_client(prefix: str, host: str) -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=app, client=(f"{prefix}:{host}", 123))
+    return httpx.AsyncClient(transport=transport, base_url="https://test")
+
+
+async def test_ipv6_clients_in_one_64_share_a_register_bucket(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    a, b = uuid.uuid4().hex[:4], uuid.uuid4().hex[:4]
+    prefix = f"2001:db8:{a}:{b}"
+    async with _ipv6_client(prefix, "0:0:0:1") as first:
+        spent = [
+            (await first.post("/auth/register", json={"email": EMAIL})).status_code
+            for _ in range(policies.REGISTER.capacity)
+        ]
+    async with _ipv6_client(prefix, "dead:beef:0:2") as neighbour:
+        refused = await neighbour.post("/auth/register", json={"email": EMAIL})
+    async with _ipv6_client(f"2001:db8:{a}:{int(b, 16) ^ 1:x}", "0:0:0:1") as elsewhere:
+        other_64 = await elsewhere.post("/auth/register", json={"email": EMAIL})
+
+    assert spent == [422] * policies.REGISTER.capacity
+    assert refused.status_code == 429
+    assert other_64.status_code == 422
+
+
 async def test_registration_has_a_ceiling_across_every_ip(
     limited_client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -367,6 +392,30 @@ async def test_a_full_global_ceiling_warns_once_without_naming_the_registrant(
             )
 
     refusals = [r for r in caplog.records if policies.REGISTER_GLOBAL.name in r.getMessage()]
+    assert [r.levelno for r in refusals] == [logging.WARNING] + [logging.DEBUG] * (
+        policies.REGISTER.capacity - 1
+    )
+    assert not any(EMAIL in r.getMessage() or "10." in r.getMessage() for r in refusals)
+
+
+async def test_a_full_attempts_ceiling_warns_once_without_naming_the_registrant(
+    limited_client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    await _drain(policies.REGISTER_ATTEMPTS_GLOBAL, _global_identity())
+
+    with caplog.at_level(logging.DEBUG, logger="app.deps"):
+        statuses = [
+            (
+                await limited_client.post(
+                    "/auth/register", json={"email": f"{attempt}{EMAIL}", "password": PASSWORD}
+                )
+            ).status_code
+            for attempt in range(policies.REGISTER.capacity)
+        ]
+
+    name = policies.REGISTER_ATTEMPTS_GLOBAL.name
+    refusals = [r for r in caplog.records if name in r.getMessage()]
+    assert statuses == [429] * policies.REGISTER.capacity
     assert [r.levelno for r in refusals] == [logging.WARNING] + [logging.DEBUG] * (
         policies.REGISTER.capacity - 1
     )

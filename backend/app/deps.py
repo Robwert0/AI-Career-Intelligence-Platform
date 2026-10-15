@@ -20,7 +20,7 @@ from app.core.analysis_registry import AnalysisRegistry
 from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
-from app.core.rate_limiter import Decision, Limiter, Policy, Scope
+from app.core.rate_limiter import Decision, Limiter, Policy, Scope, ip_identity
 from app.core.retention_marker import RetentionMarker
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
@@ -170,7 +170,7 @@ def get_global_identity() -> str:
 def _client_ip(request: Request) -> str:
     if request.client is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable")
-    return request.client.host
+    return ip_identity(request.client.host)
 
 
 def _too_many_requests(decision: Decision) -> HTTPException:
@@ -190,9 +190,24 @@ async def _decide(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable") from None
 
 
+def _log_ceiling_refusal(policy: Policy, decision: Decision) -> None:
+    # Only global ceilings: per-IP and per-user refusals are routine and would name a client.
+    if policy.scope is not Scope.GLOBAL:
+        return
+    if decision.first_refusal:
+        logger.warning(
+            "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
+            policy.name,
+            math.ceil(decision.retry_after_seconds),
+        )
+    else:
+        logger.debug("rate limit ceiling refusal policy=%s", policy.name)
+
+
 async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
     decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
     if not decision.allowed:
+        _log_ceiling_refusal(policy, decision)
         raise _too_many_requests(decision)
 
 
@@ -204,14 +219,7 @@ async def reserved_rate_limit(
     # first and spending after lets the whole burst through.
     decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
     if not decision.allowed:
-        if decision.first_refusal:
-            logger.warning(
-                "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
-                policy.name,
-                math.ceil(decision.retry_after_seconds),
-            )
-        else:
-            logger.debug("rate limit ceiling refusal policy=%s", policy.name)
+        _log_ceiling_refusal(policy, decision)
         raise _too_many_requests(decision)
     try:
         yield

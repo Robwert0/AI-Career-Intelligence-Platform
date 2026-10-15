@@ -1,3 +1,4 @@
+import ipaddress
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, Protocol
@@ -33,7 +34,21 @@ class Decision:
 class Limiter(Protocol):
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
+    # Only reserved_rate_limit may call this: a refund without its matching take mints a token.
     async def refund(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
+
+
+def ip_identity(host: str) -> str:
+    # One IPv6 subscriber holds at least a /64; keying per address would hand them 2**64 buckets.
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if not isinstance(address, ipaddress.IPv6Address):
+        return host
+    if address.ipv4_mapped is not None:
+        return str(address.ipv4_mapped)
+    return str(ipaddress.IPv6Network((address, 64), strict=False))
 
 
 REFUSAL_NOTICE_SECONDS = 60
