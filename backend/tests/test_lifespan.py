@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi import Request
@@ -32,9 +32,13 @@ async def test_get_generator_hands_out_the_shared_instance() -> None:
         assert get_generator(cast(Request, request)) is app.state.generator
 
 
+def _provider(generator: Any) -> Any:
+    return generator._inner if isinstance(generator, BudgetedGenerator) else generator
+
+
 async def test_the_generator_uses_the_chat_timeout_not_the_script_timeout() -> None:
     async with lifespan(app):
-        timeout = app.state.generator._client.timeout
+        timeout = _provider(app.state.generator)._client.timeout
 
         assert timeout.read == float(settings.chat_timeout_seconds)
         assert timeout.connect == float(settings.generation_connect_timeout_seconds)
@@ -42,7 +46,7 @@ async def test_the_generator_uses_the_chat_timeout_not_the_script_timeout() -> N
 
 async def test_the_generator_client_is_closed_on_shutdown() -> None:
     async with lifespan(app):
-        generator = app.state.generator
+        generator = _provider(app.state.generator)
 
     assert generator._client.is_closed
 
