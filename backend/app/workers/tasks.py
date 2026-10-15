@@ -10,6 +10,7 @@ from typing import Any, Literal
 from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_ready
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.ai.embeddings import BgeEmbedder
 from app.ai.generation import ClosableGenerator
@@ -82,9 +83,9 @@ async def fail_job(store: JobStore, job_id: str, error_code: str) -> None:
 async def _run_handler(
     store: JobStore, record: JobRecord, handler: JobHandler
 ) -> tuple[Outcome, str | None, str | None]:
-    # Returns (outcome, error_code, error_type). Every store call stays outside the except
-    # blocks: a store failure raised inside one would chain the handler's exception, whose
-    # message can carry CV text, into Celery's logged traceback.
+    # Returns (outcome, code, error_type): code is the failure code, or why a result was lost.
+    # Every store call stays outside the except blocks: a store failure raised inside one would
+    # chain the handler's exception, whose message can carry CV text, into Celery's traceback.
     pause: NeedsDecision | None = None
     result: dict[str, Any] = {}
     try:
@@ -93,33 +94,61 @@ async def _run_handler(
         pause = exc
     except JobError as exc:
         return "failed", exc.code, None
+    except JobStateError:
+        # set_stage refused: the job was failed elsewhere, e.g. worker_lost by a duplicate.
+        return "lost", "finished_elsewhere", None
     except SoftTimeLimitExceeded:
         return "failed", "timeout", None
     except Exception as exc:
         return "failed", "internal_error", type(exc).__name__
 
     try:
-        with contextlib.suppress(JobStateError):
-            if pause is not None:
-                await store.mark_needs_decision(
-                    record.id,
-                    failed_source=pause.source,
-                    error_code=pause.code,
-                    reset_at=pause.reset_at,
-                    now=time.time(),
-                )
-                return "paused", None, None
-            if await store.mark_done(record.id, result=result, now=time.time()) is None:
-                return "lost", None, None
+        if pause is not None:
+            stored = await store.mark_needs_decision(
+                record.id,
+                failed_source=pause.source,
+                error_code=pause.code,
+                reset_at=pause.reset_at,
+                now=time.time(),
+            )
+        else:
+            stored = await store.mark_done(record.id, result=result, now=time.time())
+    except JobStateError:
+        return "lost", "finished_elsewhere", None
     except Exception as exc:
         return "failed", "internal_error", type(exc).__name__
-    return "done", None, None
+    if stored is None:
+        # The xx write refused to recreate an expired record.
+        return "lost", "expired", None
+    return ("paused" if pause is not None else "done"), None, None
+
+
+async def _fail_unclaimed(store: JobStore, job_id: str, error: Exception) -> None:
+    # Left queued, the job would hold its slot until the stale cut-off reports it anyway.
+    try:
+        await fail_job(store, job_id, "queue_unavailable")
+    except RedisError:
+        logger.warning(
+            "job failed unrecorded job_id=%s error_code=queue_unavailable error_type=%s",
+            job_id,
+            type(error).__name__,
+        )
+        raise
+    logger.warning(
+        "job failed job_id=%s error_code=queue_unavailable error_type=%s",
+        job_id,
+        type(error).__name__,
+    )
 
 
 async def execute_job(
     store: JobStore, job_id: str, handler: JobHandler, *, stage: str | None
 ) -> None:
-    record = await store.load(job_id)
+    try:
+        record = await store.load(job_id)
+    except (RedisError, JobStateError) as exc:
+        await _fail_unclaimed(store, job_id, exc)
+        return
     if record is None:
         logger.info("job skipped job_id=%s reason=expired", job_id)
         return
@@ -129,6 +158,8 @@ async def execute_job(
     if record.status is JobStatus.RUNNING:
         # Only a crashed or killed worker leaves a job running; re-running the input that
         # crashed it would loop until the record expires and block every other job meanwhile.
+        # Known gap: without a heartbeat lease, a second worker cannot tell a live run from a
+        # dead one, so scaling past one worker per queue needs one first.
         await fail_job(store, job_id, "worker_lost")
         logger.warning("job failed job_id=%s error_code=worker_lost", job_id)
         return
@@ -138,23 +169,24 @@ async def execute_job(
         logger.warning("job failed job_id=%s error_code=queue_unavailable", job_id)
         return
 
-    running = await store.claim(job_id, stage=stage, now=time.time())
+    try:
+        running = await store.claim(job_id, stage=stage, now=time.time())
+    except (RedisError, JobStateError) as exc:
+        await _fail_unclaimed(store, job_id, exc)
+        return
     if running is None:
-        # A duplicate delivery read the same queued record and lost the claim to it.
+        # No longer queued: a duplicate delivery claimed it, or it was discarded or expired.
         logger.info("job skipped job_id=%s reason=not_claimed", job_id)
         return
 
     started = time.monotonic()
-    outcome, error_code, error_type = await _run_handler(store, running, handler)
+    outcome, code, error_type = await _run_handler(store, running, handler)
     if outcome == "failed":
-        await fail_job(store, job_id, error_code or "internal_error")
-        logger.warning(
-            "job failed job_id=%s error_code=%s error_type=%s", job_id, error_code, error_type
-        )
+        await fail_job(store, job_id, code or "internal_error")
+        logger.warning("job failed job_id=%s error_code=%s error_type=%s", job_id, code, error_type)
         return
     if outcome == "lost":
-        # The record expired mid-run; the xx write refused to recreate it, so the result is gone.
-        logger.warning("job lost job_id=%s reason=expired", job_id)
+        logger.warning("job lost job_id=%s reason=%s", job_id, code)
         return
 
     logger.info(

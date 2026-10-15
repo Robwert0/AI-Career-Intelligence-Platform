@@ -14,14 +14,14 @@ from fakes import ScriptedGenerator
 from redis.asyncio import Redis
 
 from app.core.config import settings
-from app.core.job_store import JobRecord, JobStatus, JobStore
+from app.core.job_store import JobRecord, JobStateError, JobStatus, JobStore
 from app.core.redis import create_redis
 from app.core.spend_ledger import SpendPool
 from app.integrations.safe_fetch import FetchResult
 from app.schemas.match import JobIntakeRequest
 from app.workers import tasks
 from app.workers.celery_app import celery_app
-from app.workers.tasks import JobError, execute_job, ping, run_job
+from app.workers.tasks import JobError, NeedsDecision, execute_job, ping, run_job
 
 NOW = time.time()
 
@@ -388,7 +388,7 @@ async def test_an_unserializable_result_fails_the_job_instead_of_leaving_it_runn
 
 
 async def test_a_job_finished_elsewhere_during_the_run_keeps_the_first_outcome(
-    store: JobStore,
+    store: JobStore, caplog: pytest.LogCaptureFixture
 ) -> None:
     record = await store.create("ping", "owner", now=NOW)
 
@@ -396,11 +396,150 @@ async def test_a_job_finished_elsewhere_during_the_run_keeps_the_first_outcome(
         await store.mark_failed(current.id, error_code="worker_lost", now=NOW + 1)
         return {"late": True}
 
-    await execute_job(store, record.id, handler, stage="x")
+    with caplog.at_level(logging.INFO, logger="app.workers.tasks"):
+        await execute_job(store, record.id, handler, stage="x")
 
     finished = await store.load(record.id)
     assert finished is not None
-    assert finished.error_code == "worker_lost"
+    assert (finished.status, finished.error_code, finished.result) == (
+        JobStatus.FAILED,
+        "worker_lost",
+        None,
+    )
+    assert f"job lost job_id={record.id} reason=finished_elsewhere" in caplog.text
+    assert "job done" not in caplog.text
+
+
+async def test_a_pause_after_the_job_failed_elsewhere_is_lost_not_paused(
+    store: JobStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create("match_analysis", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        await store.mark_failed(current.id, error_code="worker_lost", now=NOW + 1)
+        raise NeedsDecision("github", "github_rate_limited")
+
+    with caplog.at_level(logging.INFO, logger="app.workers.tasks"):
+        await execute_job(store, record.id, handler, stage=None)
+
+    finished = await store.load(record.id)
+    assert finished is not None
+    assert (finished.status, finished.error_code) == (JobStatus.FAILED, "worker_lost")
+    assert f"job lost job_id={record.id} reason=finished_elsewhere" in caplog.text
+    assert "job paused" not in caplog.text
+
+
+@pytest.mark.parametrize("external", ["worker_lost", "analysis_discarded"])
+async def test_a_job_failed_elsewhere_stops_at_its_next_stage(
+    store: JobStore, caplog: pytest.LogCaptureFixture, external: str
+) -> None:
+    # Bounds wasted spend: a run that lost its job must not reach the next paid stage.
+    record = await store.create("match_analysis", "owner", now=NOW)
+    reached: list[str] = []
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        await store.set_stage(current.id, stage="reading_cv", now=time.time())
+        reached.append("reading_cv")
+        await store.mark_failed(current.id, error_code=external, now=time.time())
+        await store.set_stage(current.id, stage="assessing", now=time.time())
+        reached.append("assessing")
+        return {"report": "wasted"}
+
+    with caplog.at_level(logging.INFO, logger="app.workers.tasks"):
+        await execute_job(store, record.id, handler, stage=None)
+
+    finished = await store.load(record.id)
+    assert reached == ["reading_cv"]
+    assert finished is not None
+    assert (finished.status, finished.error_code, finished.result, finished.stage) == (
+        JobStatus.FAILED,
+        external,
+        None,
+        "reading_cv",
+    )
+    assert f"job lost job_id={record.id} reason=finished_elsewhere" in caplog.text
+    assert "job done" not in caplog.text
+    assert "job failed" not in caplog.text
+
+
+class _StoreThatCannotLoad(JobStore):
+    async def load(self, job_id: str) -> JobRecord | None:
+        raise redis.exceptions.ConnectionError("redis blip")
+
+
+class _StoreThatCannotClaim(JobStore):
+    error: Exception = redis.exceptions.ConnectionError("redis blip")
+
+    async def claim(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
+        raise self.error
+
+
+class _StoreThatKeepsChangingOnClaim(_StoreThatCannotClaim):
+    error = JobStateError("job kept changing while being written")
+
+
+@pytest.mark.parametrize(
+    ("store_class", "error_type"),
+    [
+        (_StoreThatCannotLoad, "ConnectionError"),
+        (_StoreThatCannotClaim, "ConnectionError"),
+        (_StoreThatKeepsChangingOnClaim, "JobStateError"),
+    ],
+)
+async def test_a_job_that_cannot_be_claimed_fails_visibly_instead_of_waiting_out_the_queue(
+    redis_client: Redis,
+    store: JobStore,
+    caplog: pytest.LogCaptureFixture,
+    store_class: type[JobStore],
+    error_type: str,
+) -> None:
+    record = await store.create("match_analysis", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        raise AssertionError("an unclaimed job must not run")
+
+    with caplog.at_level(logging.INFO, logger="app.workers.tasks"):
+        await execute_job(
+            store_class(redis_client, ttl_seconds=600), record.id, handler, stage=None
+        )
+
+    failed = await store.load(record.id)
+    assert failed is not None
+    assert (failed.status, failed.error_code) == (JobStatus.FAILED, "queue_unavailable")
+    assert (
+        f"job failed job_id={record.id} error_code=queue_unavailable error_type={error_type}"
+        in caplog.text
+    )
+
+
+class _StoreThatIsUnreachable(_StoreThatCannotLoad):
+    async def mark_failed(self, job_id: str, *, error_code: str, now: float) -> JobRecord | None:
+        raise redis.exceptions.ConnectionError("still down")
+
+
+async def test_a_claim_failure_that_cannot_be_recorded_is_logged_and_raised(
+    redis_client: Redis, store: JobStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create("match_analysis", "owner", now=NOW)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        raise AssertionError("an unclaimed job must not run")
+
+    with (
+        caplog.at_level(logging.INFO, logger="app.workers.tasks"),
+        pytest.raises(redis.exceptions.ConnectionError),
+    ):
+        await execute_job(
+            _StoreThatIsUnreachable(redis_client, ttl_seconds=600), record.id, handler, stage=None
+        )
+
+    queued = await store.load(record.id)
+    assert queued is not None
+    assert queued.status is JobStatus.QUEUED
+    assert (
+        f"job failed unrecorded job_id={record.id} error_code=queue_unavailable "
+        "error_type=ConnectionError" in caplog.text
+    )
 
 
 class _StoreThatCannotRecordFailure(JobStore):
