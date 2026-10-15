@@ -1,5 +1,6 @@
 import time
-from typing import Any
+from enum import Enum
+from typing import Any, Final
 
 import httpx
 
@@ -23,6 +24,14 @@ FINISH_REASONS = {
     "content_filter": FinishReason.CONTENT_FILTER,
 }
 _CONTEXT_OVERFLOW = "context_length_exceeded"
+
+
+class _Unset(Enum):
+    UNSET = "unset"
+
+
+# None is a real reasoning_effort (omit the parameter), so "not passed" needs its own value.
+_UNSET: Final = _Unset.UNSET
 
 
 def _sampling(sampling: SamplingSettings) -> dict[str, Any]:
@@ -80,10 +89,12 @@ class OpenAIGenerator:
         client: httpx.AsyncClient | None = None,
         model: str | None = None,
         timeout_seconds: int | None = None,
-        reasoning_effort: str | None = None,
+        reasoning_effort: str | None | _Unset = _UNSET,
     ) -> None:
-        self._model = model or settings.openai_chat_model
-        self._reasoning_effort = reasoning_effort or settings.openai_reasoning_effort
+        self._model = settings.openai_chat_model if model is None else model
+        self._reasoning_effort = (
+            settings.openai_reasoning_effort if reasoning_effort is _UNSET else reasoning_effort
+        )
         if client is None:
             if settings.openai_api_key is None:
                 raise ValueError("OPENAI_API_KEY is required for the openai provider")
@@ -91,7 +102,9 @@ class OpenAIGenerator:
                 base_url=settings.openai_base_url,
                 headers={"Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}"},
                 timeout=httpx.Timeout(
-                    timeout_seconds or settings.generation_timeout_seconds,
+                    settings.generation_timeout_seconds
+                    if timeout_seconds is None
+                    else timeout_seconds,
                     connect=settings.generation_connect_timeout_seconds,
                 ),
                 # A followed redirect would replay the bearer key to wherever it points.
