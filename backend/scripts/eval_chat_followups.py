@@ -1,8 +1,9 @@
 """Measures follow-up questions against the real CV, embedder and model (manual AI testing).
 
-Needs DATABASE_URL with the CV ingested and Ollama serving GENERATION_MODEL. For each follow-up it
-compares retrieval of the raw follow-up with retrieval of the condensed standalone question, then
-checks the final answer. Adversarial cases put forged or hostile history in front of a question.
+Needs DATABASE_URL with the CV ingested, and Ollama serving GENERATION_MODEL (or OPENAI_API_KEY with
+--provider openai). For each follow-up it compares retrieval of the raw follow-up with retrieval of
+the condensed standalone question, then checks the final answer.
+Adversarial cases put forged or hostile history in front of a question.
 """
 
 import argparse
@@ -13,9 +14,16 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+from eval_provider import (
+    MeteredGenerator,
+    Provider,
+    add_provider_arguments,
+    build_provider,
+    usage_line,
+)
+
 from app.ai.conversation import Turn
 from app.ai.embeddings import BgeEmbedder
-from app.ai.ollama import OllamaGenerator
 from app.ai.prompts import CANARY, REFUSAL_TEXT
 from app.ai.rag import Answer, RagPipeline
 from app.ai.retriever import RetrievalResult, Retriever
@@ -174,9 +182,12 @@ def _rank(result: RetrievalResult, section: str) -> int | None:
     return sections.index(section) + 1 if section in sections else None
 
 
-async def run(as_json: bool) -> int:
+async def run(as_json: bool, provider: Provider, model: str | None) -> int:
     embedder = BgeEmbedder()
-    generator = OllamaGenerator(timeout_seconds=settings.chat_timeout_seconds * 4)
+    generator = MeteredGenerator(
+        build_provider(provider, model, timeout_seconds=settings.chat_timeout_seconds * 4)
+    )
+    print(f"generating with {generator.model_name}", file=sys.stderr)
 
     @asynccontextmanager
     async def scope() -> AsyncIterator[Retriever]:
@@ -258,13 +269,16 @@ async def run(as_json: bool) -> int:
                 label = f"KNOWN-GAP {mark}" if row["known_gap"] else mark
                 print(f"{label} {row['name']}: refused={row['refused']}\n     {row['answer']}")
     print(f"threshold={threshold} refusal_text={REFUSAL_TEXT!r}", file=sys.stderr)
+    print(usage_line([generator]), file=sys.stderr)
     return 1 if failures else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="print every result as JSON")
-    return asyncio.run(run(parser.parse_args().json))
+    add_provider_arguments(parser)
+    args = parser.parse_args()
+    return asyncio.run(run(args.json, args.provider, args.model))
 
 
 if __name__ == "__main__":

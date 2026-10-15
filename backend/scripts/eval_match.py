@@ -10,17 +10,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self, get_args
 
+from eval_provider import MeteredGenerator, add_provider_arguments, build_provider, usage_line
 from pydantic import BaseModel, ConfigDict
 
 from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.generation import GenerationResult, Message, SamplingSettings
+from app.ai.match.assess import MAX_ASSESS_BATCHES
 from app.ai.match.job_extract import extract_job
 from app.ai.match.preselect import NO_SIMILARITY, preselect
 from app.ai.match.prompts import correction_message
 from app.ai.match.requirements import requirement_refs
 from app.ai.match.schemas import EvidenceItem, JobPosting, Requirement
 from app.ai.match.structured import ExtractionError
-from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
 from app.core.redis import create_redis
 from app.integrations.github import GitHubCache, GitHubClient
@@ -190,10 +191,14 @@ def rate(numerator: int, denominator: int) -> float:
 class CountingGenerator:
     """Wraps the real adapter to count calls and schema retries without touching app code."""
 
-    def __init__(self, timeout_seconds: int) -> None:
-        self._inner = OllamaGenerator(timeout_seconds=timeout_seconds)
+    def __init__(self, args: argparse.Namespace, timeout_seconds: int) -> None:
+        self._inner = MeteredGenerator(build_provider(args.provider, args.model, timeout_seconds))
         self.calls = 0
         self.retries = 0
+
+    @property
+    def metered(self) -> MeteredGenerator:
+        return self._inner
 
     @property
     def model_name(self) -> str:
@@ -278,7 +283,7 @@ def best_similarity(
 
 
 async def prepare(args: argparse.Namespace) -> int:
-    generator = OllamaGenerator(timeout_seconds=settings.job_extract_generation_timeout_seconds)
+    generator = CountingGenerator(args, settings.job_extract_generation_timeout_seconds)
     written = 0
     try:
         for text_file in sorted(args.postings.glob("*.txt")):
@@ -300,6 +305,7 @@ async def prepare(args: argparse.Namespace) -> int:
             )
     finally:
         await generator.aclose()
+    print(usage_line([generator.metered]))
     print(f"{written} template(s) written to {args.postings}")
     return 0
 
@@ -311,11 +317,12 @@ async def calibrate(args: argparse.Namespace) -> int:
             f"need at least {MIN_RELATED_POSTINGS} postings in {args.postings}; run prepare first"
         )
         return 2
-    generator = CountingGenerator(settings.evidence_extract_generation_timeout_seconds)
+    generator = CountingGenerator(args, settings.evidence_extract_generation_timeout_seconds)
     try:
         state, _ = await read_candidate(args.cv, args.github, generator)
     finally:
         await generator.aclose()
+    print(usage_line([generator.metered]))
     embedder = BgeEmbedder()
     # Each source alone, as a CV-only or GitHub-only analysis would see it.
     by_source = {"cv": state.cv.items, "github": state.github.items}
@@ -400,16 +407,29 @@ async def _analyse_once(
     )
 
 
+def max_model_calls(postings: int, runs: int) -> int:
+    """Upper bound: every structured call is retried once, every posting uses all assess batches."""
+    attempts = 2
+    per_posting = (MAX_ASSESS_BATCHES + 1) * attempts
+    return runs * (attempts + postings * per_posting)
+
+
 async def run_eval(args: argparse.Namespace) -> int:
     # --unlabelled measures time, retries and citations before Robert has labelled anything.
     files = [f for f in load_label_files(args.postings) if args.unlabelled or f.compared()]
     if not files:
         print(f"no labelled postings in {args.postings}; label the templates first")
         return 2
+    planned = max_model_calls(len(files), args.runs)
+    if args.provider == "openai":
+        print(f"{len(files)} posting(s) x {args.runs} run(s): at most {planned} billed model calls")
+        if args.max_calls is not None and planned > args.max_calls:
+            print(f"refusing: {planned} exceeds --max-calls {args.max_calls}")
+            return 2
     embedder = BgeEmbedder()
-    evidence_gen = CountingGenerator(settings.evidence_extract_generation_timeout_seconds)
-    assess_gen = CountingGenerator(settings.match_assess_generation_timeout_seconds)
-    recommend_gen = CountingGenerator(settings.match_recommend_generation_timeout_seconds)
+    evidence_gen = CountingGenerator(args, settings.evidence_extract_generation_timeout_seconds)
+    assess_gen = CountingGenerator(args, settings.match_assess_generation_timeout_seconds)
+    recommend_gen = CountingGenerator(args, settings.match_recommend_generation_timeout_seconds)
     records: list[RunRecord] = []
     try:
         for run in range(1, args.runs + 1):
@@ -428,6 +448,7 @@ async def run_eval(args: argparse.Namespace) -> int:
             await generator.aclose()
     summary = summarise(files, records, [evidence_gen, assess_gen, recommend_gen])
     print(json.dumps(summary, indent=2))
+    print(usage_line([g.metered for g in (evidence_gen, assess_gen, recommend_gen)]))
     args.results.mkdir(parents=True, exist_ok=True)
     out = args.results / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
     out.write_text(
@@ -493,6 +514,7 @@ def main() -> int:
         ),
     )
     parser.add_argument("--postings", type=Path, default=DEFAULT_POSTINGS)
+    add_provider_arguments(parser)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("prepare", help="extract each .txt posting into a label template")
     for name in ("calibrate", "run"):
@@ -506,6 +528,12 @@ def main() -> int:
         help="a directory of real off-domain postings, prepared like --postings",
     )
     commands.choices["run"].add_argument("--runs", type=int, default=3)
+    commands.choices["run"].add_argument(
+        "--max-calls",
+        type=int,
+        default=None,
+        help="with --provider openai, refuse to start if the upper bound of calls exceeds this",
+    )
     commands.choices["run"].add_argument(
         "--unlabelled", action="store_true", help="also run postings that have no labels yet"
     )

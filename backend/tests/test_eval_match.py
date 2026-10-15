@@ -13,6 +13,7 @@ from eval_match import (  # noqa: E402
     Tally,
     flip_rate,
     load_label_files,
+    max_model_calls,
     suggested_threshold,
     suggested_thresholds,
     summarise,
@@ -147,3 +148,9 @@ def test_real_unrelated_postings_join_the_built_in_set() -> None:
     assert postings["real-nurse"] == POSTING
     assert set(UNRELATED) < set(postings)
     assert [r.text for r in postings["truck-driver"].required] == UNRELATED["truck-driver"]
+
+
+def test_the_call_bound_counts_retries_and_every_assess_batch() -> None:
+    # Per run: CV evidence (2) + per posting 8 assess batches and 1 recommend, each retried once.
+    assert max_model_calls(postings=1, runs=1) == 2 + 18
+    assert max_model_calls(postings=5, runs=3) == 3 * (2 + 5 * 18)
