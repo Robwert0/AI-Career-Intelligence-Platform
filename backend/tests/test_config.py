@@ -469,3 +469,49 @@ def test_a_blank_reasoning_effort_means_none_is_sent(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("OPENAI_REASONING_EFFORT", "")
 
     assert Settings(_env_file=None).openai_reasoning_effort is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://api.openai.com/v1",
+        "http://localhost.evil.example/v1",
+        "http://127.0.0.2:8080/v1",
+        "ftp://api.openai.com/v1",
+        "https:///v1",
+    ],
+)
+def test_an_openai_base_url_that_would_send_the_key_in_cleartext_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", url)
+
+    with pytest.raises(ValidationError, match="openai_base_url"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.openai.com/v1",
+        "https://gateway.example.com:8443/openai/v1",
+        "http://localhost:8080/v1",
+        "http://127.0.0.1:8080/v1",
+        "http://[::1]:8080/v1",
+    ],
+)
+def test_an_https_or_loopback_openai_base_url_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", url)
+
+    assert Settings(_env_file=None).openai_base_url == url
+
+
+def test_a_loopback_openai_base_url_still_cannot_carry_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://user:pass@localhost:8080/v1")
+
+    with pytest.raises(ValidationError, match="credentials"):
+        Settings(_env_file=None)

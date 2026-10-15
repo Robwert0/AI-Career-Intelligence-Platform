@@ -19,6 +19,7 @@ ANALYSIS_FIXED_BUDGET_SECONDS = (
     PARSE_BUDGET_SECONDS + GITHUB_BUDGET_SECONDS + EMBED_BUDGET_SECONDS + OVERHEAD_BUDGET_SECONDS
 )
 MAX_ASSESS_CALLS = 8
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 class Settings(BaseSettings):
@@ -164,6 +165,18 @@ class Settings(BaseSettings):
                 "must not carry credentials, a query or a fragment: httpx logs request URLs"
             )
         return url
+
+    @field_validator("openai_base_url")
+    @classmethod
+    def _openai_url_is_encrypted(cls, url: str) -> str:
+        parsed = urlsplit(url)
+        if not parsed.hostname:
+            raise ValueError("must name a host")
+        if parsed.scheme == "https" or (
+            parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS
+        ):
+            return url
+        raise ValueError("must use https (http only for a loopback host): it carries the API key")
 
     @field_validator("cors_allowed_origins", mode="after")
     @classmethod

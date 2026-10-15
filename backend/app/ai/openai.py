@@ -113,6 +113,8 @@ class OpenAIGenerator:
                     timeout_seconds or settings.generation_timeout_seconds,
                     connect=settings.generation_connect_timeout_seconds,
                 ),
+                # A followed redirect would replay the bearer key to wherever it points.
+                follow_redirects=False,
             )
         self._client = client
 

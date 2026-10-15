@@ -399,6 +399,7 @@ async def test_the_factory_builds_the_configured_provider(monkeypatch: pytest.Mo
         assert isinstance(ollama, OllamaGenerator)
         assert openai._client.timeout.read == 12.0
         assert str(openai._client.base_url).rstrip("/") == settings.openai_base_url
+        assert openai._client.follow_redirects is False
     finally:
         await openai.aclose()
         await ollama.aclose()
