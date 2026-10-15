@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     match_assess_generation_timeout_seconds: int = Field(default=60, ge=10)
     match_recommend_generation_timeout_seconds: int = Field(default=90, ge=10)
     match_analysis_soft_time_limit_seconds: int = Field(default=1800, ge=60)
+    llm_spend_guard_enabled: bool = True
+    llm_daily_budget_usd: float = Field(default=2.0, gt=0.0)
+    llm_input_usd_per_mtok: float = Field(default=0.10, ge=0.0)
+    llm_output_usd_per_mtok: float = Field(default=0.50, ge=0.0)
 
     @property
     def match_preselect_thresholds(self) -> dict[str, float]:

@@ -64,7 +64,10 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
-    dependencies=[Depends(rate_limit(policies.REGISTER))],
+    dependencies=[
+        Depends(rate_limit(policies.REGISTER)),
+        Depends(rate_limit(policies.REGISTER_GLOBAL)),
+    ],
 )
 async def register(
     data: UserCreate,

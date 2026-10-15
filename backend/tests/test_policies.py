@@ -84,3 +84,22 @@ def test_analyses_are_limited_to_five_an_hour_per_user() -> None:
     assert policies.MATCH_ANALYSIS_USER.capacity == 5
     assert policies.MATCH_ANALYSIS_USER.refill_per_second == pytest.approx(5 / 3600)
     assert policies.MATCH_ANALYSIS_USER.scope is Scope.USER
+
+
+def test_chat_has_a_daily_cap_per_user() -> None:
+    daily = policies.CHAT_USER_DAILY
+    assert daily.scope is Scope.USER
+    assert daily.refill_per_second * 86400 == pytest.approx(daily.capacity)
+    assert daily.capacity < policies.CHAT_USER.refill_per_second * 86400
+
+
+def test_registration_has_a_global_ceiling() -> None:
+    ceiling = policies.REGISTER_GLOBAL
+    assert ceiling.scope is Scope.GLOBAL
+    assert ceiling.capacity > policies.REGISTER.capacity
+
+
+def test_a_global_policy_depends_on_neither_the_ip_nor_the_user() -> None:
+    parameters = inspect.signature(rate_limit(policies.REGISTER_GLOBAL)).parameters
+    assert "user" not in parameters
+    assert "request" not in parameters

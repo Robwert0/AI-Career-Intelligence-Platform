@@ -159,6 +159,10 @@ def get_limiter(request: Request) -> Limiter:
     return limiter
 
 
+def get_global_identity() -> str:
+    return "all"
+
+
 def _client_ip(request: Request) -> str:
     if request.client is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable")
@@ -179,7 +183,7 @@ async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) ->
 
 
 def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
-    # Two closures, not one: FastAPI resolves dependencies from the signature, so an IP-scoped
+    # One closure per scope: FastAPI resolves dependencies from the signature, so an IP-scoped
     # policy must not carry the auth dependency or /auth/login would require a login.
     async def by_ip(request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]) -> None:
         await enforce_rate_limit(policy, _client_ip(request), limiter)
@@ -190,7 +194,20 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
     ) -> None:
         await enforce_rate_limit(policy, str(user.id), limiter)
 
-    return by_ip if policy.scope is Scope.IP else by_user
+    async def by_global(
+        identity: Annotated[str, Depends(get_global_identity)],
+        limiter: Annotated[Limiter, Depends(get_limiter)],
+    ) -> None:
+        await enforce_rate_limit(policy, identity, limiter)
+
+    match policy.scope:
+        case Scope.IP:
+            return by_ip
+        case Scope.USER:
+            return by_user
+        case Scope.GLOBAL:
+            return by_global
+    raise ValueError(f"unhandled scope {policy.scope}")
 
 
 def get_job_store(request: Request) -> JobStore:

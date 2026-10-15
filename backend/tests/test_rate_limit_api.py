@@ -1,10 +1,15 @@
+import time
 import uuid
 
 import httpx
+import pytest
 from fakes import AllowAllLimiter, UnavailableLimiter
 from fastapi.routing import APIRoute
 
-from app.deps import get_limiter
+from app.core import policies
+from app.core.rate_limiter import Policy
+from app.core.redis import create_redis
+from app.deps import get_global_identity, get_limiter
 from app.main import app
 
 EMAIL = "limited@test.dev"
@@ -83,7 +88,7 @@ def test_every_route_that_does_work_carries_a_rate_limit() -> None:
                 continue
             path = f"{context.prefix}{route.path}"
             attached = {getattr(d.dependency, "__name__", "") for d in route.dependencies}
-            limited = attached & {"by_ip", "by_user"}
+            limited = attached & {"by_ip", "by_user", "by_global"}
             for method in route.methods or set():
                 if not limited and (method, path) not in exempt:
                     unlimited.append((method, path))
@@ -111,3 +116,65 @@ async def test_redis_down_fails_closed_and_the_route_body_never_runs(
 async def test_health_still_answers_when_redis_is_down(client: httpx.AsyncClient) -> None:
     app.dependency_overrides[get_limiter] = UnavailableLimiter
     assert (await client.get("/health")).status_code == 200
+
+
+def _bucket(policy: Policy, identity: str) -> str:
+    return f"rl:{policy.name}:{identity}"
+
+
+async def _drain(policy: Policy, identity: str) -> None:
+    redis = create_redis()
+    try:
+        await redis.hset(_bucket(policy, identity), mapping={"tokens": 0, "ts": time.time()})
+        await redis.expire(_bucket(policy, identity), 600)
+    finally:
+        await redis.aclose()
+
+
+def _global_identity() -> str:
+    identity: str = app.dependency_overrides[get_global_identity]()
+    return identity
+
+
+async def test_chat_is_capped_per_user_per_day(limited_client: httpx.AsyncClient) -> None:
+    registered = await limited_client.post(
+        "/auth/register", json={"email": EMAIL, "password": PASSWORD}
+    )
+    login = await limited_client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    await _drain(policies.CHAT_USER_DAILY, registered.json()["id"])
+
+    response = await limited_client.post("/chat", json={"message": "hi"}, headers=headers)
+
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) > 60
+
+
+async def test_registration_has_a_ceiling_across_every_ip(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    await _drain(policies.REGISTER_GLOBAL, _global_identity())
+
+    response = await limited_client.post(
+        "/auth/register", json={"email": EMAIL, "password": PASSWORD}
+    )
+
+    assert response.status_code == 429
+
+
+async def test_a_denied_ip_does_not_spend_the_global_registration_budget(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    for attempt in range(5):
+        await limited_client.post(
+            "/auth/register", json={"email": f"{attempt}{EMAIL}", "password": PASSWORD}
+        )
+
+    redis = create_redis()
+    try:
+        left = await redis.hget(_bucket(policies.REGISTER_GLOBAL, _global_identity()), "tokens")
+    finally:
+        await redis.aclose()
+    assert left is not None
+    spent = policies.REGISTER_GLOBAL.capacity - float(left)
+    assert spent == pytest.approx(policies.REGISTER.capacity, abs=0.1)

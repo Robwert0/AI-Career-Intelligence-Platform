@@ -1,0 +1,128 @@
+import json
+import logging
+import math
+from typing import Any, Protocol
+
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+
+from app.ai.generation import (
+    GenerationRequestError,
+    GenerationResult,
+    Generator,
+    GeneratorUnavailableError,
+    Message,
+    SamplingSettings,
+)
+from app.core.config import settings
+from app.core.spend_ledger import RedisSpendLedger, Reservation
+
+logger = logging.getLogger(__name__)
+
+# Chat-template tokens around each message; generous on purpose.
+MESSAGE_OVERHEAD_TOKENS = 8
+
+
+class SpendBudgetExceededError(GeneratorUnavailableError):
+    """The global daily LLM budget is spent; callers treat it like any provider outage."""
+
+
+class SpendLedger(Protocol):
+    async def reserve(self, micro_usd: int) -> Reservation | None: ...
+
+    async def settle(self, reservation: Reservation, actual_micro_usd: int) -> None: ...
+
+
+def prompt_token_ceiling(messages: list[Message], response_schema: dict[str, Any] | None) -> int:
+    # Byte-level BPE never emits more tokens than input bytes, so UTF-8 length is an upper bound.
+    tokens = sum(len(m.content.encode()) + MESSAGE_OVERHEAD_TOKENS for m in messages)
+    if response_schema is not None:
+        tokens += len(json.dumps(response_schema).encode())
+    return tokens
+
+
+def cost_micro_usd(prompt_tokens: int, completion_tokens: int) -> int:
+    # USD per million tokens times tokens is exactly micro-dollars.
+    return math.ceil(
+        prompt_tokens * settings.llm_input_usd_per_mtok
+        + completion_tokens * settings.llm_output_usd_per_mtok
+    )
+
+
+class BudgetedGenerator:
+    def __init__(self, inner: Generator, ledger: SpendLedger) -> None:
+        self._inner = inner
+        self._ledger = ledger
+
+    @property
+    def model_name(self) -> str:
+        return self._inner.model_name
+
+    async def aclose(self) -> None:
+        close = getattr(self._inner, "aclose", None)
+        if close is not None:
+            await close()
+
+    async def generate(
+        self,
+        messages: list[Message],
+        *,
+        sampling: SamplingSettings | None = None,
+        top_logprobs: int | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> GenerationResult:
+        max_output = (sampling or SamplingSettings()).max_output_tokens
+        reservation = await self._reserve(
+            cost_micro_usd(prompt_token_ceiling(messages, response_schema), max_output)
+        )
+        try:
+            result = await self._inner.generate(
+                messages,
+                sampling=sampling,
+                top_logprobs=top_logprobs,
+                response_schema=response_schema,
+            )
+        except (GenerationRequestError, GeneratorUnavailableError) as exc:
+            if _provider_refused(exc):
+                await self._settle(reservation, 0)
+            raise
+        usage = result.usage
+        await self._settle(
+            reservation, cost_micro_usd(usage.prompt_tokens, usage.completion_tokens)
+        )
+        return result
+
+    async def _reserve(self, micro_usd: int) -> Reservation:
+        try:
+            reservation = await self._ledger.reserve(micro_usd)
+        except RedisError:
+            logger.warning("llm spend ledger unavailable; refusing the call")
+            raise GeneratorUnavailableError("spend ledger unavailable") from None
+        if reservation is None:
+            raise SpendBudgetExceededError("daily LLM budget exhausted")
+        return reservation
+
+    async def _settle(self, reservation: Reservation, actual_micro_usd: int) -> None:
+        # A failed settle leaves the worst-case reservation booked: over-counting is the safe side.
+        try:
+            await self._ledger.settle(reservation, actual_micro_usd)
+        except RedisError:
+            logger.warning(
+                "llm spend settle failed; reservation kept reserved_micro_usd=%d",
+                reservation.micro_usd,
+            )
+
+
+def _provider_refused(exc: GenerationRequestError | GeneratorUnavailableError) -> bool:
+    # Only an error status proves nothing was billed. A timeout, a cancellation or a dropped
+    # connection may have been generated and charged in full, so those keep the worst case booked.
+    return exc.status_code is not None and exc.status_code >= 400
+
+
+def guarded[G: Generator](generator: G, redis: Redis) -> G | BudgetedGenerator:
+    if not settings.llm_spend_guard_enabled:
+        return generator
+    ledger = RedisSpendLedger(
+        redis, daily_budget_micro_usd=math.floor(settings.llm_daily_budget_usd * 1_000_000)
+    )
+    return BudgetedGenerator(generator, ledger)

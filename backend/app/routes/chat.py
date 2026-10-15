@@ -26,6 +26,7 @@ router = APIRouter()
     dependencies=[
         Depends(rate_limit(policies.CHAT_IP)),
         Depends(rate_limit(policies.CHAT_USER)),
+        Depends(rate_limit(policies.CHAT_USER_DAILY)),
     ],
 )
 async def chat(
@@ -36,8 +37,9 @@ async def chat(
 ) -> ChatResponse:
     if payload.history:
         # A follow-up costs two generations (the rewrite, then the answer), so it spends two
-        # tokens of the per-user budget.
+        # tokens of each per-user budget.
         await enforce_rate_limit(policies.CHAT_USER, str(current_user.id), limiter)
+        await enforce_rate_limit(policies.CHAT_USER_DAILY, str(current_user.id), limiter)
     try:
         answer = await pipeline.answer(
             payload.message,

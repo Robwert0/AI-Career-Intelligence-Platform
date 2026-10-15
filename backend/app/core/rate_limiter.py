@@ -4,7 +4,7 @@ from typing import Protocol
 
 from redis.asyncio import Redis
 
-Scope = StrEnum("Scope", ["IP", "USER"])
+Scope = StrEnum("Scope", ["IP", "USER", "GLOBAL"])
 
 
 @dataclass(frozen=True, slots=True)
