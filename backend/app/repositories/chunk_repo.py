@@ -59,8 +59,10 @@ class ChunkRepository:
             stmt = stmt.where(Chunk.section == section)
 
         result = await self._session.execute(stmt)
+        hits = [(chunk, float(distance)) for chunk, distance in result.all()]
 
-        return [(chunk, float(distance)) for chunk, distance in result.all()]
+        # relaxed_order lets a filtered HNSW scan return rows slightly out of distance order
+        return sorted(hits, key=lambda hit: hit[1])
 
     async def search_by_text(
         self,
