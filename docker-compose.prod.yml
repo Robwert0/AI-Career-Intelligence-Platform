@@ -1,10 +1,9 @@
-# Production override for the single-VPS deploy:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-# Only the frontend is published; Postgres, Redis and the API are reachable on the compose
-# network alone. `!reset` needs Docker Compose 2.24 or newer.
-#
-# Still needed before real traffic: TLS in front of the frontend. The refresh cookie is always
-# Secure, so over plain http on a public IP the browser drops it and sessions never stick.
+# Production override for the single-VPS deploy. Put
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+# in the server's .env so every bare `docker compose …` (up, run, exec) includes this file.
+# Only Caddy is published (80 and 443, with a Let's Encrypt certificate for DOMAIN); the frontend,
+# API, Postgres and Redis are reachable on the compose networks alone. `!reset` needs Docker
+# Compose 2.24 or newer.
 
 services:
   database:
@@ -14,6 +13,27 @@ services:
   redis:
     ports: !reset []
     # Same no-persistence flags as dev. noeviction is Redis's default, pinned because the rate
-    # limiter depends on it: an evicted bucket is reborn full.
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    # limiter depends on it: an evicted bucket is reborn full. maxmemory turns a memory leak or a
+    # flood of queued CVs into refused writes (the limiter fails closed) instead of the kernel
+    # OOM-killing something else on a 4 GB host. A full queue (MATCH_MAX_QUEUED_ANALYSES=20) at
+    # MAX_UPLOAD_MB=5 is ~100 MB of CVs; buckets and job records are tiny.
+    # Raising either setting means raising maxmemory and mem_limit with it.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    # Headroom over maxmemory for allocator fragmentation and client buffers.
+    mem_limit: 384m
     restart: unless-stopped
+
+  frontend:
+    ports: !reset []
+
+  caddy:
+    ports: !override
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp"
+    environment:
+      # Required: without it Caddy serves `localhost` from its internal CA and no browser trusts it.
+      DOMAIN: ${DOMAIN:?set DOMAIN to the public hostname in .env}
+      # One year, fixed here so a dev .env (HSTS_MAX_AGE=0) cannot switch it off. No
+      # includeSubDomains or preload: those would bind every other subdomain too.
+      HSTS_MAX_AGE: "31536000"

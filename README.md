@@ -180,7 +180,7 @@ Leave `CV_DOCUMENT_ID` empty for now: the migration and ingest commands below do
 step 5 tells you what to put there.
 
 If port 5432 is already in use on your machine, change `POSTGRES_PORT` and the port in
-`DATABASE_URL` together. Redis is always published on 6379, so stop any local Redis already using it.
+`DATABASE_URL` together. Redis is always published on 127.0.0.1:6379, so stop any local Redis already using it.
 
 ### 3. Start Postgres and Redis
 
@@ -299,44 +299,132 @@ The suite has 1541 backend tests (pytest) and 501 frontend tests (Vitest).
 
 The same `.env` drives a fully containerized stack: Postgres, Redis, a one-shot `migrate`, the API,
 one Celery worker, exactly one Celery beat (never scale it: the daily retention purge runs from it),
-and the frontend. Do step 2 above first; you need Docker and Ollama, not uv or Node.
+the frontend and Caddy in front of it. Do step 2 above first; you need Docker and Ollama, not uv or
+Node.
 
 ```bash
 docker compose up -d --build        # first build takes minutes: CPU-only torch + the embedding model
 docker compose ps                   # all healthy; migrate shows "Exited (0)"
 ```
 
-Then open `http://localhost:3000` (`FRONTEND_PORT` changes the host port). Notes:
+Then open `http://localhost:3000` (bound to 127.0.0.1; `FRONTEND_PORT` changes it, and then
+`http://localhost:<port>` must be added to `CORS_ALLOWED_ORIGINS`, or every POST gets a 403), or go
+through Caddy at `https://localhost` exactly as production does. Locally Caddy signs `localhost`
+with its own internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
+`CORS_ALLOWED_ORIGINS` to log in that way. If 80/443 are taken on your machine, set
+`CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` (the origin then carries the port, e.g.
+`https://localhost:8443`). Notes:
+- Every backend service reads `env_file: ${APP_ENV_FILE:-.env}`, so the file must exist: `config`, a
+  bare `up` and any `run` fail without it. `APP_ENV_FILE` changes only the containers' environment;
+  the `${POSTGRES_*}` and other `${...}` values in the compose files are still read from `.env`.
 - The containers override the `localhost` URLs in `.env` (`DATABASE_URL`, `REDIS_URL`,
   `CELERY_BROKER_URL`) with service names, so the same `.env` still serves the local flow.
-- Generation reaches Ollama on the host at `http://host.docker.internal:11434`; override it with
-  `DOCKER_OLLAMA_BASE_URL` in `.env`. On a Linux host Ollama must listen on the Docker bridge
-  (e.g. `OLLAMA_HOST=172.17.0.1`), never on a public interface.
+- Postgres, Redis and Caddy are published on 127.0.0.1 only; the production override publishes
+  Caddy alone, on every interface. Docker Desktop still forwards 127.0.0.1 ports into WSL2, so
+  host-side tests and uvicorn reach them unchanged.
+- Local development only: generation reaches Ollama on your machine at
+  `http://host.docker.internal:11434` (Docker Desktop resolves it); override it with
+  `DOCKER_OLLAMA_BASE_URL` in `.env`. Ollama has no authentication, so whoever reaches its port can
+  run, pull and delete models: keep it on 127.0.0.1 and never expose it on a server. Production does
+  not run Ollama at all (see below).
 - The embedding model is baked into the image at the revision pinned in `app/core/config.py` and
   the containers run offline (`HF_HUB_OFFLINE=1`): changing `EMBEDDING_MODEL[_REVISION]` means
   rebuilding the backend image.
 - `BACKEND_ORIGIN` and the `NEXT_PUBLIC_UMAMI_*` values are inlined by `next build`, so they are
   build args: put the Umami values in the root `.env`, then `docker compose build frontend`.
-- CV ingestion and admin creation run as one-off containers:
+- CV ingestion and admin creation run as one-off containers. The image holds no CVs (the
+  `.dockerignore` keeps every PDF out, and it must stay that way), so the PDF is piped in on stdin
+  rather than bind-mounted: a `-v` whose source path is mistyped silently creates an empty
+  directory on the host and mounts that instead.
 
   ```bash
-  docker compose run --rm -v "$PWD/my-cv.pdf:/tmp/cv.pdf:ro" api python scripts/ingest_cv.py /tmp/cv.pdf
-  docker compose up -d api worker     # after setting CV_DOCUMENT_ID in .env
+  docker compose run --rm -T api sh -c 'cat > /tmp/cv.pdf && python scripts/ingest_cv.py /tmp/cv.pdf' < my-cv.pdf
+  docker compose up -d                # after setting CV_DOCUMENT_ID in .env to the id it printed
   docker compose run --rm api python scripts/make_admin.py --create admin@example.com
   ```
 
-For production on one host, add the override. It unpublishes Postgres and Redis, so only the
-frontend is reachable:
+  `run` starts `database`, `redis` and `migrate` first if they are not up. The API needs
+  `CV_DOCUMENT_ID` to start, and the frontend and Caddy wait for a healthy API, so a first `up`
+  before ingesting leaves those three down.
+
+### Production on one host
+
+**Deploy only once #51 (OpenAI generator), #52 (optional `CV_DOCUMENT_ID` for migrate, ingest and
+the worker) and #54 (LLM spend guard) are merged.** Before them, the settings below are silently
+ignored (Settings drops unknown keys) and the stack would try to reach Ollama with no spending cap.
+
+1. Point a DNS **A record** for your domain at the server's public IPv4 address. Skip the AAAA
+   record unless Docker's IPv6 is enabled: otherwise IPv6 visitors reach Caddy through Docker's
+   userland proxy and all appear as one address, sharing one rate-limit bucket.
+2. Open **80/tcp and 443/tcp** (and 443/udp for HTTP/3) in the firewall. Port 80 must stay open:
+   Let's Encrypt validates through it, and Caddy redirects it to HTTPS.
+3. Write a fresh `.env` on the server; never copy your development one. Checklist:
+   - `COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml`. Compose reads this from `.env`, so
+     every bare `docker compose …` (including the one-off `run` commands above) gets the
+     production override. Without it a plain `docker compose up` would start the development
+     setup. An explicit `-f` on the command line replaces it, so don't pass one.
+   - `ENV=production`. It is only a label that `/health` echoes back; nothing else reads it, so it
+     switches no security behaviour on or off.
+   - A new `SECRET_KEY` (`openssl rand -hex 32`) and a new `POSTGRES_PASSWORD`, letters and digits
+     only (`openssl rand -hex 16`), since it goes into `DATABASE_URL` unencoded.
+   - `DOMAIN=cv.example.com` and `CORS_ALLOWED_ORIGINS=https://cv.example.com`, exactly that one
+     origin (the API refuses state-changing requests from any other, so a mismatch fails every
+     login).
+   - Generation through OpenAI: `GENERATION_PROVIDER=openai` with `OPENAI_API_KEY` and
+     `OPENAI_CHAT_MODEL`. The server does not run Ollama: it has no authentication, and a 4 GB
+     VPS cannot hold the model anyway.
+   - `LLM_DAILY_BUDGET_CHAT_USD` and `LLM_DAILY_BUDGET_ANALYSIS_USD` set low (e.g. `0.2` and `0.3`,
+     $0.50/day in total), and on the OpenAI side prepaid credits with
+     auto-recharge off, so a bug or an abuser can spend at most what is on the account.
+   - `LLM_INPUT_USD_PER_MTOK` / `LLM_OUTPUT_USD_PER_MTOK` equal to the current list price of
+     `OPENAI_CHAT_MODEL` per million tokens (the defaults, `0.10` / `0.50`, match `gpt-6-luna`), and
+     `LLM_SPEND_GUARD_ENABLED=true` (the default). The daily caps are counted at these prices, so a
+     stale price after a model change lets real spend run past the cap.
+   - `CV_DOCUMENT_ID` empty for now; step 4 fills it in.
+4. Start it in this order. The API refuses to start without `CV_DOCUMENT_ID`, and the frontend and
+   Caddy only start once the API is healthy, so the CV goes in before the rest comes up. The image
+   holds no CVs (`.dockerignore` excludes every PDF; never bake one in), so the PDF is piped in on
+   stdin; a `-v` bind mount with a mistyped source would silently mount an empty directory.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose config | grep maxmemory    # prints a line only when the override is active
+docker compose build
+docker compose up -d database redis migrate worker beat
+docker compose run --rm -T api sh -c 'cat > /tmp/cv.pdf && python scripts/ingest_cv.py /tmp/cv.pdf' < my-cv.pdf
+# put the printed document id in .env as CV_DOCUMENT_ID=<id>, then:
+docker compose up -d                       # recreates the backend services with the new .env
+docker compose ps                          # all healthy; migrate shows "Exited (0)"
+docker compose run --rm api python scripts/make_admin.py --create admin@cv.example.com
 ```
 
-Two things it does not solve yet:
-- **TLS.** The refresh cookie is always `Secure`, so a reverse proxy with HTTPS has to sit in front
-  of the frontend before logins stick on a real domain.
-- **Per-IP rate limits.** Next's `/api/*` proxy forwards the client's own `X-Forwarded-For`
-  untouched, so trusting it would let any visitor pick their own rate-limit key. That is why
-  `FORWARDED_ALLOW_IPS` stays `127.0.0.1` (trust nothing) and every visitor shares the frontend's
-  per-IP bucket. Only once a reverse proxy that overwrites `X-Forwarded-For` is in front should it
-  be set to the compose network's subnet.
+   Only Caddy is published; the frontend, API, Postgres and Redis are reachable on the compose
+   networks alone (a published Docker port bypasses UFW, so nothing else is published). Caddy
+   fetches the certificate on the first request and keeps it in the `caddy_data` volume (don't
+   `down -v` in production: re-issuing is rate-limited).
+5. Back up the database: `pgdata` is the only copy of accounts and the ingested CV. For example,
+   from a script cron runs nightly in the repo directory (so compose finds `.env`), writing off the
+   volume and ideally copied off the host:
+   `docker compose exec -T database pg_dump -U <POSTGRES_USER> -Fc <POSTGRES_DB> > /var/backups/career-$(date +%F).dump`
+
+The override also fixes HSTS at one year, whatever `.env` says, caps Redis at 256 MB, and refuses
+to start without `DOMAIN`. There is no ACME email, which Let's Encrypt does not require.
+
+**How the API sees the real client IP.** Per-IP rate limits key on `request.client.host`, so it has
+to be the visitor, not a proxy, and not something the visitor can choose:
+
+```
+visitor ─TLS─▶ Caddy ──▶ Next (frontend) ──▶ uvicorn (api)
+              │          │                  │
+              │          │                  └ FORWARDED_ALLOW_IPS = the frontend's fixed IP only:
+              │          │                    takes the client from X-Forwarded-For only on that hop
+              │          └ rewrites /api/* and forwards X-Forwarded-For untouched
+              └ no trusted_proxies: replaces any client-sent X-Forwarded-For with the TCP peer
+```
+
+`FORWARDED_ALLOW_IPS` is the list of peers uvicorn believes about `X-Forwarded-For`. Compose sets it
+to `FRONTEND_PROXY_IP` (default `10.254.253.10`, inside `API_PROXY_SUBNET`, default
+`10.254.253.0/28`); change those two only if the subnet collides with one on your host. Each network
+holds only the two hops it connects, so nothing else can talk to the frontend or the API. Two
+consequences: the frontend is a single replica (fixed address), and anything that reaches the
+frontend without going through Caddy can forge its IP, which is why port 3000 is loopback-only in
+development and unpublished in production.

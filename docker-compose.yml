@@ -1,3 +1,10 @@
+# Our own images run as an unprivileged user and need no Linux capabilities at all.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
 services:
   database:
     image: pgvector/pgvector:pg18
@@ -5,8 +12,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Loopback only: a published port bypasses host firewalls such as UFW. Docker Desktop still
+    # forwards 127.0.0.1 ports into WSL2, so host-side tests reach them as before.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -20,7 +29,7 @@ services:
     # No RDB/AOF: job records and CV bytes must never be written to disk.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 1s
@@ -30,12 +39,13 @@ services:
   # Everything below runs only with a bare `docker compose up`; `up -d database redis` ignores it.
 
   migrate:
+    <<: *hardening
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
     environment: &backend-env
       # The root .env is written for host processes (localhost URLs); inside the network the
-      # services are reached by name. The password goes into the URL unencoded: keep it alphanumeric.
+      # services are reached by name. POSTGRES_PASSWORD goes in unencoded (see .env.example).
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
@@ -48,17 +58,21 @@ services:
     restart: "no"
 
   api:
+    <<: *hardening
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
     environment:
       <<: *backend-env
-      # uvicorn reads this itself. Next's rewrite proxy forwards the client's X-Forwarded-For
-      # untouched, so trusting the frontend lets any visitor pick their own rate-limit key.
-      # Raise it only once a reverse proxy that overwrites X-Forwarded-For fronts Next.
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # uvicorn reads this itself and takes the client from X-Forwarded-For only when the TCP
+      # peer is listed here. Only the frontend: Caddy overwrites the header with the real client
+      # IP and Next passes it on untouched. Set in compose, so a value in .env cannot widen it.
+      FORWARDED_ALLOW_IPS: ${FRONTEND_PROXY_IP:-10.254.253.10}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - api_proxy
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -73,6 +87,7 @@ services:
     restart: unless-stopped
 
   worker:
+    <<: *hardening
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -85,6 +100,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    # Reporting only: plain Compose does not restart an unhealthy container, just an exited one.
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10"]
       interval: 60s
@@ -94,8 +110,10 @@ services:
     restart: unless-stopped
 
   # Exactly one beat process: none means the retention purge never runs, two run it twice.
-  # Never scale this service.
+  # The fixed container_name prevents a second beat container: `--scale beat=2` is refused.
   beat:
+    <<: *hardening
+    container_name: ${COMPOSE_PROJECT_NAME}-beat
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -111,6 +129,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    <<: *hardening
     image: career-intel-frontend
     build:
       context: ./frontend
@@ -120,8 +139,15 @@ services:
         NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${NEXT_PUBLIC_UMAMI_WEBSITE_ID:-}
         NEXT_PUBLIC_UMAMI_DOMAINS: ${NEXT_PUBLIC_UMAMI_DOMAINS:-}
         NEXT_PUBLIC_UMAMI_DASHBOARD_URL: ${NEXT_PUBLIC_UMAMI_DASHBOARD_URL:-}
+    # Loopback only, for local development. This port bypasses Caddy, and the API trusts
+    # whatever X-Forwarded-For reaches it through the frontend, so it must never be public:
+    # the production override unpublishes it. The same holds for anything joining `edge`.
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    networks:
+      edge: {}
+      api_proxy:
+        ipv4_address: ${FRONTEND_PROXY_IP:-10.254.253.10}
     depends_on:
       api:
         condition: service_healthy
@@ -133,7 +159,51 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  caddy:
+    <<: *hardening
+    # The image grants /usr/bin/caddy cap_net_bind_service as a file capability; with it missing
+    # from the bounding set the kernel refuses to exec the binary at all.
+    cap_add:
+      - NET_BIND_SERVICE
+    image: caddy:2.11.7-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}
+    # Loopback in development; the production override publishes these on every interface.
+    ports:
+      - "127.0.0.1:${CADDY_HTTP_PORT:-80}:80"
+      - "127.0.0.1:${CADDY_HTTPS_PORT:-443}:443"
+      - "127.0.0.1:${CADDY_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys: losing them means re-issuing, and Let's Encrypt
+      # rate-limits that.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    depends_on:
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+
+
+# Three networks so each hop sees only its neighbour: Caddy reaches only the frontend, and the
+# frontend reaches only the API. api_proxy has a fixed subnet because the API trusts
+# X-Forwarded-For from one address, the frontend's. FRONTEND_PROXY_IP must sit inside
+# API_PROXY_SUBNET: `config` does not check it, Docker only rejects it when it creates the frontend
+# container, after the services before it have started. The fixed address means one frontend
+# replica.
+networks:
+  default:
+  edge:
+  api_proxy:
+    ipam:
+      config:
+        - subnet: ${API_PROXY_SUBNET:-10.254.253.0/28}
 
 volumes:
   pgdata:
   celerybeat:
+  caddy_data:
+  caddy_config:
