@@ -126,7 +126,7 @@ services:
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
     environment: *backend-env
-    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info", "--schedule", "/var/lib/celerybeat/schedule"]
+    command: ["celery", "-A", "app.workers.beat_app:beat_app", "beat", "--loglevel=info", "--schedule", "/var/lib/celerybeat/schedule"]
     volumes:
       - celerybeat:/var/lib/celerybeat
     depends_on:
