@@ -236,3 +236,38 @@ def test_the_retrieval_result_is_immutable() -> None:
 
     with pytest.raises(AttributeError):
         result.best_similarity = 0.9  # type: ignore[misc]
+
+
+class OutOfOrderRepository(ChunkRepository):
+    def __init__(self, hits: list[tuple[Chunk, float]]) -> None:
+        self._hits = hits
+
+    async def search_by_vector(
+        self,
+        embedding: list[float],
+        limit: int,
+        *,
+        document_id: uuid.UUID,
+        section: str | None = None,
+    ) -> list[tuple[Chunk, float]]:
+        return self._hits
+
+    async def search_by_text(
+        self,
+        query: str,
+        limit: int,
+        *,
+        document_id: uuid.UUID,
+        section: str | None = None,
+    ) -> list[Chunk]:
+        return []
+
+
+async def test_relaxed_order_hits_are_ranked_and_scored_by_distance() -> None:
+    far, nearest, middle = chunk("far"), chunk("nearest"), chunk("middle")
+    repo = OutOfOrderRepository([(far, 0.6), (nearest, 0.2), (middle, 0.4)])
+
+    result = await Retriever(repo, FakeEmbedder()).retrieve("anything", document_id=DOCUMENT_ID)
+
+    assert result.best_similarity == pytest.approx(0.8)
+    assert [c.section for c in result.chunks] == ["nearest", "middle", "far"]
