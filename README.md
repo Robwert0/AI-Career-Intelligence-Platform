@@ -295,3 +295,49 @@ cd frontend && npm run lint && npm run test && npm run build
 ```
 
 The suite has 1541 backend tests (pytest) and 501 frontend tests (Vitest).
+
+## Run the full stack in Docker
+
+The same `.env` drives a fully containerized stack: Postgres, Redis, a one-shot `migrate`, the API,
+one Celery worker, exactly one Celery beat (never scale it: the daily retention purge runs from it),
+and the frontend. Do step 2 above first; you need Docker and Ollama, not uv or Node.
+
+```bash
+docker compose up -d --build        # first build takes minutes: CPU-only torch + the embedding model
+docker compose ps                   # all healthy; migrate shows "Exited (0)"
+```
+
+Then open `http://localhost:3000` (`FRONTEND_PORT` changes the host port). Notes:
+- The containers override the `localhost` URLs in `.env` (`DATABASE_URL`, `REDIS_URL`,
+  `CELERY_BROKER_URL`) with service names, so the same `.env` still serves the local flow.
+- Generation reaches Ollama on the host at `http://host.docker.internal:11434`; override it with
+  `DOCKER_OLLAMA_BASE_URL` in `.env`. On a Linux host Ollama must listen on the Docker bridge
+  (e.g. `OLLAMA_HOST=172.17.0.1`), never on a public interface.
+- The embedding model is baked into the image at the revision pinned in `app/core/config.py` and
+  the containers run offline (`HF_HUB_OFFLINE=1`): changing `EMBEDDING_MODEL[_REVISION]` means
+  rebuilding the backend image.
+- `BACKEND_ORIGIN` and the `NEXT_PUBLIC_UMAMI_*` values are inlined by `next build`, so they are
+  build args: put the Umami values in the root `.env`, then `docker compose build frontend`.
+- CV ingestion and admin creation run as one-off containers:
+
+  ```bash
+  docker compose run --rm -v "$PWD/my-cv.pdf:/tmp/cv.pdf:ro" api python scripts/ingest_cv.py /tmp/cv.pdf
+  docker compose up -d api worker     # after setting CV_DOCUMENT_ID in .env
+  docker compose run --rm api python scripts/make_admin.py --create admin@example.com
+  ```
+
+For production on one host, add the override. It unpublishes Postgres and Redis, so only the
+frontend is reachable:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Two things it does not solve yet:
+- **TLS.** The refresh cookie is always `Secure`, so a reverse proxy with HTTPS has to sit in front
+  of the frontend before logins stick on a real domain.
+- **Per-IP rate limits.** Next's `/api/*` proxy forwards the client's own `X-Forwarded-For`
+  untouched, so trusting it would let any visitor pick their own rate-limit key. That is why
+  `FORWARDED_ALLOW_IPS` stays `127.0.0.1` (trust nothing) and every visitor shares the frontend's
+  per-IP bucket. Only once a reverse proxy that overwrites `X-Forwarded-For` is in front should it
+  be set to the compose network's subnet.

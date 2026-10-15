@@ -2,9 +2,10 @@ import type { NextConfig } from 'next'
 
 const backendOrigin = process.env.BACKEND_ORIGIN ?? 'http://localhost:8000'
 
-// Guard the serving phase only. Rewrites are evaluated per request, never baked in at build
-// time, so a build without BACKEND_ORIGIN is fine while serving without it would silently proxy
-// to loopback inside the container.
+// `next build` writes these rewrites into .next/routes-manifest.json and the production server
+// reads them from there, so BACKEND_ORIGIN is baked in at BUILD time (the Dockerfile takes it as
+// a build arg). The serving-phase guard below runs only under `next start` and checks the runtime
+// env, not what was baked in; the standalone server.js never loads this file at all.
 const PHASE_PRODUCTION_SERVER = 'phase-production-server'
 
 // No proxy.ts exists, so rewrites stream request bodies: a CV upload up to the server-configured
@@ -51,6 +52,7 @@ const SECURITY_HEADERS = [
 
 function buildConfig(): NextConfig {
   return {
+    output: 'standalone',
     async rewrites() {
       return [
         ...PROXIED_PREFIXES.map((prefix) => ({
