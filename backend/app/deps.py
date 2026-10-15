@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from functools import partial
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -16,17 +16,27 @@ from app.ai.embeddings import BgeEmbedder, Embedder
 from app.ai.generation import Generator
 from app.ai.rag import RagPipeline, RetrieverScope
 from app.ai.retriever import Retriever
+from app.core import policies
 from app.core.analysis_registry import AnalysisRegistry
 from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
-from app.core.rate_limiter import Decision, Limiter, Policy, Scope, ip_identity
+from app.core.rate_limiter import (
+    Decision,
+    Limiter,
+    Policy,
+    Scope,
+    ip_identity,
+    ip_prefix_identity,
+)
 from app.core.retention_marker import RetentionMarker
+from app.core.security import LOGIN_DEVICE_COOKIE, login_device_id
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
+from app.schemas import LoginRequest
 from app.services import AuthService, IngestionService
 from app.services.admin_service import AdminService
-from app.services.auth_service import InvalidAccessTokenError
+from app.services.auth_service import InvalidAccessTokenError, LoginAccount
 from app.services.match_service import MatchService
 from app.workers.queue import TaskQueue
 
@@ -167,10 +177,10 @@ def get_global_identity() -> str:
     return "all"
 
 
-def _client_ip(request: Request) -> str:
+def _client_host(request: Request) -> str:
     if request.client is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable")
-    return ip_identity(request.client.host)
+    return request.client.host
 
 
 def _too_many_requests(decision: Decision) -> HTTPException:
@@ -190,24 +200,33 @@ async def _decide(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable") from None
 
 
-def _log_ceiling_refusal(policy: Policy, decision: Decision) -> None:
-    # Only global ceilings: per-IP and per-user refusals are routine and would name a client.
-    if policy.scope is not Scope.GLOBAL:
-        return
+def _log_refusal(policy: Policy, decision: Decision) -> None:
+    # Per-IP and per-user refusals are routine and would name a client. A global ceiling or a
+    # sign-in lockout is a signal worth a warning, logged by policy name only, never its key.
+    match policy.scope:
+        case Scope.GLOBAL:
+            event = "rate limit ceiling reached, refusing requests"
+        case Scope.ACCOUNT:
+            event = "sign-in failure limit reached, refusing sign-ins"
+        case _:
+            return
     if decision.first_refusal:
         logger.warning(
-            "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
+            "%s policy=%s scope=%s retry_after_s=%d",
+            event,
             policy.name,
+            policy.scope,
             math.ceil(decision.retry_after_seconds),
         )
     else:
-        logger.debug("rate limit ceiling refusal policy=%s", policy.name)
+        logger.debug("%s policy=%s scope=%s", event, policy.name, policy.scope)
 
 
 async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
+    # Takes a token; the reserving context managers below build on this so they cannot drift.
     decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
     if not decision.allowed:
-        _log_ceiling_refusal(policy, decision)
+        _log_refusal(policy, decision)
         raise _too_many_requests(decision)
 
 
@@ -217,15 +236,48 @@ async def reserved_rate_limit(
 ) -> AsyncIterator[None]:
     # The atomic take before the work is what holds the cap under a concurrent burst; checking
     # first and spending after lets the whole burst through.
-    decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
-    if not decision.allowed:
-        _log_ceiling_refusal(policy, decision)
-        raise _too_many_requests(decision)
+    await enforce_rate_limit(policy, identity, limiter)
     try:
         yield
     except BaseException:
         await _refund(policy, identity, limiter)
         raise
+
+
+@asynccontextmanager
+async def failure_rate_limit(
+    policy: Policy, identity: str, limiter: Limiter
+) -> AsyncIterator[None]:
+    # A failure must raise: a handler that returns an error response would be refunded.
+    # The inverse of reserved_rate_limit: taken up front for the same burst-safety, refunded only
+    # when the block completes, so only failed attempts stay spent.
+    await enforce_rate_limit(policy, identity, limiter)
+    yield
+    await _refund(policy, identity, limiter)
+
+
+def _login_bucket(account_key: str, device_token: str | None) -> tuple[Policy, str]:
+    # A browser that has signed in to this account before gets its own failure budget, so an
+    # attacker draining the account's shared one cannot lock the owner out of a known device.
+    device_id = None if device_token is None else login_device_id(device_token, account_key)
+    if device_id is None:
+        return policies.LOGIN_ACCOUNT, account_key
+    return policies.LOGIN_DEVICE, device_id
+
+
+async def login_failure_limit(
+    data: LoginRequest,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    limiter: Annotated[Limiter, Depends(get_limiter)],
+    device_token: Annotated[str | None, Cookie(alias=LOGIN_DEVICE_COOKIE)] = None,
+) -> AsyncIterator[LoginAccount]:
+    # The account is resolved before the take so every spelling CITEXT matches to one row spends
+    # one bucket; the lookup runs for unknown emails too, so the limit leaks no existence. FastAPI
+    # throws the handler's 401 in at the yield, which skips the refund: only failures stay spent.
+    account = await auth_service.resolve_login(data.email)
+    policy, identity = _login_bucket(account.key, device_token)
+    async with failure_rate_limit(policy, identity, limiter):
+        yield account
 
 
 async def _refund(policy: Policy, identity: str, limiter: Limiter) -> None:
@@ -240,7 +292,12 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
     # One closure per scope: FastAPI resolves dependencies from the signature, so an IP-scoped
     # policy must not carry the auth dependency or /auth/login would require a login.
     async def by_ip(request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]) -> None:
-        await enforce_rate_limit(policy, _client_ip(request), limiter)
+        await enforce_rate_limit(policy, ip_identity(_client_host(request)), limiter)
+
+    async def by_ip_prefix(
+        request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]
+    ) -> None:
+        await enforce_rate_limit(policy, ip_prefix_identity(_client_host(request)), limiter)
 
     async def by_user(
         user: Annotated[User, Depends(get_current_user)],
@@ -257,6 +314,8 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
     match policy.scope:
         case Scope.IP:
             return by_ip
+        case Scope.IP_PREFIX:
+            return by_ip_prefix
         case Scope.USER:
             return by_user
         case Scope.GLOBAL:

@@ -1,5 +1,6 @@
 import asyncio
 import secrets
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 from uuid import UUID, uuid4
@@ -13,6 +14,8 @@ from app.core.security import (
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
+    login_account_key,
+    unregistered_login_key,
     verify_password,
 )
 from app.models import User
@@ -37,6 +40,13 @@ class InvalidAccessTokenError(Exception):
 
 class InvalidRefreshTokenError(Exception):
     """Refresh token missing, unknown, expired, revoked, or already spent."""
+
+
+@dataclass(frozen=True, slots=True)
+class LoginAccount:
+    # key names the account's failure bucket; user is None for an unregistered email.
+    key: str
+    user: User | None
 
 
 class AuthService:
@@ -69,8 +79,16 @@ class AuthService:
             raise EmailAlreadyRegisteredError from None
         return user
 
-    async def login(self, email: str, password: str) -> tuple[str, str]:
-        user = await self._repo.get_user_by_email(email)
+    async def resolve_login(self, email: str) -> LoginAccount:
+        # Keyed on the row, not the typed email, so every spelling that signs in to one account
+        # spends one bucket. No bcrypt here: it runs in login, after the bucket is charged.
+        user, canonical_email = await self._repo.find_login_account(email)
+        if user is None:
+            return LoginAccount(unregistered_login_key(canonical_email), None)
+        return LoginAccount(login_account_key(user.id), user)
+
+    async def login(self, account: LoginAccount, password: str) -> tuple[str, str]:
+        user = account.user
         if user is None:
             await asyncio.to_thread(
                 verify_password,

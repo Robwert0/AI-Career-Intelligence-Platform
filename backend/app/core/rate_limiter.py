@@ -5,7 +5,9 @@ from typing import Literal, Protocol
 
 from redis.asyncio import Redis
 
-Scope = StrEnum("Scope", ["IP", "USER", "GLOBAL"])
+# ACCOUNT policies key on the account a login body resolves to, so deps.login_failure_limit charges
+# them; rate_limit() has no request-only identity for them.
+Scope = StrEnum("Scope", ["IP", "IP_PREFIX", "USER", "ACCOUNT", "GLOBAL"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,12 +36,12 @@ class Decision:
 class Limiter(Protocol):
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
-    # Only reserved_rate_limit may call this: a refund without its matching take mints a token.
+    # Only the reserving context managers in deps may call this: a refund without its matching
+    # take mints a token.
     async def refund(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
 
-def ip_identity(host: str) -> str:
-    # One IPv6 subscriber holds at least a /64; keying per address would hand them 2**64 buckets.
+def _ipv6_network_identity(host: str, prefix_length: int) -> str:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
@@ -48,7 +50,17 @@ def ip_identity(host: str) -> str:
         return host
     if address.ipv4_mapped is not None:
         return str(address.ipv4_mapped)
-    return str(ipaddress.IPv6Network((address, 64), strict=False))
+    return str(ipaddress.IPv6Network((address, prefix_length), strict=False))
+
+
+def ip_identity(host: str) -> str:
+    # One IPv6 subscriber holds at least a /64; keying per address would hand them 2**64 buckets.
+    return _ipv6_network_identity(host, 64)
+
+
+def ip_prefix_identity(host: str) -> str:
+    # A /48 is a free tunnelbroker allocation, i.e. 65,536 /64 buckets for one person.
+    return _ipv6_network_identity(host, 48)
 
 
 REFUSAL_NOTICE_SECONDS = 60
@@ -104,6 +116,10 @@ return { allowed, tostring(tokens), tostring(retry), first }
 _Mode = Literal["take", "refund"]
 
 
+def bucket_key(policy: Policy, identity: str) -> str:
+    return f"rl:{policy.name}:{identity}"
+
+
 class TokenBucketLimiter:
     def __init__(self, redis: Redis) -> None:
         self._script = redis.register_script(TOKEN_BUCKET_LUA)
@@ -115,7 +131,7 @@ class TokenBucketLimiter:
         return await self._run(policy, identity, now, "refund")
 
     async def _run(self, policy: Policy, identity: str, now: float, mode: _Mode) -> Decision:
-        key = f"rl:{policy.name}:{identity}"
+        key = bucket_key(policy, identity)
         allowed, remaining, retry_after, first_refusal = await self._script(
             keys=[key],
             args=[policy.capacity, policy.refill_per_second, now, mode, REFUSAL_NOTICE_SECONDS],

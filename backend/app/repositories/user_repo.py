@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Text, delete, func, literal, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,16 @@ class UserRepository:
     async def get_user_by_email(self, email: str) -> User | None:
         result = await self._session.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
+
+    async def find_login_account(self, email: str) -> tuple[User | None, str]:
+        # CITEXT equality is lower() on both sides, so lower(email) is shared by exactly the
+        # spellings that reach one row, registered or not. One query either way: no timing oracle.
+        probe = select(func.lower(literal(email).cast(Text)).label("canonical")).subquery()
+        result = await self._session.execute(
+            select(User, probe.c.canonical).select_from(probe).outerjoin(User, User.email == email)
+        )
+        user, canonical = result.one()
+        return user, canonical
 
     async def create_user(
         self,

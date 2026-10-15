@@ -41,7 +41,8 @@ export default function PrivacyPage() {
             <li>
               Rate limiting: your IP address is held briefly in Redis to protect the site from
               abuse, and expires automatically within about an hour. If you are signed in, your
-              account id is used the same way.
+              account id is used the same way. Failed sign-in attempts are counted against a keyed
+              hash of the account (or of the email typed, if no account exists) for about an hour.
             </li>
             <li>
               Server logs: the server&apos;s request logs record your IP address and the page or API
@@ -73,6 +74,13 @@ export default function PrivacyPage() {
             A sign-in cookie (httpOnly, so page scripts cannot read it) holds your session token so
             you stay signed in. It is needed for sign-in, is not used for tracking, lasts up to 7
             days from your last sign-in or session refresh, and is cleared when you sign out.
+          </p>
+          <p className="leading-relaxed">
+            A second httpOnly cookie marks this browser as one that has signed in to your account
+            before. It holds a random id and a keyed hash of your account id, never your email, and
+            lets you keep signing in while someone else is locked out for guessing your password. It
+            is not used for tracking. It is not cleared when you sign out, and each sign-in issues a
+            fresh one that lasts up to 90 days.
           </p>
           <p className="leading-relaxed">
             Robert&apos;s admin page shows your email, company, role, sign-up date and last visit.

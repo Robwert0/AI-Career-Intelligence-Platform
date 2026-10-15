@@ -5,10 +5,12 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from app.core import policies
 from app.core.config import settings
 from app.core.rate_limiter import Limiter
+from app.core.security import LOGIN_DEVICE_COOKIE, create_login_device_token
 from app.deps import (
     get_auth_service,
     get_global_identity,
     get_limiter,
+    login_failure_limit,
     rate_limit,
     reserved_rate_limit,
 )
@@ -18,6 +20,7 @@ from app.services.auth_service import (
     EmailAlreadyRegisteredError,
     InvalidCredentialsError,
     InvalidRefreshTokenError,
+    LoginAccount,
 )
 
 router = APIRouter()
@@ -47,6 +50,18 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     )
 
 
+def _set_device_cookie(response: Response, account_key: str) -> None:
+    response.set_cookie(
+        LOGIN_DEVICE_COOKIE,
+        create_login_device_token(account_key),
+        httponly=True,
+        secure=True,
+        samesite=_SAMESITE,
+        max_age=settings.login_device_expire_days * 24 * 60 * 60,
+        path=_COOKIE_PATH,
+    )
+
+
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         _REFRESH_COOKIE, path=_COOKIE_PATH, httponly=True, secure=True, samesite=_SAMESITE
@@ -71,9 +86,10 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
-    # Per-IP first, so an IP that is already refused does not spend the global attempts.
+    # Narrowest first, so a client that is already refused does not spend the wider budgets.
     dependencies=[
         Depends(rate_limit(policies.REGISTER)),
+        Depends(rate_limit(policies.REGISTER_PREFIX)),
         Depends(rate_limit(policies.REGISTER_ATTEMPTS_GLOBAL)),
     ],
 )
@@ -98,23 +114,27 @@ async def register(
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(rate_limit(policies.LOGIN))],
+    # Narrowest first; the account's failure bucket is charged last, by login_failure_limit.
+    dependencies=[
+        Depends(rate_limit(policies.LOGIN)),
+        Depends(rate_limit(policies.LOGIN_PREFIX)),
+    ],
 )
 async def login(
     data: LoginRequest,
+    account: Annotated[LoginAccount, Depends(login_failure_limit)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     response: Response,
 ) -> TokenResponse:
     try:
-        access_token, refresh_token = await auth_service.login(
-            email=data.email, password=data.password
-        )
+        access_token, refresh_token = await auth_service.login(account, data.password)
     except InvalidCredentialsError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         ) from None
     _set_refresh_cookie(response, refresh_token)
+    _set_device_cookie(response, account.key)
 
     return TokenResponse(access_token=access_token)
 

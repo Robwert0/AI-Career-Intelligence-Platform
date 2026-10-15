@@ -2,6 +2,20 @@ from app.core.rate_limiter import Policy, Scope
 
 LOGIN = Policy("login", capacity=5, refill_per_second=1 / 60, scope=Scope.IP)
 REGISTER = Policy("register", capacity=3, refill_per_second=3 / 3600, scope=Scope.IP)
+# Five times the per-/64 budget: a /48 absorbs five fully active subscribers before it binds, and
+# an attacker holding one gets 5x a single client instead of 65,536x. IPv4 keys as-is here, so
+# the stricter per-IP policy always refuses first and IPv4 clients never notice this one.
+LOGIN_PREFIX = Policy("login_prefix", capacity=25, refill_per_second=5 / 60, scope=Scope.IP_PREFIX)
+REGISTER_PREFIX = Policy(
+    "register_prefix", capacity=15, refill_per_second=15 / 3600, scope=Scope.IP_PREFIX
+)
+# Failed sign-ins only (a success refunds), across every IP: 10 + 240 a day per account, plus the
+# same again per browser holding that account's device cookie. Such a browser spends its own
+# LOGIN_DEVICE bucket instead, so flooding LOGIN_ACCOUNT cannot lock the owner out of it.
+LOGIN_ACCOUNT = Policy(
+    "login_account", capacity=10, refill_per_second=10 / 3600, scope=Scope.ACCOUNT
+)
+LOGIN_DEVICE = Policy("login_device", capacity=10, refill_per_second=10 / 3600, scope=Scope.ACCOUNT)
 # Both span all IPs: attempts caps 409 email probing and is never refunded; REGISTER_GLOBAL caps
 # created accounts and is refunded when a registration fails.
 REGISTER_ATTEMPTS_GLOBAL = Policy(
