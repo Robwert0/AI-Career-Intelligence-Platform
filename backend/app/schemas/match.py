@@ -25,6 +25,7 @@ Recovery = Literal[
     "retry",
     "fix_url",
     "wait",
+    "wait_for_reset",
     "choose_file",
     "paste_cv",
     "fix_github_url",

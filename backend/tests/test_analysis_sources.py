@@ -173,6 +173,20 @@ async def test_a_failed_source_next_to_a_useful_one_pauses_for_a_decision() -> N
     assert decide(state) == Pause(source="cv", code="scanned_pdf_suspected", reset_at=None)
 
 
+async def test_a_cv_refused_by_the_daily_budget_fails_the_run_instead_of_pausing() -> None:
+    # Continuing without the CV would still need the same spent pool to assess the match.
+    state = await read_sources(
+        both(),
+        take_cv=Blobs(cv_file=b"x"),
+        read_cv=CvReader("ai_budget_exhausted"),
+        read_github=GitHubReader(),
+        on_stage=Stages(),
+    )
+
+    assert state.github.status == "read"
+    assert decide(state) == Fail(code="ai_budget_exhausted")
+
+
 async def test_a_github_pause_carries_the_reset_time() -> None:
     state = await read_sources(
         both(),

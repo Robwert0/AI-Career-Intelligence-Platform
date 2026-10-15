@@ -229,7 +229,7 @@ function DecisionPanel({
         {isCv ? "We couldn't read your CV" : "We couldn't read your GitHub profile"}
       </h3>
       <p>{decision.error.message}</p>
-      {inputsLost && isCv ? (
+      {inputsLost && isCv && kind !== 'wait_for_reset' ? (
         <p>Your CV is not kept in this browser, so choose or paste it again to retry.</p>
       ) : null}
 
@@ -258,9 +258,11 @@ function DecisionPanel({
             Retry
           </button>
         ) : null}
-        <button type="button" disabled={acting} onClick={onContinue} className={SECONDARY_BUTTON}>
-          Continue without {isCv ? 'your CV' : 'GitHub'}
-        </button>
+        {kind === 'wait_for_reset' ? null : (
+          <button type="button" disabled={acting} onClick={onContinue} className={SECONDARY_BUTTON}>
+            Continue without {isCv ? 'your CV' : 'GitHub'}
+          </button>
+        )}
         <button type="button" disabled={acting} onClick={onStartOver} className={TEXT_BUTTON}>
           Start over
         </button>
@@ -404,6 +406,8 @@ function FailureAction({
           Edit the job
         </button>
       )
+    case 'wait_for_reset':
+      return null
     case 'retry':
     case 'wait':
       return (

@@ -12,7 +12,8 @@ export type Problem = {
   expired?: boolean
 }
 export type JobRecovery = { offerRetry: boolean; offerPaste: boolean }
-export type FailureAction = 'retry' | 'wait' | 'edit_candidate' | 'paste_cv' | 'edit_job'
+export type FailureAction =
+  'retry' | 'wait' | 'wait_for_reset' | 'edit_candidate' | 'paste_cv' | 'edit_job'
 
 const FIELD_BY_CODE: Record<string, MatchField> = {
   invalid_url: 'job',
@@ -52,6 +53,7 @@ const ACTION_BY_RECOVERY: Partial<Record<Recovery, FailureAction>> = {
   fix_github_url: 'edit_candidate',
   retry_or_continue: 'retry',
   wait: 'wait',
+  wait_for_reset: 'wait_for_reset',
   edit_job: 'edit_job',
   paste: 'paste_cv',
   fix_url: 'edit_job',
@@ -120,6 +122,8 @@ export function retryLimitProblem(failure: ApiFailure): Problem {
 }
 
 export function jobRecovery(error: FailureOut, tab: JobTab): JobRecovery {
+  // Pasting the text is no way out either: reading it needs the same spent daily model budget.
+  if (error.recovery === 'wait_for_reset') return { offerRetry: false, offerPaste: false }
   return {
     offerRetry:
       error.recovery === 'retry' ||

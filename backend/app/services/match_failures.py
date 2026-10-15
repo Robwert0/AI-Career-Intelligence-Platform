@@ -60,7 +60,7 @@ _FAILURES: dict[str, tuple[str, Recovery]] = {
     # The pool resets at 00:00 UTC; a retry before then fails again and spends a rate-limit token.
     "ai_budget_exhausted": (
         "The analysis model has reached its daily limit. You can try again after 00:00 UTC.",
-        "wait",
+        "wait_for_reset",
     ),
     "ai_invalid_output": (
         "We couldn't extract this posting reliably. Try again, or paste a "
