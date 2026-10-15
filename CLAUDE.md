@@ -247,7 +247,8 @@ pytest -q
 # Ingest a CV into the chunks table (phase 4; run from backend/, needs DATABASE_URL)
 cd backend && python scripts/ingest_cv.py path/to/cv.pdf
 # Chat follow-ups against the real CV + Ollama: raw vs condensed retrieval, adversarial history
-python scripts/eval_chat_followups.py  # add --provider openai --model gpt-6-luna to bill OpenAI (eval_match.py too)
+python scripts/eval_chat_followups.py  # add --provider openai --model gpt-6-luna to bill OpenAI
+# eval_match.py takes the same flags before its subcommand: eval_match.py --provider openai run
 
 # Create a dedicated admin (prompts for a 16+ char password; refuses an existing email; run from backend/)
 cd backend && python scripts/make_admin.py --create admin@yourdomain.com
@@ -267,7 +268,7 @@ celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
 celery -A app.workers.beat_app:beat_app beat --loglevel=info
 
 # Job Match Analyzer: calibrate the per-source gates (MATCH_PRESELECT_MIN_SIMILARITY[_GITHUB]),
-# then run the eval gate (both need labelled postings under docs/eval/calibration/)
+# then run the eval gate (both need labelled postings under docs/eval/postings/)
 cd backend && uv run python scripts/eval_match.py prepare
 uv run python scripts/eval_match.py calibrate
 uv run python scripts/eval_match.py run

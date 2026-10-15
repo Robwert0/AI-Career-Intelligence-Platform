@@ -1,8 +1,8 @@
 # AI Career Intelligence Platform
 
 An interactive, RAG-based "AI version of my CV": a portfolio site where visitors can read my CV and
-projects, then ask a chat assistant questions answered from the CV itself. The longer-term goal is
-a CV analysis and job-matching engine built on a multi-agent system.
+projects, then ask a chat assistant questions answered from the CV itself. Visitors can also match
+their own CV or GitHub profile against a job posting. A multi-agent layer (recruiter, career coach, interviewer) is the next phase.
 
 It is built as a production-grade system, not a demo: every feature has to be **secure, async,
 scalable and explainable** before it counts as done.
@@ -27,8 +27,10 @@ scalable and explainable** before it counts as done.
   redaction → local embeddings (`bge-small-en-v1.5`) → pgvector
 - Hybrid retrieval: pgvector cosine similarity (HNSW index) + Postgres full-text search, with a
   similarity threshold calibrated against the real CV
-- Generation through a provider-agnostic boundary; the current adapter is a local
-  [Ollama](https://ollama.com) model (`qwen3:8b`)
+- Generation through a provider-agnostic boundary, chosen by `GENERATION_PROVIDER`: `openai` in
+  production (`gpt-6-luna` with `reasoning_effort=none`), `ollama` (a local
+  [Ollama](https://ollama.com) `qwen3:8b`) for development only. The same provider runs chat and
+  the Job Match Analyzer
 - Prompt-injection defense: an input guard, strict isolation of system prompt / user input /
   retrieved documents, special-token escaping, and an output guard that blocks prompt leaks
   and refuses any answer naming an organisation, person or figure the CV never mentions (so a
@@ -64,26 +66,44 @@ scalable and explainable** before it counts as done.
   written to disk; dedicated per-user/IP rate limits for job intake and analysis submission
 
 **Security and operations**
-- Redis token-bucket rate limiting per IP and per user (e.g. chat: 20 req/min per user), fail-closed
-- Structured backend logging with noisy third-party loggers kept quiet
+- Redis token-bucket rate limiting, fail-closed, with every policy in `backend/app/core/policies.py`:
+  per IP (IPv6 keyed per /64, plus a looser /48 bucket on login and register), per user (e.g. chat:
+  20 req/min and 200/day) and per-user daily caps on the Job Match Analyzer (30 job intakes,
+  8 analyses)
+- Login: failed attempts are also limited per account, keyed on the resolved account rather than
+  the typed email; a known-device cookie gives the account owner's browser its own bucket, so
+  someone else guessing cannot lock them out
+- Registration ceilings across all IPs: 20 created accounts per hour (a failed registration is
+  refunded) and 200 attempts per hour
+- LLM spend guard (denial-of-wallet): every model call reserves its worst-case cost against a
+  global daily budget in Redis, in two pools (`LLM_DAILY_BUDGET_CHAT_USD`,
+  `LLM_DAILY_BUDGET_ANALYSIS_USD`) priced by `LLM_INPUT_USD_PER_MTOK` / `LLM_OUTPUT_USD_PER_MTOK`;
+  an exhausted pool refuses until 00:00 UTC, and draining the analysis pool leaves chat answering
+- Structured backend logging (chat logs tokens and latency per answer) with noisy third-party
+  loggers kept quiet
 - Background jobs run on a Celery worker; job records live in Redis with a 1-hour TTL and Redis
   persistence is off, so job data is never written to disk
+- A full Docker Compose stack behind Caddy (automatic HTTPS, real client IP), with a production
+  override for a single host; see [Run the full stack in Docker](#run-the-full-stack-in-docker)
 - CI on every PR: ruff, mypy, pytest against real Postgres + pgvector, model/migration parity
-  check, and frontend lint, format, tests and build
+  check, a live Celery worker smoke test, a check that CI's service images match the compose
+  digests, and frontend lint, format, tests and build
 - Backend dependencies are installed from `uv.lock`, so CI tests exactly what runs locally
 
 **Admin, analytics and data retention**
 - Registration optionally asks for company and role; login and token refresh record last activity
 - An admin-only `/admin` page lists registered users (paginated, `Cache-Control: no-store`)
 - Admins are created with `scripts/make_admin.py --create`, which refuses existing emails and
-  requires a 16+ character password; granting admin to an existing account also needs its password
+  requires a 16+ character password; granting admin to an existing account also needs its password,
+  and `--revoke` removes it
 - Optional [Umami](https://umami.is) analytics: the tracker is vendored and served from our own
   origin (a test pins its sha256), and the CSP only opens `connect-src` to the collector when a
   website id is configured
 - A daily Celery beat task deletes non-admin accounts inactive for `ACCOUNT_RETENTION_DAYS`
   (default 365); `scripts/delete_account.py` handles individual erasure requests
 - `scripts/unlock_login.py <email>` lifts one account's sign-in lockout (its account-wide failure
-  bucket only) when its owner is locked out by someone else's guessing
+  bucket only) when its owner is locked out by someone else's guessing (see
+  [Operations scripts](#operations-scripts))
 
 ## Roadmap
 
@@ -97,24 +117,36 @@ scalable and explainable** before it counts as done.
 | 6 | Async jobs (Celery workers) | ✅ Done: job intake and analysis both run as Celery tasks with queue position, stage progress and stale-queue handling |
 | 7 | AI analysis: CV feedback, ATS scoring | 🟡 Partial: grounded CV rewrite suggestions and gap analysis ship as part of the Job Match Analyzer; no separate standalone ATS-scoring endpoint |
 | 8 | Job matching: CV vs job description | ✅ Done: the Job Match Analyzer (job intake, CV + GitHub evidence, hybrid retrieval, multi-stage LLM assessment, transparent scoring). The per-source similarity gates (CV 0.605, GitHub 0.583) are calibrated against one real CV and one GitHub profile; the eval quality gate (`scripts/eval_match.py`) has not yet passed against hand-labelled postings |
-| 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Planned |
-| 10 | Security hardening | 🟡 Partial: rate limiting, prompt-injection defense and file-upload validation done for chat and the Job Match Analyzer; queue/worker-concurrency hardening (a global cap of 20 waiting analyses and separate intake/analysis queues exist; stale-queue edge cases remain) still open |
-| 11 | Observability | 🟡 Partial: structured logging, admin visitor insights and optional Umami analytics done; error tracking and token-usage tracking pending |
-| 12 | Deployment | ⏳ Planned |
+| 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Not built |
+| 10 | Security hardening | 🟡 Mostly done: rate limiting (IPv6-aware, per-account login limits, registration ceilings), LLM spend guard, prompt-injection defense and file-upload validation for chat and the Job Match Analyzer. Open: `/docs` and `/openapi.json` are enabled in every environment (not reachable through the production proxy) |
+| 11 | Observability | 🟡 Partial: structured logging, per-answer chat token/latency logs, daily spend tracking per pool, admin visitor insights and optional Umami analytics; no error tracking yet |
+| 12 | Deployment | 🟡 Ready for one host: production compose override with Caddy (HTTPS), digest-pinned images, read-only containers and memory caps |
 
 RAG was deliberately built before the frontend, so the chat had a real backend to talk to.
+
+What's next:
+- Phase 9, the multi-agent system.
+- Error tracking (Phase 11).
+- A heartbeat lease on running jobs before scaling past **one worker per queue**: today a job
+  found already `running` is treated as a crashed worker's and failed, which is only safe while
+  a single worker consumes each queue.
+- Passing the Job Match Analyzer's eval gate (`scripts/eval_match.py run`) against hand-labelled
+  postings.
 
 ## Architecture
 
 ```
-Browser ──► Next.js (/api/* proxied) ──► FastAPI
-                                           ├─ routes        thin: validation, auth, delegation
-                                           ├─ services      business logic
-                                           ├─ ai            chunking, embeddings, retrieval, prompts, guards
-                                           ├─ repositories  the only place DB queries live
-                                           └─ models        SQLAlchemy
-                                  PostgreSQL + pgvector   Redis (rate limits, job/analysis state,
-                                                                  CV blobs, GitHub cache)
+Browser ──► Caddy (HTTPS) ──► Next.js (/api/* proxied) ──► FastAPI
+                                                             ├─ routes        thin: validation, auth, delegation
+                                                             ├─ services      business logic
+                                                             ├─ ai            chunking, embeddings, retrieval, prompts,
+                                                             │                guards, generation (Ollama | OpenAI)
+                                                             ├─ integrations  CV parsing (sandboxed), job URL fetch, GitHub
+                                                             ├─ repositories  the only place DB queries live
+                                                             └─ models        SQLAlchemy
+                                    Celery worker (job intake, analysis) · Celery beat (daily retention purge)
+                                    PostgreSQL + pgvector   Redis (rate limits, spend ledger, job/analysis
+                                                                   state, CV blobs, GitHub cache, Celery broker)
 ```
 
 The frontend proxies `/api/*` to the backend, so the browser only ever talks to one origin. That is
@@ -126,16 +158,18 @@ what lets the refresh cookie be `SameSite=Strict`.
 |---|---|
 | Frontend | Next.js (App Router), TypeScript (strict), TailwindCSS, Vitest |
 | Backend | FastAPI, Python 3.14, Pydantic v2, SQLAlchemy 2.0 (async), Alembic |
-| AI | sentence-transformers (`bge-small-en-v1.5`), Ollama for generation |
+| AI | sentence-transformers (`bge-small-en-v1.5`, local embeddings); generation via OpenAI (`gpt-6-luna`) in production, Ollama in development |
 | Data | PostgreSQL 18 + pgvector |
-| Cache / limits | Redis |
-| Tooling | uv, ruff, mypy, ESLint, Prettier, Docker Compose, GitHub Actions |
+| Cache / limits / queue | Redis, Celery (worker + beat) |
+| Edge | Caddy (TLS, HSTS) |
+| Tooling | uv, ruff, mypy, ESLint, Prettier, Docker Compose, GitHub Actions, Dependabot |
 
 ## Running locally
 
 This walks you from a fresh clone to the site running on `http://localhost:3000`, with a CV you can
 chat with. Everything runs on your machine: generation uses a local Ollama model, so you need no API
-key. Plan for about 15 minutes, plus model downloads.
+key. Plan for about 15 minutes, plus model downloads. (To try the production model locally instead,
+set `GENERATION_PROVIDER=openai` and `OPENAI_API_KEY` in `.env`; that bills OpenAI.)
 
 ### 1. Install the prerequisites
 
@@ -178,8 +212,8 @@ POSTGRES_PORT=5432
 DATABASE_URL=postgresql+asyncpg://career:<the same password>@localhost:5432/career
 ```
 
-Leave `CV_DOCUMENT_ID` empty for now: the migration and ingest commands below do not need it, and
-step 5 tells you what to put there.
+Leave `CV_DOCUMENT_ID` empty for now: migrations, ingestion and the Celery worker do not need it
+(only the API refuses to start without it), and step 5 tells you what to put there.
 
 If port 5432 is already in use on your machine, change `POSTGRES_PORT` and the port in
 `DATABASE_URL` together. Redis is always published on 127.0.0.1:6379, so stop any local Redis already using it.
@@ -259,7 +293,7 @@ accepts the `localhost` origin by default.
 | `uvicorn` exits with `CV_DOCUMENT_ID is not set` | the chat needs to know which document to answer from: run step 5 and put the id it printed in `.env` |
 | `Connection refused` on 5432 / 6379 | Docker containers not running: `docker compose up -d database redis` |
 | `password authentication failed` | `DATABASE_URL` does not match `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`; if you changed them after the first start, the old volume keeps the old ones (`docker compose down -v` resets it, **deleting the data**) |
-| Chat returns 503 | Ollama is not running, or the first cold model load exceeded `CHAT_TIMEOUT_SECONDS` (retry), or all generation slots are busy |
+| Chat returns 503 | Ollama is not running, or the first cold model load exceeded `CHAT_TIMEOUT_SECONDS` (retry), or all generation slots are busy, or the day's chat spend budget (`LLM_DAILY_BUDGET_CHAT_USD`) is used up (refused until 00:00 UTC) |
 | Chat returns 500 | the model is not pulled: `ollama pull qwen3:8b` (Ollama answers 404, which the API treats as a rejected request) |
 | Chat refuses every question | the chat is scoped to `CV_DOCUMENT_ID`; check it matches the id `ingest_cv.py` printed, then restart uvicorn |
 | A match analysis never leaves the queue | the Celery worker is not running |
@@ -267,21 +301,33 @@ accepts the `localhost` origin by default.
 
 ### Configuration worth knowing
 
-Job Match Analyzer settings (see `.env.example` for the rest, each with its reasoning):
+Generation and cost (see `.env.example` for the rest, each with its reasoning):
+- `GENERATION_PROVIDER=ollama` (default, uses `OLLAMA_BASE_URL` and `GENERATION_MODEL`) or
+  `openai` (needs `OPENAI_API_KEY`; `OPENAI_CHAT_MODEL=gpt-6-luna` with
+  `OPENAI_REASONING_EFFORT=none`, without which it rejects `temperature=0`). `gpt-4o` and
+  `gpt-4.1-mini` are deprecated and shut down on 2027-01-14; any replacement must accept
+  temperature, seed and strict `json_schema`.
+- `LLM_SPEND_GUARD_ENABLED=true`, `LLM_DAILY_BUDGET_CHAT_USD=0.75`,
+  `LLM_DAILY_BUDGET_ANALYSIS_USD=1.25` and `LLM_INPUT_USD_PER_MTOK` / `LLM_OUTPUT_USD_PER_MTOK`
+  (defaults `0.10` / `0.50`, `gpt-6-luna`'s prices). With `openai` and the guard on, startup
+  refuses a zero price.
+
+Job Match Analyzer settings:
 - `MATCH_PRESELECT_MIN_SIMILARITY=0.605` (CV) and `MATCH_PRESELECT_MIN_SIMILARITY_GITHUB=0.583` —
   the refusal gate is per source and both have committed defaults. The statistic is each source's
   mean, over the posting's requirements, of that requirement's best evidence match ("relatedness").
   The defaults were measured on one CV and one GitHub profile; re-measure against your own with
-  `uv run python scripts/eval_match.py calibrate`. **Existing setups: remove an old
-  `MATCH_PRESELECT_MIN_SIMILARITY=0.681` line from `.env`** -- it overrides the new CV gate.
+  `uv run python scripts/eval_match.py calibrate --cv <your-cv.pdf>`. An old
+  `MATCH_PRESELECT_MIN_SIMILARITY=0.681` line in `.env` overrides the CV gate: remove it.
 - `MAX_UPLOAD_MB=5` — the CV upload size limit (1-20). The frontend reads the effective limit from
   `GET /match/config` (falling back to 5 MB), so there is nothing to keep in sync.
 - `GITHUB_TOKEN` — optional. Without it, every user of this deployment shares GitHub's
   unauthenticated ~60 requests/hour (about 2 new profiles).
 
 Two Celery queues exist: `intake` (job extraction) and `analysis` (the long CV/GitHub analysis). The
-plain worker command above consumes both. To keep job intake responsive behind a long analysis, run
-two workers instead:
+plain worker command above consumes both (plus the default `celery` queue the retention purge uses).
+To keep job intake responsive behind a long analysis, run two workers instead, but never more than
+one per queue until running jobs get a heartbeat lease (see [What's next](#roadmap)):
 
 ```bash
 uv run celery -A app.workers.celery_app worker -Q intake,celery -n intake@%h
@@ -292,17 +338,38 @@ uv run celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
 
 ```bash
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest -q
-cd frontend && npm run lint && npm run test && npm run build
+cd frontend && npm run lint && npm run format:check && npm run test && npm run build
 ```
 
-The suite has 1541 backend tests (pytest) and 501 frontend tests (Vitest).
+Backend tests are pytest (they need the Postgres and Redis containers running); frontend tests are
+Vitest.
+
+### Operations scripts
+
+All run from `backend/` (`uv run python scripts/<name>`) and read the same `.env`. In the Docker
+stack, run them as one-offs: `docker compose run --rm api python scripts/<name> …`.
+
+| Script | What it does |
+|---|---|
+| `ingest_cv.py <pdf>` | parse, chunk, redact, embed and store a CV; prints the document id for `CV_DOCUMENT_ID` |
+| `make_admin.py --create <email>` | create a new admin (prompts for a 16+ char password); `make_admin.py <email>` grants admin to an existing account (needs its password), `--revoke` removes it |
+| `delete_account.py <email>` | erasure request: delete one account (asks for the email again); admins need `--allow-admin` |
+| `unlock_login.py <email>` | clear one account's sign-in failure bucket; needs the production `SECRET_KEY`, since the bucket is keyed by an HMAC of the account id |
+| `eval_chat_followups.py` | manual AI test of follow-up questions against the real CV and model |
+| `eval_match.py prepare \| calibrate \| run` | calibrate the Job Match Analyzer's similarity gates and run its eval gate; needs postings under `docs/eval/postings/` (never committed) and `--cv <pdf>` after `calibrate`/`run` for your own CV |
+| `calibrate_threshold.py` | measure `RETRIEVAL_SIMILARITY_THRESHOLD` against the ingested CV (needs `CV_DOCUMENT_ID`; edit its question lists to match your CV first) |
+| `worker_smoke.py` | check a live Celery worker completes a job (CI runs it) |
+
+The two eval scripts use Ollama by default. `--provider openai` (optionally `--model <name>`) bills
+OpenAI outside the daily spend pools, and prints the run's token usage. For `eval_match.py` the
+flags go before the subcommand: `uv run python scripts/eval_match.py --provider openai run`.
 
 ## Run the full stack in Docker
 
 The same `.env` drives a fully containerized stack: Postgres, Redis, a one-shot `migrate`, the API,
-one Celery worker, exactly one Celery beat (never scale it: the daily retention purge runs from it),
-the frontend and Caddy in front of it. Do step 2 above first; you need Docker and Ollama, not uv or
-Node.
+one Celery worker, exactly one Celery beat (never scale it: the daily retention purge runs from it;
+it runs the slim `app.workers.beat_app:beat_app`, which never loads torch), the frontend and Caddy
+in front of it. Do step 2 above first; you need Docker and Ollama, not uv or Node.
 
 ```bash
 docker compose up -d --build        # first build takes minutes: CPU-only torch + the embedding model
@@ -380,11 +447,13 @@ each name against `.env.example`.
    - `DOMAIN=cv.example.com` and `CORS_ALLOWED_ORIGINS=https://cv.example.com`, exactly that one
      origin (the API refuses state-changing requests from any other, so a mismatch fails every
      login).
-   - Generation through OpenAI: `GENERATION_PROVIDER=openai` with `OPENAI_API_KEY` and
-     `OPENAI_CHAT_MODEL`. The server does not run Ollama: it has no authentication, and a 4 GB
+   - Generation through OpenAI: `GENERATION_PROVIDER=openai` with a project-scoped
+     `OPENAI_API_KEY`; keep `OPENAI_CHAT_MODEL=gpt-6-luna` and `OPENAI_REASONING_EFFORT=none` (the
+     defaults). The server does not run Ollama: it has no authentication, and a 4 GB
      VPS cannot hold the model anyway.
-   - `LLM_DAILY_BUDGET_CHAT_USD` and `LLM_DAILY_BUDGET_ANALYSIS_USD` set low (e.g. `0.2` and `0.3`,
-     $0.50/day in total), and on the OpenAI side prepaid credits with
+   - `LLM_DAILY_BUDGET_CHAT_USD` and `LLM_DAILY_BUDGET_ANALYSIS_USD` at what you can afford to lose
+     each day (the defaults, `0.75` and `1.25`, total $2/day; e.g. `0.2` and `0.3` for $0.50/day),
+     and on the OpenAI side prepaid credits with
      auto-recharge off, so a bug or an abuser can spend at most what is on the account.
    - `LLM_INPUT_USD_PER_MTOK` / `LLM_OUTPUT_USD_PER_MTOK` equal to the current list price of
      `OPENAI_CHAT_MODEL` per million tokens (the defaults, `0.10` / `0.50`, match `gpt-6-luna`), and
@@ -392,20 +461,19 @@ each name against `.env.example`.
      stale price after a model change lets real spend run past the cap.
    - `CV_DOCUMENT_ID` empty for now; step 4 fills it in.
 4. Start it in this order. The API refuses to start without `CV_DOCUMENT_ID`, and the frontend and
-   Caddy only start once the API is healthy, so the CV goes in before the rest comes up. The image
-   holds no CVs (`.dockerignore` excludes every PDF; never bake one in), so the PDF is piped in on
-   stdin; a `-v` bind mount with a mistyped source would silently mount an empty directory.
+   Caddy only start once the API is healthy, so the CV goes in before the rest comes up. The PDF
+   is piped in on stdin, as in the notes above (never bake one into the image).
 
-```bash
-docker compose config | grep maxmemory    # prints a line only when the override is active
-docker compose build
-docker compose up -d database redis migrate worker beat
-docker compose run --rm -T api sh -c 'cat > /tmp/cv.pdf && python scripts/ingest_cv.py /tmp/cv.pdf' < my-cv.pdf
-# put the printed document id in .env as CV_DOCUMENT_ID=<id>, then:
-docker compose up -d                       # recreates the backend services with the new .env
-docker compose ps                          # all healthy; migrate shows "Exited (0)"
-docker compose run --rm api python scripts/make_admin.py --create admin@cv.example.com
-```
+   ```bash
+   docker compose config | grep maxmemory    # prints a line only when the override is active
+   docker compose build
+   docker compose up -d database redis migrate worker beat
+   docker compose run --rm -T api sh -c 'cat > /tmp/cv.pdf && python scripts/ingest_cv.py /tmp/cv.pdf' < my-cv.pdf
+   # put the printed document id in .env as CV_DOCUMENT_ID=<id>, then:
+   docker compose up -d                       # recreates the backend services with the new .env
+   docker compose ps                          # all healthy; migrate shows "Exited (0)"
+   docker compose run --rm api python scripts/make_admin.py --create admin@cv.example.com
+   ```
 
    Only Caddy is published; the frontend, API, Postgres and Redis are reachable on the compose
    networks alone (a published Docker port bypasses UFW, so nothing else is published). Caddy
@@ -417,8 +485,9 @@ docker compose run --rm api python scripts/make_admin.py --create admin@cv.examp
    `docker compose exec -T database pg_dump -U <POSTGRES_USER> -Fc <POSTGRES_DB> > /var/backups/career-$(date +%F).dump`
 
 The override also fixes HSTS at one year, whatever `.env` says, caps Redis at 256 MB, refuses to
-start without `DOMAIN`, and gives every long-running container a memory cap sized for a 4 GB host
-(the reasoning and the measurements are in `docker-compose.prod.yml`; revisit them before adding a
+start without `DOMAIN`, and gives every long-running container a memory cap sized for a 4 GB host,
+with no swap, so a runaway container is OOM-killed and restarted rather than dragging the host
+down (the reasoning and the measurements are in `docker-compose.prod.yml`; revisit them before adding a
 second worker or raising worker concurrency). There is no ACME email, which Let's Encrypt does not
 require.
 
