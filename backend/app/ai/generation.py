@@ -85,3 +85,7 @@ class Generator(Protocol):
         top_logprobs: int | None = None,
         response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult: ...
+
+
+class ClosableGenerator(Generator, Protocol):
+    async def aclose(self) -> None: ...

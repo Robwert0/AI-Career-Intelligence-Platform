@@ -91,9 +91,9 @@ export default function PrivacyPage() {
         <Section title="chat">
           <p className="leading-relaxed">
             So follow-up questions make sense, each question is sent with up to the last three
-            questions and answers of the conversation on that page. They are processed by the
-            locally hosted model like the question itself and are never stored, on the server or in
-            the browser. The conversation is gone when you leave or reload the page, sign out, or
+            questions and answers of the conversation on that page. They are sent to the AI model
+            like the question itself and are never stored by this site, on the server or in the
+            browser. The conversation is gone when you leave or reload the page, sign out, or
             switch accounts.
           </p>
         </Section>
@@ -112,6 +112,15 @@ export default function PrivacyPage() {
             signing back in to the same account resumes the analysis. Keeping the identifiers does
             not make the analysis last longer: the report is still deleted on the server when it
             expires.
+          </p>
+        </Section>
+
+        <Section title="ai processing">
+          <p className="leading-relaxed">
+            Chat questions, the conversation sent with them, job postings and CVs you submit for a
+            match are sent to OpenAI&apos;s API, which runs the AI model and processes them on
+            Robert&apos;s behalf. What OpenAI keeps, and for how long, is set out in its own API data
+            policy.
           </p>
         </Section>
 
