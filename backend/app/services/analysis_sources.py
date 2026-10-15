@@ -59,6 +59,11 @@ class SourcesState(BaseModel):
     github: GitHubSource
 
 
+# Every step after a source read (assess, recommend) draws on the same spent LLM pool, so neither
+# continue nor retry can succeed before the daily reset.
+RUN_FATAL_CODES = frozenset({"ai_budget_exhausted"})
+
+
 @dataclass(frozen=True, slots=True)
 class Ready:
     pass
@@ -198,6 +203,8 @@ def decide(state: SourcesState) -> Ready | Pause | Fail:
         return Ready()
     name, source = failed[0]
     code = source.error_code or "internal_error"
+    if code in RUN_FATAL_CODES:
+        return Fail(code=code)
     if any(s.status == "read" and s.items for s in (state.cv, state.github)):
         reset_at = source.reset_at if isinstance(source, GitHubSource) else None
         return Pause(source=name, code=code, reset_at=reset_at)

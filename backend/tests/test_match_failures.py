@@ -68,11 +68,19 @@ def test_a_reset_time_is_added_to_the_message_in_utc() -> None:
     assert described.recovery == describe_failure("github_rate_limited").recovery
 
 
-def test_an_exhausted_ai_budget_says_when_it_resets_and_asks_the_user_to_wait() -> None:
+def test_an_exhausted_ai_budget_says_when_it_resets_and_offers_no_retry_before_then() -> None:
     failure = describe_failure("ai_budget_exhausted")
 
-    assert failure.recovery == "wait"
+    assert failure.recovery == "wait_for_reset"
     assert failure.message.endswith("You can try again after 00:00 UTC.")
+
+
+def test_only_the_daily_budget_waits_for_the_reset() -> None:
+    # A "wait" failure clears in minutes and the UI offers a retry; this one can't clear before
+    # 00:00 UTC, so any other code reusing it would hide a retry that might work.
+    waiting = [code for code, (_, recovery) in _FAILURES.items() if recovery == "wait_for_reset"]
+
+    assert waiting == ["ai_budget_exhausted"]
 
 
 _ANALYSIS_CODES = [

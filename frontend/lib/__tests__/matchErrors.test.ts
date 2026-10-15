@@ -183,6 +183,15 @@ describe('jobRecovery', () => {
     })
   })
 
+  it('offers neither retry nor paste once the daily model budget is spent', () => {
+    for (const tab of ['url', 'text'] as const) {
+      expect(jobRecovery(failed('ai_budget_exhausted', 'wait_for_reset'), tab)).toEqual({
+        offerRetry: false,
+        offerPaste: false,
+      })
+    }
+  })
+
   it('offers retry when the queue says wait', () => {
     expect(jobRecovery(failed('queue_unavailable', 'wait'), 'url').offerRetry).toBe(true)
   })
@@ -234,6 +243,12 @@ describe('analysisFailureAction', () => {
 
   it('waits when the backend says so', () => {
     expect(analysisFailureAction(failed('queue_unavailable', 'wait'))).toBe('wait')
+  })
+
+  it('offers no "Try again" once the daily model budget is spent', () => {
+    expect(analysisFailureAction(failed('ai_budget_exhausted', 'wait_for_reset'))).toBe(
+      'wait_for_reset',
+    )
   })
 
   it.each([
