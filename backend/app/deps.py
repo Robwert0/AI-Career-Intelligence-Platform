@@ -1,8 +1,10 @@
 import asyncio
+import logging
 import math
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from functools import partial
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -18,7 +20,7 @@ from app.core.analysis_registry import AnalysisRegistry
 from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
-from app.core.rate_limiter import Limiter, Policy, Scope
+from app.core.rate_limiter import Decision, Limiter, Policy, Scope
 from app.core.retention_marker import RetentionMarker
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
@@ -27,6 +29,8 @@ from app.services.admin_service import AdminService
 from app.services.auth_service import InvalidAccessTokenError
 from app.services.match_service import MatchService
 from app.workers.queue import TaskQueue
+
+logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer()
 
@@ -169,17 +173,59 @@ def _client_ip(request: Request) -> str:
     return request.client.host
 
 
-async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
+def _too_many_requests(decision: Decision) -> HTTPException:
+    return HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "Too many requests",
+        headers={"Retry-After": str(math.ceil(decision.retry_after_seconds))},
+    )
+
+
+async def _decide(
+    decide: Callable[[Policy, str], Awaitable[Decision]], policy: Policy, identity: str
+) -> Decision:
     try:
-        decision = await limiter.check(policy, identity, now=time.time())
+        return await decide(policy, identity)
     except RedisError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable") from None
+
+
+async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
+    decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
     if not decision.allowed:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "Too many requests",
-            headers={"Retry-After": str(math.ceil(decision.retry_after_seconds))},
-        )
+        raise _too_many_requests(decision)
+
+
+@asynccontextmanager
+async def reserved_rate_limit(
+    policy: Policy, identity: str, limiter: Limiter
+) -> AsyncIterator[None]:
+    # The atomic take before the work is what holds the cap under a concurrent burst; checking
+    # first and spending after lets the whole burst through.
+    decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
+    if not decision.allowed:
+        if decision.first_refusal:
+            logger.warning(
+                "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
+                policy.name,
+                math.ceil(decision.retry_after_seconds),
+            )
+        else:
+            logger.debug("rate limit ceiling refusal policy=%s", policy.name)
+        raise _too_many_requests(decision)
+    try:
+        yield
+    except BaseException:
+        await _refund(policy, identity, limiter)
+        raise
+
+
+async def _refund(policy: Policy, identity: str, limiter: Limiter) -> None:
+    # Swallowed so the caller's original error surfaces; a lost token is the safe direction.
+    try:
+        await limiter.refund(policy, identity, now=time.time())
+    except RedisError:
+        logger.exception("rate limit refund failed, token stays spent policy=%s", policy.name)
 
 
 def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:

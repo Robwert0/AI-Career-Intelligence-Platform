@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from redis.asyncio import Redis
 
@@ -26,23 +26,36 @@ class Decision:
     allowed: bool
     remaining: float
     retry_after_seconds: float
+    # Set on the first refusal per REFUSAL_NOTICE_SECONDS, so a flood logs once, not per hit.
+    first_refusal: bool = False
 
 
 class Limiter(Protocol):
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
+    async def refund(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
+
+REFUSAL_NOTICE_SECONDS = 60
+
+# Modes: 'take' spends a token only if one exists; 'refund' returns one, capped at capacity, and
+# is a no-op on a missing key because a missing bucket is already full.
 TOKEN_BUCKET_LUA = """
 local key      = KEYS[1]
 local capacity = tonumber(ARGV[1])
 local refill   = tonumber(ARGV[2])
 local now      = tonumber(ARGV[3])
+local mode     = ARGV[4]
+local notice   = tonumber(ARGV[5])
 
-local bucket = redis.call('HMGET', key, 'tokens', 'ts')
+local bucket = redis.call('HMGET', key, 'tokens', 'ts', 'noticed_until')
 local tokens = tonumber(bucket[1])
 local ts     = tonumber(bucket[2])
 
 if tokens == nil then
+  if mode == 'refund' then
+    return { 1, tostring(capacity), '0', 0 }
+  end
   tokens = capacity
   ts = now
 end
@@ -51,12 +64,18 @@ end
 local elapsed = math.max(0, now - ts)
 tokens = math.min(capacity, tokens + elapsed * refill)
 
-local allowed, retry = 0, 0.0
-if tokens >= 1 then
-  tokens  = tokens - 1
-  allowed = 1
+local allowed, retry, first = 1, 0.0, 0
+if mode == 'refund' then
+  tokens = math.min(capacity, tokens + 1)
+elseif tokens >= 1 then
+  tokens = tokens - 1
 else
+  allowed = 0
   retry = (1 - tokens) / refill
+  if now >= (tonumber(bucket[3]) or 0) then
+    redis.call('HSET', key, 'noticed_until', now + notice)
+    first = 1
+  end
 end
 
 redis.call('HSET', key, 'tokens', tokens, 'ts', now)
@@ -64,8 +83,10 @@ redis.call('HSET', key, 'tokens', tokens, 'ts', now)
 redis.call('PEXPIRE', key, math.ceil((capacity / refill) * 1000) + 1000)
 
 -- Floats must leave as strings: Redis truncates Lua numbers to integers.
-return { allowed, tostring(tokens), tostring(retry) }
+return { allowed, tostring(tokens), tostring(retry), first }
 """
+
+_Mode = Literal["take", "refund"]
 
 
 class TokenBucketLimiter:
@@ -73,12 +94,20 @@ class TokenBucketLimiter:
         self._script = redis.register_script(TOKEN_BUCKET_LUA)
 
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        return await self._run(policy, identity, now, "take")
+
+    async def refund(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        return await self._run(policy, identity, now, "refund")
+
+    async def _run(self, policy: Policy, identity: str, now: float, mode: _Mode) -> Decision:
         key = f"rl:{policy.name}:{identity}"
-        allowed, remaining, retry_after = await self._script(
-            keys=[key], args=[policy.capacity, policy.refill_per_second, now]
+        allowed, remaining, retry_after, first_refusal = await self._script(
+            keys=[key],
+            args=[policy.capacity, policy.refill_per_second, now, mode, REFUSAL_NOTICE_SECONDS],
         )
         return Decision(
             allowed=bool(allowed),
             remaining=float(remaining),
             retry_after_seconds=float(retry_after),
+            first_refusal=bool(first_refusal),
         )
