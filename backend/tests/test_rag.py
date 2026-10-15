@@ -2,14 +2,17 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import Any, cast
 
+import httpx
 import pytest
 from fakes import FakeGenerator, ScriptedGenerator, UnavailableGenerator
 
 from app.ai.conversation import MAX_STANDALONE_CHARS, Turn
 from app.ai.embeddings import QueryTooLongError
 from app.ai.generation import FinishReason, GeneratorUnavailableError, Role
+from app.ai.ollama import OllamaGenerator
+from app.ai.openai import OpenAIGenerator
 from app.ai.prompts import CANARY, INCOMPLETE_TEXT, REFUSAL_TEXT
 from app.ai.rag import GenerationCapacityError, RagPipeline, RetrieverScope
 from app.ai.retriever import EmptyQueryError, RetrievalResult
@@ -587,3 +590,112 @@ async def test_a_name_dictated_in_history_counts_as_user_text() -> None:
     answer = await pipeline(hit(), generator).answer("Where does he work?", history=history)
 
     assert answer.refused is True
+
+
+def replaying(bodies: list[dict[str, Any]]) -> httpx.AsyncClient:
+    replies = iter(bodies)
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=next(replies))),
+        base_url="https://provider.test",
+    )
+
+
+def openai_reply(
+    content: str | None, *, refusal: str | None = None, finish: str = "stop"
+) -> dict[str, Any]:
+    return {
+        "choices": [
+            {
+                "finish_reason": finish,
+                "message": {"role": "assistant", "content": content, "refusal": refusal},
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 3},
+    }
+
+
+def ollama_reply(content: str, **overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "message": {"role": "assistant", "content": content},
+        "done": True,
+        "done_reason": "stop",
+        "prompt_eval_count": 10,
+        "eval_count": 3,
+    }
+    return body | overrides
+
+
+def openai_over(*bodies: dict[str, Any]) -> OpenAIGenerator:
+    return OpenAIGenerator(client=replaying(list(bodies)), model="gpt-test")
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        openai_reply(None, refusal="I can't help with that request about Robert."),
+        openai_reply("He used FastAPI and also", finish="content_filter"),
+    ],
+    ids=["refusal", "content-filter-partial"],
+)
+async def test_a_provider_decline_is_refused_without_sources(
+    reply: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    answer = await pipeline(hit(), openai_over(reply)).answer("what framework?")
+
+    assert answer.text == REFUSAL_TEXT
+    assert answer.refused is True
+    assert answer.sources == []
+    assert "declined by the provider" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        openai_reply(None, refusal="I can't rewrite that."),
+        openai_reply("Which project shows", finish="content_filter"),
+    ],
+    ids=["refusal", "content-filter-partial"],
+)
+async def test_a_declined_rewrite_is_never_used_as_the_retrieval_query(
+    rewrite: dict[str, Any],
+) -> None:
+    generator = openai_over(rewrite, openai_reply("The ledger project."))
+    rag, retriever = tracked(hit(), generator)
+
+    await rag.answer("Which project demonstrates that?", history=HISTORY)
+
+    assert retriever.queries == [
+        "What backend experience does Robert have?\nWhich project demonstrates that?"
+    ]
+
+
+async def test_a_normal_ollama_answer_and_rewrite_pass_the_finish_check() -> None:
+    generator = OllamaGenerator(
+        client=replaying(
+            [
+                ollama_reply("Which project demonstrates Robert's backend experience?"),
+                ollama_reply("He used FastAPI."),
+            ]
+        ),
+        model="qwen3:8b",
+    )
+    rag, retriever = tracked(hit(), generator)
+
+    answer = await rag.answer("Which project demonstrates that?", history=HISTORY)
+
+    assert retriever.queries == ["Which project demonstrates Robert's backend experience?"]
+    assert answer.text == "He used FastAPI."
+    assert answer.refused is False
+    assert answer.sources
+
+
+async def test_an_ollama_answer_without_a_finish_reason_is_refused() -> None:
+    # Ollama omits done_reason only when the runner connection closed mid-answer.
+    reply = ollama_reply("He used FastAPI and")
+    del reply["done_reason"]
+    generator = OllamaGenerator(client=replaying([reply]), model="qwen3:8b")
+
+    answer = await pipeline(hit(), generator).answer("what framework?")
+
+    assert answer.refused is True
+    assert answer.sources == []

@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 RetrieverScope = Callable[[], AbstractAsyncContextManager[Retriever]]
 
 # canary and ngram mean a suspected prompt leak, so the response must be indistinguishable from a
-# refusal. empty and truncated are ordinary faults and get an honest message instead.
+# refusal. abnormal_finish (a provider refusal, a filtered partial) is a decline, so it refuses too.
+# empty and truncated are ordinary faults and get an honest message instead.
 LEAK_CHECKS = frozenset({"canary", "ngram"})
 
 
@@ -125,6 +126,15 @@ class RagPipeline:
                 generated.model,
                 hashlib.sha256(generated.text.encode()).hexdigest()[:16],
                 len(generated.text),
+            )
+            return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
+
+        if verdict.failed_check == "abnormal_finish":
+            logger.warning(
+                "chat answer declined by the provider user=%s finish=%s model=%s",
+                user_id,
+                generated.finish_reason,
+                generated.model,
             )
             return Answer(text=REFUSAL_TEXT, refused=True, sources=[])
 

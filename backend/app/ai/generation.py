@@ -5,7 +5,9 @@ from typing import Any, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 Role = StrEnum("Role", ("SYSTEM", "USER", "ASSISTANT"))
-FinishReason = StrEnum("FinishReason", ("STOP", "LENGTH", "OTHER"))
+FinishReason = StrEnum("FinishReason", ("STOP", "LENGTH", "REFUSAL", "CONTENT_FILTER", "OTHER"))
+# The provider declined the content; at temperature 0 asking again declines again.
+DECLINED = frozenset({FinishReason.REFUSAL, FinishReason.CONTENT_FILTER})
 
 
 class SamplingSettings(BaseModel):

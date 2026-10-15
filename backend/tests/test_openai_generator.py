@@ -172,18 +172,30 @@ async def test_a_length_stop_is_reported_as_truncated() -> None:
     assert result.truncated
 
 
-async def test_a_content_filter_stop_is_other() -> None:
+async def test_a_content_filter_stop_is_reported_as_filtered() -> None:
     body = openai_body()
     body["choices"][0]["finish_reason"] = "content_filter"
+    generator, _ = stub(body)
+    assert (await generator.generate(MESSAGES)).finish_reason is FinishReason.CONTENT_FILTER
+
+
+async def test_an_unknown_finish_is_other() -> None:
+    body = openai_body()
+    body["choices"][0]["finish_reason"] = "tool_calls"
     generator, _ = stub(body)
     assert (await generator.generate(MESSAGES)).finish_reason is FinishReason.OTHER
 
 
-async def test_a_refusal_comes_back_as_text_with_finish_other() -> None:
+async def test_a_refusal_comes_back_as_text_with_finish_refusal() -> None:
     generator, _ = stub(openai_body(content=None, refusal="I can't help with that."))
     result = await generator.generate(MESSAGES)
     assert result.text == "I can't help with that."
-    assert result.finish_reason is FinishReason.OTHER
+    assert result.finish_reason is FinishReason.REFUSAL
+
+
+async def test_a_refusal_beside_content_is_still_a_refusal() -> None:
+    generator, _ = stub(openai_body(content="Partial", refusal="I can't help with that."))
+    assert (await generator.generate(MESSAGES)).finish_reason is FinishReason.REFUSAL
 
 
 async def test_logprobs_are_requested_and_mapped() -> None:

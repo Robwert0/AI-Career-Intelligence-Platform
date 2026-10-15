@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from app.ai.generation import GenerationResult, SamplingSettings
+from app.ai.generation import FinishReason, GenerationResult, SamplingSettings
 
 # Well inside bge-small's 510-token query budget, so a rewrite can never trip QueryTooLongError.
 MAX_STANDALONE_CHARS: Final = 400
@@ -21,7 +21,7 @@ class Turn:
 
 def standalone_from(result: GenerationResult) -> str | None:
     """The rewrite's first line, or None when it cannot be trusted as a retrieval query."""
-    if result.truncated:
+    if result.finish_reason is not FinishReason.STOP:
         return None
     lines = result.text.strip().splitlines()
     first = lines[0].strip().strip("\"'").strip() if lines else ""

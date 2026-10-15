@@ -17,7 +17,11 @@ from app.ai.generation import (
 )
 from app.core.config import settings
 
-FINISH_REASONS = {"stop": FinishReason.STOP, "length": FinishReason.LENGTH}
+FINISH_REASONS = {
+    "stop": FinishReason.STOP,
+    "length": FinishReason.LENGTH,
+    "content_filter": FinishReason.CONTENT_FILTER,
+}
 _CONTEXT_OVERFLOW = "context_length_exceeded"
 
 
@@ -189,9 +193,9 @@ class OpenAIGenerator:
             choice = body["choices"][0]
             message = choice["message"]
             text = message.get("content")
-            if text is None:
-                text = message["refusal"]
-                finish_reason = FinishReason.OTHER
+            if message.get("refusal") is not None:
+                text = message["refusal"] if text is None else text
+                finish_reason = FinishReason.REFUSAL
             else:
                 finish_reason = FINISH_REASONS.get(choice.get("finish_reason"), FinishReason.OTHER)
             if not isinstance(text, str):
