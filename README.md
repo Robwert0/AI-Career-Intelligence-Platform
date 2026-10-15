@@ -357,7 +357,8 @@ internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
    - Generation through OpenAI: `GENERATION_PROVIDER=openai` with `OPENAI_API_KEY` and
      `OPENAI_CHAT_MODEL`. The server does not run Ollama: it has no authentication, and a 4 GB
      VPS cannot hold the model anyway.
-   - `LLM_DAILY_BUDGET_USD` set low (e.g. `0.5`), and on the OpenAI side prepaid credits with
+   - `LLM_DAILY_BUDGET_CHAT_USD` and `LLM_DAILY_BUDGET_ANALYSIS_USD` set low (e.g. `0.2` and `0.3`,
+     $0.50/day in total), and on the OpenAI side prepaid credits with
      auto-recharge off, so a bug or an abuser can spend at most what is on the account.
 
    The OpenAI and budget settings come from the OpenAI generator and spend-cap branches; deploy only
