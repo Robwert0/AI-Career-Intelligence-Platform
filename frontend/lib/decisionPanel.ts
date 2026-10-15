@@ -7,8 +7,7 @@ export type DecisionPanelKind =
 // otherwise special-case (a future backend addition) still gets a safe panel instead of a blind
 // retry. fix_github_url is the only kind that must never fall back to it -- a retry there would
 // just re-fetch the same bad URL and spend another GitHub token. wait_for_reset offers neither
-// retry nor continue: both need the spent daily model budget (the server now fails such a run
-// outright, so this only covers a pause recorded before that change).
+// retry nor continue: neither can succeed before the daily model budget resets.
 export function decisionPanelKind(recovery: Recovery): DecisionPanelKind {
   switch (recovery) {
     case 'fix_github_url':
