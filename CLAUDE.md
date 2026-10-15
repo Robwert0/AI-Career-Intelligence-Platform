@@ -268,7 +268,7 @@ celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
 celery -A app.workers.beat_app:beat_app beat --loglevel=info
 
 # Job Match Analyzer: calibrate the per-source gates (MATCH_PRESELECT_MIN_SIMILARITY[_GITHUB]),
-# then run the eval gate (both need labelled postings under docs/eval/calibration/)
+# then run the eval gate (both need labelled postings under docs/eval/postings/)
 cd backend && uv run python scripts/eval_match.py prepare
 uv run python scripts/eval_match.py calibrate
 uv run python scripts/eval_match.py run

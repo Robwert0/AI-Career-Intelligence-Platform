@@ -1,8 +1,8 @@
 # AI Career Intelligence Platform
 
 An interactive, RAG-based "AI version of my CV": a portfolio site where visitors can read my CV and
-projects, then ask a chat assistant questions answered from the CV itself, and match the CV against
-a job posting. A multi-agent layer (recruiter, career coach, interviewer) is the next phase.
+projects, then ask a chat assistant questions answered from the CV itself. Visitors can also match
+their own CV or GitHub profile against a job posting. A multi-agent layer (recruiter, career coach, interviewer) is the next phase.
 
 It is built as a production-grade system, not a demo: every feature has to be **secure, async,
 scalable and explainable** before it counts as done.
@@ -118,7 +118,7 @@ scalable and explainable** before it counts as done.
 | 7 | AI analysis: CV feedback, ATS scoring | 🟡 Partial: grounded CV rewrite suggestions and gap analysis ship as part of the Job Match Analyzer; no separate standalone ATS-scoring endpoint |
 | 8 | Job matching: CV vs job description | ✅ Done: the Job Match Analyzer (job intake, CV + GitHub evidence, hybrid retrieval, multi-stage LLM assessment, transparent scoring). The per-source similarity gates (CV 0.605, GitHub 0.583) are calibrated against one real CV and one GitHub profile; the eval quality gate (`scripts/eval_match.py`) has not yet passed against hand-labelled postings |
 | 9 | Multi-agent system: router, recruiter, career coach, interviewer | ⏳ Not built |
-| 10 | Security hardening | ✅ Done for what exists: rate limiting (IPv6-aware, per-account login limits, registration ceilings), LLM spend guard, prompt-injection defense and file-upload validation for chat and the Job Match Analyzer |
+| 10 | Security hardening | 🟡 Mostly done: rate limiting (IPv6-aware, per-account login limits, registration ceilings), LLM spend guard, prompt-injection defense and file-upload validation for chat and the Job Match Analyzer. Open: `/docs` and `/openapi.json` are enabled in every environment (not reachable through the production proxy) |
 | 11 | Observability | 🟡 Partial: structured logging, per-answer chat token/latency logs, daily spend tracking per pool, admin visitor insights and optional Umami analytics; no error tracking yet |
 | 12 | Deployment | 🟡 Ready for one host: production compose override with Caddy (HTTPS), digest-pinned images, read-only containers and memory caps |
 
@@ -369,8 +369,7 @@ flags go before the subcommand: `uv run python scripts/eval_match.py --provider 
 The same `.env` drives a fully containerized stack: Postgres, Redis, a one-shot `migrate`, the API,
 one Celery worker, exactly one Celery beat (never scale it: the daily retention purge runs from it;
 it runs the slim `app.workers.beat_app:beat_app`, which never loads torch), the frontend and Caddy
-in front of it. Do step 2 above first; you need Docker and Ollama, not uv or
-Node.
+in front of it. Do step 2 above first; you need Docker and Ollama, not uv or Node.
 
 ```bash
 docker compose up -d --build        # first build takes minutes: CPU-only torch + the embedding model
