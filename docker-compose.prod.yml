@@ -1,0 +1,19 @@
+# Production override for the single-VPS deploy:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Only the frontend is published; Postgres, Redis and the API are reachable on the compose
+# network alone. `!reset` needs Docker Compose 2.24 or newer.
+#
+# Still needed before real traffic: TLS in front of the frontend. The refresh cookie is always
+# Secure, so over plain http on a public IP the browser drops it and sessions never stick.
+
+services:
+  database:
+    ports: !reset []
+    restart: unless-stopped
+
+  redis:
+    ports: !reset []
+    # Same no-persistence flags as dev. noeviction is Redis's default, pinned because the rate
+    # limiter depends on it: an evicted bucket is reborn full.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    restart: unless-stopped

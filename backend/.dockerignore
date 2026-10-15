@@ -1,0 +1,13 @@
+# Allowlist: only what the image needs. Tests (fixture PDFs), .env, .venv and caches stay out.
+*
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!alembic/
+!app/
+!scripts/
+**/__pycache__
+**/*.py[cod]
+**/.env*
+**/*.pdf
+**/*.docx

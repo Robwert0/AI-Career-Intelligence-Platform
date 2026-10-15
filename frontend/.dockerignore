@@ -1,0 +1,13 @@
+# .env* must stay out: `next build` would read frontend/.env.local and inline its values.
+.env*
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+next-env.d.ts
+*.pem
+*.pdf
+*.docx
+Dockerfile
+.dockerignore

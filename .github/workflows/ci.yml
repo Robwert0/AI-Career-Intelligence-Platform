@@ -146,7 +146,7 @@ jobs:
       - name: Test
         run: npm run test
 
-      # No BACKEND_ORIGIN needed: next.config.ts falls back to localhost and rewrites are
-      # evaluated per request at runtime, not baked in at build time.
+      # No BACKEND_ORIGIN needed: next.config.ts falls back to localhost. The rewrites ARE baked
+      # in at build time, so this build artifact is only good for a localhost backend.
       - name: Build
         run: npm run build
