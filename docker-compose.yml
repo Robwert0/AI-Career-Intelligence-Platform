@@ -1,13 +1,21 @@
-# Our own images run as an unprivileged user and need no Linux capabilities at all.
+# Our own images run as an unprivileged user and need no Linux capabilities at all. The root
+# filesystem is read-only: whatever a service must write goes to a named volume or a tmpfs, which
+# counts against the container's memory limit.
 x-hardening: &hardening
   security_opt:
     - no-new-privileges:true
   cap_drop:
     - ALL
+  read_only: true
+
+# Python's tempfile, FastAPI spooling uploads over 1 MB, and the ingest one-off's /tmp/cv.pdf.
+x-backend-tmp: &backend-tmp
+  tmpfs:
+    - /tmp:size=64m
 
 services:
   database:
-    image: pgvector/pgvector:pg18
+    image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -25,7 +33,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:8-alpine
+    image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     # No RDB/AOF: job records and CV bytes must never be written to disk.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
@@ -39,7 +47,7 @@ services:
   # Everything below runs only with a bare `docker compose up`; `up -d database redis` ignores it.
 
   migrate:
-    <<: *hardening
+    <<: [*hardening, *backend-tmp]
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -58,7 +66,7 @@ services:
     restart: "no"
 
   api:
-    <<: *hardening
+    <<: [*hardening, *backend-tmp]
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -87,7 +95,7 @@ services:
     restart: unless-stopped
 
   worker:
-    <<: *hardening
+    <<: [*hardening, *backend-tmp]
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -112,7 +120,7 @@ services:
   # Exactly one beat process: none means the retention purge never runs, two run it twice.
   # The fixed container_name prevents a second beat container: `--scale beat=2` is refused.
   beat:
-    <<: *hardening
+    <<: [*hardening, *backend-tmp]
     container_name: ${COMPOSE_PROJECT_NAME}-beat
     image: career-intel-backend
     build: ./backend
@@ -130,6 +138,9 @@ services:
 
   frontend:
     <<: *hardening
+    # Next writes its image-optimizer and fetch caches here; uid 1000 is the image's node user.
+    tmpfs:
+      - /app/.next/cache:size=64m,uid=1000,gid=1000
     image: career-intel-frontend
     build:
       context: ./frontend
@@ -165,7 +176,7 @@ services:
     # from the bounding set the kernel refuses to exec the binary at all.
     cap_add:
       - NET_BIND_SERVICE
-    image: caddy:2.11.7-alpine
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     environment:
       DOMAIN: ${DOMAIN:-localhost}
       HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}

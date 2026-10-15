@@ -1,6 +1,12 @@
 # The only public entry point. DOMAIN unset means `localhost`, served from Caddy's internal CA.
 # A real domain gets a Let's Encrypt certificate automatically (A record + ports 80/443 open).
 # No ACME email: it is optional, and Let's Encrypt no longer sends expiry mail anyway.
+{
+	# Caddy's root filesystem is read-only, so it cannot add its local CA (used only for
+	# `localhost`) to the container's trust store; nothing inside the container needs it there.
+	skip_install_trust
+}
+
 {$DOMAIN:localhost} {
 	# Next already sends the CSP, nosniff, Referrer-Policy and X-Frame-Options; HSTS is the one
 	# header only the TLS terminator can honestly promise. max-age=0 (the default) keeps

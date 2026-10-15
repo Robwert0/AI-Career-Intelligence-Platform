@@ -4,10 +4,38 @@
 # Only Caddy is published (80 and 443, with a Let's Encrypt certificate for DOMAIN); the frontend,
 # API, Postgres and Redis are reachable on the compose networks alone. `!reset` needs Docker
 # Compose 2.24 or newer.
+#
+# Memory caps, so one runaway container is OOM-killed (and restarted) instead of the kernel picking
+# a victim on a 4 GB host. They add up to 3488 MiB of the ~3.8 GiB such a VPS reports, leaving
+# ~350 MiB for the kernel and dockerd even if every container sat at its cap at once; typical use
+# is under half of it. Sized from the working set measured 2026-10-15 after a full CV analysis
+# (anonymous memory; page cache inside a container is reclaimed before anything is OOM-killed):
+#   api 457 MiB (embedding model loaded) · worker 525 MiB (model loaded) · beat 399 MiB
+#   frontend 55 MiB · caddy 17 MiB · database 17 MiB on a near-empty DB · redis 9 MiB
+# The worker cap assumes concurrency 1 (celery_app.py): model, plus one parse child capped at 512 MB
+# of address space (doc_sandbox.PARSE_MEMORY_BYTES), plus its 72 MiB healthcheck process, plus /tmp.
+# More concurrency, a second worker or a bigger embedding model means raising it and rechecking the
+# sum. `docker compose run` one-offs inherit their service's cap: ingest_cv.py peaked at 546 MiB.
 
 services:
+  api:
+    mem_limit: 640m
+
+  worker:
+    mem_limit: 1280m
+
+  beat:
+    # Idle all day, but it imports the whole app (torch included) to read the schedule.
+    mem_limit: 512m
+
+  frontend:
+    ports: !reset []
+    mem_limit: 192m
+
   database:
     ports: !reset []
+    # shared_buffers is Postgres's default 128 MB; the rest is per-connection memory and pg_dump.
+    mem_limit: 384m
     restart: unless-stopped
 
   redis:
@@ -23,10 +51,9 @@ services:
     mem_limit: 384m
     restart: unless-stopped
 
-  frontend:
-    ports: !reset []
-
   caddy:
+    # Caddy sets its Go GOMEMLIMIT from this cap at startup.
+    mem_limit: 96m
     ports: !override
       - "${CADDY_HTTP_PORT:-80}:80"
       - "${CADDY_HTTPS_PORT:-443}:443"

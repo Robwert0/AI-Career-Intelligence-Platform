@@ -327,6 +327,13 @@ with its own internal CA, so the browser warns (or use `curl -k`); add `https://
   `DOCKER_OLLAMA_BASE_URL` in `.env`. Ollama has no authentication, so whoever reaches its port can
   run, pull and delete models: keep it on 127.0.0.1 and never expose it on a server. Production does
   not run Ollama at all (see below).
+- The containers we build (migrate, API, worker, beat, frontend) and Caddy run with a read-only
+  root filesystem. What they may write is listed in `docker-compose.yml`: a `/tmp` tmpfs for the
+  backend, a tmpfs for Next's `.next/cache`, the beat schedule volume and Caddy's data/config
+  volumes. A new feature that writes elsewhere fails with "Read-only file system": give it a tmpfs
+  or a volume rather than dropping `read_only`.
+- Base images are pinned by digest (tag kept alongside for reading); Dependabot opens weekly PRs
+  that move the digests forward (`.github/dependabot.yml`).
 - The embedding model is baked into the image at the revision pinned in `app/core/config.py` and
   the containers run offline (`HF_HUB_OFFLINE=1`): changing `EMBEDDING_MODEL[_REVISION]` means
   rebuilding the backend image.
@@ -349,9 +356,10 @@ with its own internal CA, so the browser warns (or use `curl -k`); add `https://
 
 ### Production on one host
 
-**Deploy only once #51 (OpenAI generator), #52 (optional `CV_DOCUMENT_ID` for migrate, ingest and
-the worker) and #54 (LLM spend guard) are merged.** Before them, the settings below are silently
-ignored (Settings drops unknown keys) and the stack would try to reach Ollama with no spending cap.
+Production needs OpenAI for generation (the server runs no Ollama), the LLM spend guard switched
+on with real prices, and `CV_DOCUMENT_ID` filled in after the first ingest; the checklist below
+covers all three. Settings drops unknown keys, so a misspelled setting is silently ignored: check
+each name against `.env.example`.
 
 1. Point a DNS **A record** for your domain at the server's public IPv4 address. Skip the AAAA
    record unless Docker's IPv6 is enabled: otherwise IPv6 visitors reach Caddy through Docker's
@@ -406,8 +414,11 @@ docker compose run --rm api python scripts/make_admin.py --create admin@cv.examp
    volume and ideally copied off the host:
    `docker compose exec -T database pg_dump -U <POSTGRES_USER> -Fc <POSTGRES_DB> > /var/backups/career-$(date +%F).dump`
 
-The override also fixes HSTS at one year, whatever `.env` says, caps Redis at 256 MB, and refuses
-to start without `DOMAIN`. There is no ACME email, which Let's Encrypt does not require.
+The override also fixes HSTS at one year, whatever `.env` says, caps Redis at 256 MB, refuses to
+start without `DOMAIN`, and gives every long-running container a memory cap sized for a 4 GB host
+(the reasoning and the measurements are in `docker-compose.prod.yml`; revisit them before adding a
+second worker or raising worker concurrency). There is no ACME email, which Let's Encrypt does not
+require.
 
 **How the API sees the real client IP.** Per-IP rate limits key on `request.client.host`, so it has
 to be the visitor, not a proxy, and not something the visitor can choose:

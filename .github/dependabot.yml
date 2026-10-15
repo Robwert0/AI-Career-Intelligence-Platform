@@ -1,0 +1,34 @@
+# Base images are pinned by digest; these weekly PRs move the digests (and patch tags) forward.
+# Major versions stay a deliberate change: a Postgres major needs a data migration, and a Python or
+# Node major is a runtime upgrade to test, not a bump to merge.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      # CI's setup-uv pins the same uv version; bump both together by hand.
+      - dependency-name: "*astral-sh/uv"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: pgvector/pgvector
+        update-types: ["version-update:semver-major"]
+      - dependency-name: redis
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
