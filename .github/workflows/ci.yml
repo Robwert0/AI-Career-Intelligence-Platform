@@ -13,7 +13,27 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Dependabot bumps the compose digests but not the `services:` images below.
+      - name: Check CI service images match docker-compose.yml
+        working-directory: .
+        run: |
+          refs=$(grep -oE '^\s*image:\s*(pgvector/pgvector|redis):\S+@sha256:[0-9a-f]{64}' docker-compose.yml | sed -E 's/^\s*image:\s*//')
+          if [ "$(printf '%s\n' "$refs" | grep -c .)" -ne 2 ]; then
+            echo "::error::Expected 2 digest-pinned pgvector/redis images in docker-compose.yml, found: $refs"
+            exit 1
+          fi
+          status=0
+          for ref in $refs; do
+            if ! grep -qF "image: $ref" .github/workflows/ci.yml; then
+              echo "::error file=.github/workflows/ci.yml::Service image drifted from docker-compose.yml. Copy this ref into the test job's services: $ref"
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Set up uv and Python 3.14
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -23,7 +43,7 @@ jobs:
           working-directory: backend
           activate-environment: true
           enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          cache-dependency-glob: uv.lock
 
       # --locked installs exactly what uv.lock pins and fails if it has drifted from pyproject.toml,
       # so CI can't silently test newer versions than the ones run locally.
@@ -43,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     # Same digests as docker-compose.yml, so CI tests the images production runs. Dependabot's
     # github-actions updater only bumps `uses:` lines, not these: when it moves the compose
-    # digests, copy them here in the same PR.
+    # digests, copy them here in the same PR (the lint job fails until you do).
     services:
       database:
         image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
@@ -70,7 +90,9 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/app_test
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up uv and Python 3.14
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -80,13 +102,13 @@ jobs:
           working-directory: backend
           activate-environment: true
           enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
         run: uv sync --locked --extra dev
 
       - name: Cache the embedding model
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/huggingface
           key: hf-${{ hashFiles('backend/app/core/config.py') }}
@@ -126,10 +148,12 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node 24
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
