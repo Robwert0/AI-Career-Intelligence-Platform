@@ -81,7 +81,7 @@ class Env:
     async def pause(
         self, analysis_id: str, source: str, code: str, reset_at: int | None = None
     ) -> None:
-        await self.store.mark_running(analysis_id, stage=f"reading_{source}", now=time.time())
+        await self.store.claim(analysis_id, stage=f"reading_{source}", now=time.time())
         await self.store.mark_needs_decision(
             analysis_id, failed_source=source, error_code=code, reset_at=reset_at, now=time.time()
         )
@@ -335,7 +335,7 @@ async def test_a_finished_analysis_releases_the_lock_by_itself(env: Env, finish:
         await env.store.mark_failed(first, error_code="ai_unavailable", now=time.time())
     else:
         stale = time.time() - settings.match_analysis_hard_time_limit_seconds - 5
-        await env.store.mark_running(first, stage="assessing", now=stale)
+        await env.store.claim(first, stage="assessing", now=stale)
 
     response = await env.submit(github_url="https://github.com/jane")
 
@@ -380,14 +380,14 @@ async def test_a_queued_analysis_reports_its_queue_position(env: Env, redis_clie
     body = (await env.client.get(f"/match/analyses/{mine}", headers=env.headers)).json()
 
     assert (body["status"], body["stage"], body["queue_position"]) == ("queued", None, 1)
-    await env.store.mark_running(first, stage="reading_github", now=time.time())
+    await env.store.claim(first, stage="reading_github", now=time.time())
     body = (await env.client.get(f"/match/analyses/{mine}", headers=env.headers)).json()
     assert body["queue_position"] == 0
 
 
 async def test_a_running_analysis_has_no_queue_position(env: Env) -> None:
     analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
-    await env.store.mark_running(analysis_id, stage="assessing", now=time.time())
+    await env.store.claim(analysis_id, stage="assessing", now=time.time())
 
     body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
 
@@ -446,7 +446,7 @@ async def test_a_failed_analysis_explains_itself(env: Env) -> None:
 async def test_a_stale_running_analysis_polls_as_timed_out(env: Env) -> None:
     analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
     stale = time.time() - settings.match_analysis_hard_time_limit_seconds - 5
-    await env.store.mark_running(analysis_id, stage="assessing", now=stale)
+    await env.store.claim(analysis_id, stage="assessing", now=stale)
 
     body = (await env.client.get(f"/match/analyses/{analysis_id}", headers=env.headers)).json()
 
@@ -455,7 +455,7 @@ async def test_a_stale_running_analysis_polls_as_timed_out(env: Env) -> None:
 
 async def test_a_long_running_analysis_is_not_stale_under_the_job_limit(env: Env) -> None:
     analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
-    await env.store.mark_running(
+    await env.store.claim(
         analysis_id, stage="assessing", now=time.time() - settings.job_hard_time_limit_seconds - 5
     )
 
@@ -709,7 +709,7 @@ async def test_analyses_that_left_the_queue_do_not_count_towards_the_cap(
     monkeypatch.setattr(settings, "match_max_queued_analyses", 1)
     other = await _login(env.client, f"{uuid.uuid4().hex[:10]}@test.dev")
     first = (await env.submit(headers=other, github_url="https://github.com/jane")).json()
-    await env.store.mark_running(first["analysis_id"], stage="assessing", now=time.time())
+    await env.store.claim(first["analysis_id"], stage="assessing", now=time.time())
 
     response = await env.submit(github_url="https://github.com/jane")
 
@@ -738,7 +738,7 @@ async def test_discarding_an_analysis_frees_the_lock_and_its_inputs(
 
 async def test_a_running_analysis_cannot_be_discarded(env: Env) -> None:
     analysis_id = (await env.submit(github_url="https://github.com/jane")).json()["analysis_id"]
-    await env.store.mark_running(analysis_id, stage="assessing", now=time.time())
+    await env.store.claim(analysis_id, stage="assessing", now=time.time())
 
     response = await env.client.post(f"/match/analyses/{analysis_id}/discard", headers=env.headers)
 

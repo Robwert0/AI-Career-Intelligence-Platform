@@ -271,7 +271,7 @@ async def test_a_stale_running_job_polls_as_timed_out(match_client: MatchFixture
     job_id = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()[
         "job_id"
     ]
-    await store.mark_running(
+    await store.claim(
         job_id, stage="extracting", now=time.time() - settings.job_hard_time_limit_seconds - 5
     )
 
@@ -372,7 +372,7 @@ async def test_a_finished_intake_frees_the_slot(match_client: MatchFixture, outc
 async def test_a_stale_intake_frees_the_slot(match_client: MatchFixture) -> None:
     client, _, store, headers, _ = match_client
     first = (await client.post("/match/jobs", json={"text": TEXT}, headers=headers)).json()
-    await store.mark_running(
+    await store.claim(
         first["job_id"],
         stage="extracting",
         now=time.time() - settings.job_hard_time_limit_seconds - 5,

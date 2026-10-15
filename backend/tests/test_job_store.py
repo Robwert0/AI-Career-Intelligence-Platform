@@ -84,7 +84,7 @@ async def test_malformed_ids_are_rejected_before_redis(
 async def test_transitions_update_status_stage_and_time(store: JobStore, owner: str) -> None:
     record = await store.create("ping", owner, now=NOW)
 
-    running = await store.mark_running(record.id, stage="reading", now=NOW + 1)
+    running = await store.claim(record.id, stage="reading", now=NOW + 1)
     assert running is not None
     assert (running.status, running.stage, running.updated_at) == (
         JobStatus.RUNNING,
@@ -113,7 +113,7 @@ async def test_a_transition_keeps_the_original_ttl(
     record = await store.create("ping", owner, now=NOW)
     await redis_client.expire(f"job:{record.id}", 30)
 
-    await store.mark_running(record.id, stage="reading", now=NOW + 1)
+    await store.claim(record.id, stage="reading", now=NOW + 1)
 
     assert 0 < await redis_client.ttl(f"job:{record.id}") <= 30
 
@@ -139,7 +139,68 @@ async def test_a_terminal_record_refuses_further_transitions(
         await store.mark_failed(record.id, error_code="x", now=NOW + 1)
 
     with pytest.raises(JobStateError):
-        await store.mark_running(record.id, stage="again", now=NOW + 2)
+        await store.set_stage(record.id, stage="again", now=NOW + 2)
+    assert await store.claim(record.id, stage="again", now=NOW + 2) is None
+
+
+async def test_concurrent_claims_on_one_queued_job_let_exactly_one_through(
+    store: JobStore, owner: str
+) -> None:
+    record = await store.create("match_analysis", owner, now=NOW)
+    clients = [create_redis() for _ in range(5)]
+    try:
+        claims = await asyncio.gather(
+            *(
+                JobStore(client, ttl_seconds=TTL).claim(record.id, stage=None, now=NOW + 1)
+                for client in clients
+            )
+        )
+    finally:
+        for client in clients:
+            await client.aclose()
+
+    assert sum(claim is not None for claim in claims) == 1
+
+
+async def test_a_running_job_cannot_be_claimed_again(store: JobStore, owner: str) -> None:
+    record = await store.create("match_analysis", owner, now=NOW)
+    first = await store.claim(record.id, stage="reading_cv", now=NOW + 1)
+
+    assert await store.claim(record.id, stage=None, now=NOW + 2) is None
+    assert await store.load(record.id) == first
+
+
+async def test_a_paused_job_cannot_be_claimed_until_it_is_resumed(
+    store: JobStore, owner: str
+) -> None:
+    job_id = await _paused(store, owner)
+
+    assert await store.claim(job_id, stage=None, now=NOW + 3) is None
+    await store.resume(job_id, owner, resume="retry", now=NOW + 4)
+    claimed = await store.claim(job_id, stage=None, now=NOW + 5)
+    assert claimed is not None and claimed.status is JobStatus.RUNNING
+
+
+async def test_set_stage_updates_a_claimed_job(store: JobStore, owner: str) -> None:
+    record = await store.create("match_analysis", owner, now=NOW)
+    await store.claim(record.id, stage=None, now=NOW + 1)
+
+    staged = await store.set_stage(record.id, stage="assessing", now=NOW + 2)
+
+    assert staged is not None
+    assert (staged.status, staged.stage, staged.updated_at) == (
+        JobStatus.RUNNING,
+        "assessing",
+        NOW + 2,
+    )
+
+
+async def test_set_stage_never_starts_an_unclaimed_job(store: JobStore, owner: str) -> None:
+    record = await store.create("match_analysis", owner, now=NOW)
+
+    with pytest.raises(JobStateError):
+        await store.set_stage(record.id, stage="assessing", now=NOW + 1)
+    assert await store.load(record.id) == record
 
 
 async def test_a_blob_round_trips_binary_and_is_gone_after_take(
@@ -180,7 +241,7 @@ async def test_a_running_job_past_the_hard_limit_is_shown_as_timed_out(
     store: JobStore, owner: str
 ) -> None:
     record = await store.create("job_intake", owner, now=NOW)
-    running = await store.mark_running(record.id, stage="extracting", now=NOW)
+    running = await store.claim(record.id, stage="extracting", now=NOW)
     assert running is not None
 
     fresh = effective_state(
@@ -285,7 +346,7 @@ async def test_replacing_succeeds_only_while_the_named_holder_still_holds(
 
 async def _paused(store: JobStore, owner: str) -> str:
     record = await store.create("match_analysis", owner, now=NOW)
-    await store.mark_running(record.id, stage="reading_cv", now=NOW + 1)
+    await store.claim(record.id, stage="reading_cv", now=NOW + 1)
     await store.mark_needs_decision(
         record.id,
         failed_source="cv",
@@ -438,7 +499,7 @@ async def test_a_resumed_job_is_not_stale_because_it_was_created_long_ago(
 async def test_the_first_stage_can_be_left_unset(store: JobStore, owner: str) -> None:
     record = await store.create("match_analysis", owner, now=NOW)
 
-    running = await store.mark_running(record.id, stage=None, now=NOW + 1)
+    running = await store.claim(record.id, stage=None, now=NOW + 1)
 
     assert running is not None
     assert running.stage is None

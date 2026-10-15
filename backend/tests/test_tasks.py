@@ -126,6 +126,93 @@ async def test_a_redelivered_task_for_a_finished_job_is_a_no_op(store: JobStore)
     assert finished.result == {"first": True}
 
 
+class _StoreThatLoadsTogether(JobStore):
+    def __init__(self, redis: Redis, barrier: asyncio.Barrier) -> None:
+        super().__init__(redis, ttl_seconds=600)
+        self._barrier = barrier
+
+    async def load(self, job_id: str) -> JobRecord | None:
+        record = await super().load(job_id)
+        await self._barrier.wait()
+        return record
+
+
+async def test_two_simultaneous_deliveries_run_the_handler_exactly_once(
+    store: JobStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = await store.create("match_analysis", "owner", now=NOW)
+    barrier = asyncio.Barrier(2)
+    clients = [create_redis(), create_redis()]
+    runs = 0
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        nonlocal runs
+        runs += 1
+        await asyncio.sleep(0.05)
+        return {"report": "first"}
+
+    try:
+        with caplog.at_level(logging.INFO, logger="app.workers.tasks"):
+            await asyncio.gather(
+                *(
+                    execute_job(
+                        _StoreThatLoadsTogether(client, barrier), record.id, handler, stage=None
+                    )
+                    for client in clients
+                )
+            )
+    finally:
+        for client in clients:
+            await client.aclose()
+
+    done = await store.load(record.id)
+    assert runs == 1
+    assert done is not None
+    assert (done.status, done.result) == (JobStatus.DONE, {"report": "first"})
+    assert f"job skipped job_id={record.id} reason=not_claimed" in caplog.text
+
+
+async def test_the_claimant_can_move_its_job_through_stages(store: JobStore) -> None:
+    record = await store.create("match_analysis", "owner", now=NOW)
+    seen: list[str | None] = []
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        for stage in ("reading_cv", "assessing"):
+            staged = await store.set_stage(current.id, stage=stage, now=time.time())
+            assert staged is not None
+            seen.append(staged.stage)
+        return {}
+
+    await execute_job(store, record.id, handler, stage=None)
+
+    done = await store.load(record.id)
+    assert seen == ["reading_cv", "assessing"]
+    assert done is not None
+    assert (done.status, done.stage) == (JobStatus.DONE, "assessing")
+
+
+@pytest.mark.parametrize("final", ["done", "failed", "needs_decision"])
+async def test_a_job_that_left_the_queue_is_never_run_again(store: JobStore, final: str) -> None:
+    record = await store.create("match_analysis", "owner", now=NOW)
+    if final == "done":
+        await store.mark_done(record.id, result={}, now=NOW + 1)
+    elif final == "failed":
+        await store.mark_failed(record.id, error_code="ai_unavailable", now=NOW + 1)
+    else:
+        await store.claim(record.id, stage=None, now=NOW + 1)
+        await store.mark_needs_decision(
+            record.id, failed_source="cv", error_code="x", reset_at=None, now=NOW + 2
+        )
+    before = await store.load(record.id)
+
+    async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
+        raise AssertionError("a job that left the queue must not run again")
+
+    await execute_job(store, record.id, handler, stage=None)
+
+    assert await store.load(record.id) == before
+
+
 async def test_a_job_that_expires_mid_run_is_not_recreated(
     store: JobStore, redis_client: Redis
 ) -> None:
@@ -273,7 +360,7 @@ async def test_a_job_found_running_was_orphaned_by_a_crash_and_is_not_rerun(
     store: JobStore,
 ) -> None:
     record = await store.create("ping", "owner", now=NOW)
-    await store.mark_running(record.id, stage="parsing", now=NOW + 1)
+    await store.claim(record.id, stage="parsing", now=NOW + 1)
 
     async def handler(store: JobStore, current: JobRecord) -> dict[str, Any]:
         raise AssertionError("an input that crashed the worker must not run again")
@@ -482,9 +569,13 @@ _STAGES: list[str | None] = []
 
 
 class _StageRecordingStore(JobStore):
-    async def mark_running(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
+    async def claim(self, job_id: str, *, stage: str | None, now: float) -> JobRecord | None:
         _STAGES.append(stage)
-        return await super().mark_running(job_id, stage=stage, now=now)
+        return await super().claim(job_id, stage=stage, now=now)
+
+    async def set_stage(self, job_id: str, *, stage: str, now: float) -> JobRecord | None:
+        _STAGES.append(stage)
+        return await super().set_stage(job_id, stage=stage, now=now)
 
 
 class _PlainTextFetcher:

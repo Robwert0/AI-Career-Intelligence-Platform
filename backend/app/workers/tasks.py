@@ -138,8 +138,10 @@ async def execute_job(
         logger.warning("job failed job_id=%s error_code=queue_unavailable", job_id)
         return
 
-    running = await store.mark_running(job_id, stage=stage, now=time.time())
+    running = await store.claim(job_id, stage=stage, now=time.time())
     if running is None:
+        # A duplicate delivery read the same queued record and lost the claim to it.
+        logger.info("job skipped job_id=%s reason=not_claimed", job_id)
         return
 
     started = time.monotonic()
@@ -204,7 +206,7 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
     async def on_stage(stage: str) -> None:
         nonlocal shown
         if stage != shown:
-            await store.mark_running(record.id, stage=stage, now=time.time())
+            await store.set_stage(record.id, stage=stage, now=time.time())
             shown = stage
 
     # Pasted text has nothing to read, so it must never be shown as "reading".
@@ -300,7 +302,7 @@ async def _run_analysis(store: JobStore, record: JobRecord) -> dict[str, Any]:
     )
 
     async def on_stage(stage: str) -> None:
-        await store.mark_running(record.id, stage=stage, now=time.time())
+        await store.set_stage(record.id, stage=stage, now=time.time())
 
     async def take_cv(name: str) -> bytes | None:
         return await store.take_blob(record.id, name)
