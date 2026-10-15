@@ -26,22 +26,20 @@ class Decision:
     allowed: bool
     remaining: float
     retry_after_seconds: float
-    # Set on the first peek refusal per REFUSAL_NOTICE_SECONDS, so a flood logs once, not per hit.
+    # Set on the first refusal per REFUSAL_NOTICE_SECONDS, so a flood logs once, not per hit.
     first_refusal: bool = False
 
 
 class Limiter(Protocol):
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
-    async def peek(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
-
-    async def charge(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
+    async def refund(self, policy: Policy, identity: str, *, now: float) -> Decision: ...
 
 
 REFUSAL_NOTICE_SECONDS = 60
 
-# Modes: 'take' spends a token only if one exists; 'peek' never spends; 'charge' always spends,
-# so the bucket may go negative and later peeks refuse until the debt refills.
+# Modes: 'take' spends a token only if one exists; 'refund' returns one, capped at capacity, and
+# is a no-op on a missing key because a missing bucket is already full.
 TOKEN_BUCKET_LUA = """
 local key      = KEYS[1]
 local capacity = tonumber(ARGV[1])
@@ -55,6 +53,9 @@ local tokens = tonumber(bucket[1])
 local ts     = tonumber(bucket[2])
 
 if tokens == nil then
+  if mode == 'refund' then
+    return { 1, tostring(capacity), '0', 0 }
+  end
   tokens = capacity
   ts = now
 end
@@ -63,37 +64,29 @@ end
 local elapsed = math.max(0, now - ts)
 tokens = math.min(capacity, tokens + elapsed * refill)
 
-if mode == 'peek' then
-  if tokens >= 1 then
-    return { 1, tostring(tokens), '0', 0 }
-  end
-  -- A refusal means the bucket was spent, so the key exists and HSET keeps its TTL.
-  local first = 0
+local allowed, retry, first = 1, 0.0, 0
+if mode == 'refund' then
+  tokens = math.min(capacity, tokens + 1)
+elseif tokens >= 1 then
+  tokens = tokens - 1
+else
+  allowed = 0
+  retry = (1 - tokens) / refill
   if now >= (tonumber(bucket[3]) or 0) then
     redis.call('HSET', key, 'noticed_until', now + notice)
     first = 1
   end
-  return { 0, tostring(tokens), tostring((1 - tokens) / refill), first }
-end
-
-local allowed, retry = 0, 0.0
-if mode == 'charge' or tokens >= 1 then
-  tokens  = tokens - 1
-  allowed = 1
-else
-  retry = (1 - tokens) / refill
 end
 
 redis.call('HSET', key, 'tokens', tokens, 'ts', now)
 -- Must outlive a full refill: expiring early resets the bucket to capacity, i.e. free budget.
-local deficit = capacity - math.min(tokens, 0)
-redis.call('PEXPIRE', key, math.ceil((deficit / refill) * 1000) + 1000)
+redis.call('PEXPIRE', key, math.ceil((capacity / refill) * 1000) + 1000)
 
 -- Floats must leave as strings: Redis truncates Lua numbers to integers.
-return { allowed, tostring(tokens), tostring(retry), 0 }
+return { allowed, tostring(tokens), tostring(retry), first }
 """
 
-_Mode = Literal["take", "peek", "charge"]
+_Mode = Literal["take", "refund"]
 
 
 class TokenBucketLimiter:
@@ -103,11 +96,8 @@ class TokenBucketLimiter:
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
         return await self._run(policy, identity, now, "take")
 
-    async def peek(self, policy: Policy, identity: str, *, now: float) -> Decision:
-        return await self._run(policy, identity, now, "peek")
-
-    async def charge(self, policy: Policy, identity: str, *, now: float) -> Decision:
-        return await self._run(policy, identity, now, "charge")
+    async def refund(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        return await self._run(policy, identity, now, "refund")
 
     async def _run(self, policy: Policy, identity: str, now: float, mode: _Mode) -> Decision:
         key = f"rl:{policy.name}:{identity}"

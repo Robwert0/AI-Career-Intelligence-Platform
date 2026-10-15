@@ -196,23 +196,36 @@ async def enforce_rate_limit(policy: Policy, identity: str, limiter: Limiter) ->
         raise _too_many_requests(decision)
 
 
-async def require_headroom(policy: Policy, identity: str, limiter: Limiter) -> None:
-    decision = await _decide(partial(limiter.peek, now=time.time()), policy, identity)
-    if decision.allowed:
-        return
-    if decision.first_refusal:
-        logger.warning(
-            "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
-            policy.name,
-            math.ceil(decision.retry_after_seconds),
-        )
-    else:
-        logger.debug("rate limit ceiling refusal policy=%s", policy.name)
-    raise _too_many_requests(decision)
+@asynccontextmanager
+async def reserved_rate_limit(
+    policy: Policy, identity: str, limiter: Limiter
+) -> AsyncIterator[None]:
+    # The atomic take before the work is what holds the cap under a concurrent burst; checking
+    # first and spending after lets the whole burst through.
+    decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
+    if not decision.allowed:
+        if decision.first_refusal:
+            logger.warning(
+                "rate limit ceiling reached, refusing requests policy=%s retry_after_s=%d",
+                policy.name,
+                math.ceil(decision.retry_after_seconds),
+            )
+        else:
+            logger.debug("rate limit ceiling refusal policy=%s", policy.name)
+        raise _too_many_requests(decision)
+    try:
+        yield
+    except BaseException:
+        await _refund(policy, identity, limiter)
+        raise
 
 
-async def charge_rate_limit(policy: Policy, identity: str, limiter: Limiter) -> None:
-    await _decide(partial(limiter.charge, now=time.time()), policy, identity)
+async def _refund(policy: Policy, identity: str, limiter: Limiter) -> None:
+    # Swallowed so the caller's original error surfaces; a lost token is the safe direction.
+    try:
+        await limiter.refund(policy, identity, now=time.time())
+    except RedisError:
+        logger.exception("rate limit refund failed, token stays spent policy=%s", policy.name)
 
 
 def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:

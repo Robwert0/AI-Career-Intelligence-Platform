@@ -6,12 +6,11 @@ from app.core import policies
 from app.core.config import settings
 from app.core.rate_limiter import Limiter
 from app.deps import (
-    charge_rate_limit,
     get_auth_service,
     get_global_identity,
     get_limiter,
     rate_limit,
-    require_headroom,
+    reserved_rate_limit,
 )
 from app.schemas import LoginRequest, TokenResponse, UserCreate, UserRead
 from app.services import AuthService
@@ -72,7 +71,11 @@ def _unauthenticated() -> HTTPException:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=UserRead,
-    dependencies=[Depends(rate_limit(policies.REGISTER))],
+    # Per-IP first, so an IP that is already refused does not spend the global attempts.
+    dependencies=[
+        Depends(rate_limit(policies.REGISTER)),
+        Depends(rate_limit(policies.REGISTER_ATTEMPTS_GLOBAL)),
+    ],
 )
 async def register(
     data: UserCreate,
@@ -80,20 +83,16 @@ async def register(
     limiter: Annotated[Limiter, Depends(get_limiter)],
     global_identity: Annotated[str, Depends(get_global_identity)],
 ) -> UserRead:
-    # The global ceiling is charged per created account, not per attempt: otherwise a few proxy
-    # IPs sending 422s or 409s could keep sign-up shut without creating anything.
-    await require_headroom(policies.REGISTER_GLOBAL, global_identity, limiter)
-    try:
-        user = await auth_service.register(data)
-    except EmailAlreadyRegisteredError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
-        ) from None
-    # Unconditional, so concurrent winners of the last token push the bucket into debt and the
-    # next peek refuses. A Redis error here is a 503 that rolls the new account back.
-    await charge_rate_limit(policies.REGISTER_GLOBAL, global_identity, limiter)
-
-    return UserRead.model_validate(user)
+    # Taken in the body, after validation, and refunded on any failure (409 included), so only
+    # created accounts spend the ceiling and 422s never reach it.
+    async with reserved_rate_limit(policies.REGISTER_GLOBAL, global_identity, limiter):
+        try:
+            user = await auth_service.register(data)
+        except EmailAlreadyRegisteredError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
+            ) from None
+        return UserRead.model_validate(user)
 
 
 @router.post(

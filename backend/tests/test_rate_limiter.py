@@ -144,59 +144,77 @@ async def test_fifty_concurrent_requests_on_capacity_ten_allow_exactly_ten(
     assert sum(d.allowed for d in decisions) == 10
 
 
-async def test_a_peek_answers_without_spending(limiter: TokenBucketLimiter, identity: str) -> None:
-    spec = policy(capacity=2)
-    peeks = [(await limiter.peek(spec, identity, now=NOW)).allowed for _ in range(5)]
-    allowed = [(await limiter.check(spec, identity, now=NOW)).allowed for _ in range(3)]
-    assert peeks == [True] * 5
-    assert allowed == [True, True, False]
+async def test_a_refund_returns_a_spent_token(limiter: TokenBucketLimiter, identity: str) -> None:
+    spec = policy(capacity=2, refill=1 / 3600)
+    for _ in range(2):
+        await limiter.check(spec, identity, now=NOW)
+    await limiter.refund(spec, identity, now=NOW)
+    allowed = [(await limiter.check(spec, identity, now=NOW)).allowed for _ in range(2)]
+    assert allowed == [True, False]
 
 
-async def test_a_peek_refuses_an_empty_bucket_with_a_retry_after(
-    limiter: TokenBucketLimiter, identity: str
-) -> None:
-    spec = policy(capacity=1, refill=0.5)
-    await limiter.check(spec, identity, now=NOW)
-    denied = await limiter.peek(spec, identity, now=NOW)
-    assert denied.allowed is False
-    assert denied.retry_after_seconds == pytest.approx(2.0)
-
-
-async def test_a_charge_spends_even_an_empty_bucket_and_peeks_wait_out_the_debt(
-    limiter: TokenBucketLimiter, identity: str
-) -> None:
-    spec = policy(capacity=1, refill=1.0)
-    charges = [await limiter.charge(spec, identity, now=NOW) for _ in range(3)]
-    assert [c.allowed for c in charges] == [True] * 3
-    assert charges[-1].remaining == pytest.approx(-2.0)
-    assert (await limiter.peek(spec, identity, now=NOW + 2.0)).allowed is False
-    assert (await limiter.peek(spec, identity, now=NOW + 3.0)).allowed is True
-
-
-async def test_concurrent_charges_are_all_counted(
+async def test_a_refund_never_lifts_a_bucket_past_capacity(
     limiter: TokenBucketLimiter, identity: str
 ) -> None:
     spec = policy(capacity=2, refill=1 / 3600)
-    await asyncio.gather(*(limiter.charge(spec, identity, now=NOW) for _ in range(5)))
-    assert (await limiter.peek(spec, identity, now=NOW)).remaining == pytest.approx(-3.0)
+    await limiter.check(spec, identity, now=NOW)
+    refunds = [await limiter.refund(spec, identity, now=NOW) for _ in range(3)]
+    assert refunds[-1].remaining == pytest.approx(2.0)
+    allowed = [(await limiter.check(spec, identity, now=NOW)).allowed for _ in range(3)]
+    assert allowed == [True, True, False]
 
 
-async def test_the_ttl_outlives_repaying_a_debt(
+async def test_a_refund_applies_the_refill_first(
+    limiter: TokenBucketLimiter, identity: str
+) -> None:
+    spec = policy(capacity=3, refill=1.0)
+    for _ in range(3):
+        await limiter.check(spec, identity, now=NOW)
+    refunded = await limiter.refund(spec, identity, now=NOW + 0.5)
+    assert refunded.remaining == pytest.approx(1.5)
+
+
+async def test_a_refund_on_a_missing_bucket_is_a_no_op(
     limiter: TokenBucketLimiter, redis_client: Redis, identity: str
 ) -> None:
-    spec = policy(capacity=2, refill=1 / 60)
-    for _ in range(5):
-        await limiter.charge(spec, identity, now=NOW)
+    spec = policy(capacity=2)
+    await limiter.refund(spec, identity, now=NOW)
+    assert await redis_client.exists(f"rl:{spec.name}:{identity}") == 0
+    allowed = [(await limiter.check(spec, identity, now=NOW)).allowed for _ in range(3)]
+    assert allowed == [True, True, False]
+
+
+async def test_a_refund_keeps_the_ttl_outliving_a_full_refill(
+    limiter: TokenBucketLimiter, redis_client: Redis, identity: str
+) -> None:
+    spec = policy(capacity=10, refill=1 / 60)
+    await limiter.check(spec, identity, now=NOW)
+    await limiter.refund(spec, identity, now=NOW)
     ttl_ms = await redis_client.pttl(f"rl:{spec.name}:{identity}")
-    assert ttl_ms >= (5 / spec.refill_per_second) * 1000
+    assert ttl_ms >= (spec.capacity / spec.refill_per_second) * 1000
+
+
+async def test_concurrent_takes_with_refunds_never_exceed_capacity(
+    limiter: TokenBucketLimiter, identity: str
+) -> None:
+    spec = policy(capacity=3, refill=1 / 3600)
+
+    async def attempt(fails: bool) -> bool:
+        taken = (await limiter.check(spec, identity, now=NOW)).allowed
+        if taken and fails:
+            await limiter.refund(spec, identity, now=NOW)
+        return taken and not fails
+
+    kept = await asyncio.gather(*(attempt(fails=i % 2 == 0) for i in range(40)))
+    assert sum(kept) <= spec.capacity
 
 
 async def test_only_the_first_refusal_in_a_notice_window_is_flagged(
     limiter: TokenBucketLimiter, identity: str
 ) -> None:
     spec = policy(capacity=1, refill=1 / 86400)
-    await limiter.check(spec, identity, now=NOW)
-    flags = [(await limiter.peek(spec, identity, now=NOW + t)).first_refusal for t in (0, 1, 2)]
-    later = await limiter.peek(spec, identity, now=NOW + REFUSAL_NOTICE_SECONDS)
+    assert (await limiter.check(spec, identity, now=NOW)).first_refusal is False
+    flags = [(await limiter.check(spec, identity, now=NOW + t)).first_refusal for t in (0, 1, 2)]
+    later = await limiter.check(spec, identity, now=NOW + REFUSAL_NOTICE_SECONDS)
     assert flags == [True, False, False]
     assert later.first_refusal is True
