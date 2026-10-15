@@ -1,3 +1,10 @@
+# Our own images run as an unprivileged user and need no Linux capabilities at all.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
 services:
   database:
     image: pgvector/pgvector:pg18
@@ -5,8 +12,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Loopback only: a published port bypasses host firewalls such as UFW. Docker Desktop still
+    # forwards 127.0.0.1 ports into WSL2, so host-side tests reach them as before.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -20,7 +29,7 @@ services:
     # No RDB/AOF: job records and CV bytes must never be written to disk.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 1s
@@ -30,12 +39,13 @@ services:
   # Everything below runs only with a bare `docker compose up`; `up -d database redis` ignores it.
 
   migrate:
+    <<: *hardening
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
     environment: &backend-env
       # The root .env is written for host processes (localhost URLs); inside the network the
-      # services are reached by name. The password goes into the URL unencoded: keep it alphanumeric.
+      # services are reached by name. POSTGRES_PASSWORD goes in unencoded (see .env.example).
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
@@ -48,6 +58,7 @@ services:
     restart: "no"
 
   api:
+    <<: *hardening
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -76,6 +87,7 @@ services:
     restart: unless-stopped
 
   worker:
+    <<: *hardening
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -97,8 +109,10 @@ services:
     restart: unless-stopped
 
   # Exactly one beat process: none means the retention purge never runs, two run it twice.
-  # Never scale this service.
+  # The fixed container_name makes `--scale beat=2` a no-op: compose warns and keeps one.
   beat:
+    <<: *hardening
+    container_name: ${COMPOSE_PROJECT_NAME}-beat
     image: career-intel-backend
     build: ./backend
     env_file: ${APP_ENV_FILE:-.env}
@@ -114,6 +128,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    <<: *hardening
     image: career-intel-frontend
     build:
       context: ./frontend
@@ -144,6 +159,11 @@ services:
     restart: unless-stopped
 
   caddy:
+    <<: *hardening
+    # The image grants /usr/bin/caddy cap_net_bind_service as a file capability; with it missing
+    # from the bounding set the kernel refuses to exec the binary at all.
+    cap_add:
+      - NET_BIND_SERVICE
     image: caddy:2.11.7-alpine
     environment:
       DOMAIN: ${DOMAIN:-localhost}
@@ -168,8 +188,9 @@ services:
 
 # Three networks so each hop sees only its neighbour: Caddy reaches only the frontend, and the
 # frontend reaches only the API. api_proxy has a fixed subnet because the API trusts
-# X-Forwarded-For from one address, the frontend's (FRONTEND_PROXY_IP must sit inside
-# API_PROXY_SUBNET; compose refuses to start otherwise). The fixed address means one frontend
+# X-Forwarded-For from one address, the frontend's. FRONTEND_PROXY_IP must sit inside
+# API_PROXY_SUBNET: `config` does not check it, Docker only rejects it when it creates the frontend
+# container, after the services before it have started. The fixed address means one frontend
 # replica.
 networks:
   default:

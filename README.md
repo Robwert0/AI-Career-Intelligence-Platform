@@ -181,7 +181,7 @@ CV_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
 ```
 
 If port 5432 is already in use on your machine, change `POSTGRES_PORT` and the port in
-`DATABASE_URL` together. Redis is always published on 6379, so stop any local Redis already using it.
+`DATABASE_URL` together. Redis is always published on 127.0.0.1:6379, so stop any local Redis already using it.
 
 ### 3. Start Postgres and Redis
 
@@ -316,9 +316,13 @@ internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
 `https://localhost:8443`). Notes:
 - The containers override the `localhost` URLs in `.env` (`DATABASE_URL`, `REDIS_URL`,
   `CELERY_BROKER_URL`) with service names, so the same `.env` still serves the local flow.
-- Generation reaches Ollama on the host at `http://host.docker.internal:11434`; override it with
-  `DOCKER_OLLAMA_BASE_URL` in `.env`. On a Linux host Ollama must listen on the Docker bridge
-  (e.g. `OLLAMA_HOST=172.17.0.1`), never on a public interface.
+- Postgres and Redis are published on 127.0.0.1 only (Docker Desktop still forwards those ports
+  into WSL2, so host-side tests and uvicorn reach them unchanged).
+- Local development only: generation reaches Ollama on your machine at
+  `http://host.docker.internal:11434` (Docker Desktop resolves it); override it with
+  `DOCKER_OLLAMA_BASE_URL` in `.env`. Ollama has no authentication, so whoever reaches its port can
+  run, pull and delete models: keep it on 127.0.0.1 and never expose it on a server. Production does
+  not run Ollama at all (see below).
 - The embedding model is baked into the image at the revision pinned in `app/core/config.py` and
   the containers run offline (`HF_HUB_OFFLINE=1`): changing `EMBEDDING_MODEL[_REVISION]` means
   rebuilding the backend image.
@@ -339,18 +343,37 @@ internal CA, so the browser warns (or use `curl -k`); add `https://localhost` to
    userland proxy and all appear as one address, sharing one rate-limit bucket.
 2. Open **80/tcp and 443/tcp** (and 443/udp for HTTP/3) in the firewall. Port 80 must stay open:
    Let's Encrypt validates through it, and Caddy redirects it to HTTPS.
-3. In `.env`: `DOMAIN=cv.example.com` and `CORS_ALLOWED_ORIGINS=https://cv.example.com` (the
-   API refuses state-changing requests from any other origin, so a mismatch fails every login).
-4. Start with the override. Only Caddy is published; the frontend, API, Postgres and Redis are
-   reachable on the compose networks alone. Caddy fetches the certificate on the first request and
-   keeps it in the `caddy_data` volume (don't `down -v` in production: re-issuing is rate-limited).
+3. Write a fresh `.env` on the server; never copy your development one. Checklist:
+   - `COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml`. Compose reads this from `.env`, so
+     every bare `docker compose …` (including the one-off `run` commands above) gets the
+     production override. Without it a plain `docker compose up` would start the development
+     setup. An explicit `-f` on the command line replaces it, so don't pass one.
+   - `ENV=production`.
+   - A new `SECRET_KEY` (`openssl rand -hex 32`) and a new `POSTGRES_PASSWORD`, letters and digits
+     only (`openssl rand -hex 16`), since it goes into `DATABASE_URL` unencoded.
+   - `DOMAIN=cv.example.com` and `CORS_ALLOWED_ORIGINS=https://cv.example.com`, exactly that one
+     origin (the API refuses state-changing requests from any other, so a mismatch fails every
+     login).
+   - Generation through OpenAI: `GENERATION_PROVIDER=openai` with `OPENAI_API_KEY` and
+     `OPENAI_CHAT_MODEL`. The server does not run Ollama: it has no authentication, and a 4 GB
+     VPS cannot hold the model anyway.
+   - `LLM_DAILY_BUDGET_USD` set low (e.g. `0.5`), and on the OpenAI side prepaid credits with
+     auto-recharge off, so a bug or an abuser can spend at most what is on the account.
+
+   The OpenAI and budget settings come from the OpenAI generator and spend-cap branches; deploy only
+   once those are merged.
+4. Start it. Only Caddy is published; the frontend, API, Postgres and Redis are reachable on the
+   compose networks alone (a published Docker port bypasses UFW, so nothing else is published).
+   Caddy fetches the certificate on the first request and keeps it in the `caddy_data` volume
+   (don't `down -v` in production: re-issuing is rate-limited).
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose config | grep maxmemory    # prints a line only when the override is active
+docker compose up -d --build
 ```
 
-The override also turns on HSTS for one year (`HSTS_MAX_AGE`); there is no ACME email, which
-Let's Encrypt does not require.
+The override also fixes HSTS at one year, whatever `.env` says, caps Redis at 256 MB, and refuses
+to start without `DOMAIN`. There is no ACME email, which Let's Encrypt does not require.
 
 **How the API sees the real client IP.** Per-IP rate limits key on `request.client.host`, so it has
 to be the visitor, not a proxy, and not something the visitor can choose:
