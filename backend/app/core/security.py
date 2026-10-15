@@ -3,6 +3,7 @@ import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import bcrypt
 import jwt
@@ -51,14 +52,26 @@ def decode_token(token: str, expected_type: str) -> dict[str, Any]:
     return payload
 
 
-def login_account_key(email: str) -> str:
-    # Keyed, so neither Redis nor a leaked dump maps a bucket back to an email. Casefolded so
-    # case variants of one address cannot each claim a fresh bucket.
-    message = b"login-account:" + email.casefold().encode("utf-8")
-    return hmac.new(settings.secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()
-
-
+LOGIN_DEVICE_COOKIE = "__Host-login_device"
 _LOGIN_DEVICE = "login_device"
+
+
+def _subkey(purpose: bytes) -> bytes:
+    # One secret, one subkey per use: a value minted for one purpose can never verify as another.
+    return hmac.new(settings.secret_key.encode("utf-8"), purpose, hashlib.sha256).digest()
+
+
+def _login_key(message: bytes) -> str:
+    # Keyed, so neither Redis nor a leaked dump maps a bucket back to an account or an email.
+    return hmac.new(_subkey(b"login-account-key"), message, hashlib.sha256).hexdigest()
+
+
+def login_account_key(user_id: UUID) -> str:
+    return _login_key(b"user:" + str(user_id).encode("ascii"))
+
+
+def unregistered_login_key(canonical_email: str) -> str:
+    return _login_key(b"email:" + canonical_email.encode("utf-8"))
 
 
 def create_login_device_token(account_key: str) -> str:
@@ -66,19 +79,28 @@ def create_login_device_token(account_key: str) -> str:
     claims = {
         "sub": account_key,
         "type": _LOGIN_DEVICE,
+        "aud": _LOGIN_DEVICE,
         "jti": secrets.token_urlsafe(16),
         "iat": now,
         "exp": now + timedelta(days=settings.login_device_expire_days),
     }
-    return jwt.encode(claims, settings.secret_key, algorithm="HS256")
+    return jwt.encode(claims, _subkey(b"jwt-login-device"), algorithm="HS256")
 
 
 def login_device_id(token: str, account_key: str) -> str | None:
     try:
-        payload = decode_token(token, _LOGIN_DEVICE)
+        payload = jwt.decode(
+            token,
+            _subkey(b"jwt-login-device"),
+            algorithms=["HS256"],
+            audience=_LOGIN_DEVICE,
+            options={"require": ["sub", "type", "aud", "jti", "iat", "exp"]},
+        )
     except jwt.InvalidTokenError:
         return None
-    device_id, subject = payload.get("jti"), payload["sub"]
+    device_id, subject = payload["jti"], payload["sub"]
+    if payload["type"] != _LOGIN_DEVICE:
+        return None
     if not isinstance(device_id, str) or not isinstance(subject, str):
         return None
     return device_id if hmac.compare_digest(subject, account_key) else None

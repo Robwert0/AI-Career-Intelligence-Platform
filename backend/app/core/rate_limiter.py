@@ -5,7 +5,8 @@ from typing import Literal, Protocol
 
 from redis.asyncio import Redis
 
-# ACCOUNT policies key on a credential-derived id from the body, so a route charges them itself.
+# ACCOUNT policies key on the account a login body resolves to, so deps.login_failure_limit charges
+# them; rate_limit() has no request-only identity for them.
 Scope = StrEnum("Scope", ["IP", "IP_PREFIX", "USER", "ACCOUNT", "GLOBAL"])
 
 
@@ -115,6 +116,10 @@ return { allowed, tostring(tokens), tostring(retry), first }
 _Mode = Literal["take", "refund"]
 
 
+def bucket_key(policy: Policy, identity: str) -> str:
+    return f"rl:{policy.name}:{identity}"
+
+
 class TokenBucketLimiter:
     def __init__(self, redis: Redis) -> None:
         self._script = redis.register_script(TOKEN_BUCKET_LUA)
@@ -126,7 +131,7 @@ class TokenBucketLimiter:
         return await self._run(policy, identity, now, "refund")
 
     async def _run(self, policy: Policy, identity: str, now: float, mode: _Mode) -> Decision:
-        key = f"rl:{policy.name}:{identity}"
+        key = bucket_key(policy, identity)
         allowed, remaining, retry_after, first_refusal = await self._script(
             keys=[key],
             args=[policy.capacity, policy.refill_per_second, now, mode, REFUSAL_NOTICE_SECONDS],

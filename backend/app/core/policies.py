@@ -9,8 +9,8 @@ LOGIN_PREFIX = Policy("login_prefix", capacity=25, refill_per_second=5 / 60, sco
 REGISTER_PREFIX = Policy(
     "register_prefix", capacity=15, refill_per_second=15 / 3600, scope=Scope.IP_PREFIX
 )
-# Failed sign-ins only (a success refunds), across every IP, so a distributed guesser gets at most
-# 10 + 240 a day per account. A browser that already signed in to the account spends its own
+# Failed sign-ins only (a success refunds), across every IP: 10 + 240 a day per account, plus the
+# same again per browser holding that account's device cookie. Such a browser spends its own
 # LOGIN_DEVICE bucket instead, so flooding LOGIN_ACCOUNT cannot lock the owner out of it.
 LOGIN_ACCOUNT = Policy(
     "login_account", capacity=10, refill_per_second=10 / 3600, scope=Scope.ACCOUNT

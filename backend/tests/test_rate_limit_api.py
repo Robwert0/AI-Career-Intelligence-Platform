@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import policies
 from app.core.rate_limiter import Policy
 from app.core.redis import create_redis
-from app.core.security import login_account_key
+from app.core.security import LOGIN_DEVICE_COOKIE, login_account_key, unregistered_login_key
 from app.deps import get_auth_service, get_global_identity, get_limiter
 from app.main import app
 from app.repositories import UserRepository
@@ -108,8 +108,14 @@ def test_every_route_that_does_work_carries_a_rate_limit() -> None:
             if not isinstance(route, APIRoute):
                 continue
             path = f"{context.prefix}{route.path}"
-            attached = {getattr(d.dependency, "__name__", "") for d in route.dependencies}
-            limited = attached & {"by_ip", "by_ip_prefix", "by_user", "by_global"}
+            attached = {getattr(d.call, "__name__", "") for d in route.dependant.dependencies}
+            limited = attached & {
+                "by_ip",
+                "by_ip_prefix",
+                "by_user",
+                "by_global",
+                "login_failure_limit",
+            }
             for method in route.methods or set():
                 if not limited and (method, path) not in exempt:
                     unlimited.append((method, path))
@@ -535,17 +541,19 @@ def _unique_email() -> str:
     return f"{uuid.uuid4().hex}@test.dev"
 
 
-async def _register(client: httpx.AsyncClient, email: str) -> None:
+async def _register(client: httpx.AsyncClient, email: str) -> str:
     response = await client.post("/auth/register", json={"email": email, "password": PASSWORD})
     assert response.status_code == 201
+    return login_account_key(uuid.UUID(response.json()["id"]))
 
 
-async def _fail_login_from_many_ips(email: str, attempts: int) -> list[int]:
+async def _fail_login_from_many_ips(email: str, attempts: int, *variants: str) -> list[int]:
+    spellings = [email, *variants]
     block = _ip_block()
     statuses: list[int] = []
     for octet in range(attempts):
         async with _client_from(block, octet) as c:
-            body = {"email": email, "password": WRONG_PASSWORD}
+            body = {"email": spellings[octet % len(spellings)], "password": WRONG_PASSWORD}
             statuses.append((await c.post("/auth/login", json=body)).status_code)
     return statuses
 
@@ -599,6 +607,80 @@ async def test_unknown_and_registered_emails_take_the_same_limiter_path(
     assert allow_all_limiter.refunded == []
 
 
+def _email_with_an_i() -> str:
+    return f"mira-{uuid.uuid4().hex}@test.dev"
+
+
+def _dotted_capital_i(email: str) -> str:
+    # Python casefolds İ to "i" + U+0307, but Postgres lower() gives a plain "i", so the CITEXT
+    # column matches this spelling to the same row as the plain one.
+    local, domain = email.split("@")
+    return f"{local.replace('i', 'İ')}@{domain}"
+
+
+async def test_every_spelling_of_one_account_charges_its_one_bucket(
+    client: httpx.AsyncClient, allow_all_limiter: AllowAllLimiter
+) -> None:
+    email = _email_with_an_i()
+    key = await _register(client, email)
+    variant = _dotted_capital_i(email)
+    allow_all_limiter.calls.clear()
+
+    for spelling in (email, variant):
+        await client.post("/auth/login", json={"email": spelling, "password": WRONG_PASSWORD})
+    signed_in = await client.post("/auth/login", json={"email": variant, "password": PASSWORD})
+
+    charged = [identity for name, identity in allow_all_limiter.calls if name == "login_account"]
+    assert charged == [key, key, key]
+    assert signed_in.status_code == 200
+
+
+async def test_a_device_cookie_from_one_spelling_counts_for_every_other(
+    client: httpx.AsyncClient, allow_all_limiter: AllowAllLimiter
+) -> None:
+    email = _email_with_an_i()
+    await _register(client, email)
+    await client.post("/auth/login", json={"email": _dotted_capital_i(email), "password": PASSWORD})
+    allow_all_limiter.calls.clear()
+
+    await client.post("/auth/login", json={"email": email, "password": WRONG_PASSWORD})
+
+    assert [name for name, _ in allow_all_limiter.calls] == [
+        "login",
+        "login_prefix",
+        "login_device",
+    ]
+
+
+async def test_unknown_email_spellings_share_one_bucket_like_registered_ones(
+    client: httpx.AsyncClient, allow_all_limiter: AllowAllLimiter
+) -> None:
+    email = _email_with_an_i()
+
+    statuses = [
+        (await client.post("/auth/login", json={"email": e, "password": PASSWORD})).status_code
+        for e in (email, _dotted_capital_i(email))
+    ]
+
+    charged = [identity for name, identity in allow_all_limiter.calls if name == "login_account"]
+    assert statuses == [401, 401]
+    assert charged == [unregistered_login_key(email)] * 2
+
+
+async def test_alternating_spellings_cannot_outlast_the_account_budget(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    # Known and unknown must lock out alike, or the lockout itself tells which emails exist.
+    registered, unknown = _email_with_an_i(), _email_with_an_i()
+    await _register(limited_client, registered)
+    capacity = policies.LOGIN_ACCOUNT.capacity
+
+    known = await _fail_login_from_many_ips(registered, capacity + 1, _dotted_capital_i(registered))
+    stranger = await _fail_login_from_many_ips(unknown, capacity + 1, _dotted_capital_i(unknown))
+
+    assert known == stranger == [401] * capacity + [429]
+
+
 async def test_a_successful_login_refunds_its_account_token(
     limited_client: httpx.AsyncClient,
 ) -> None:
@@ -620,10 +702,10 @@ async def test_a_known_device_signs_in_while_the_account_budget_is_drained(
     limited_client: httpx.AsyncClient,
 ) -> None:
     email = _unique_email()
-    await _register(limited_client, email)
+    key = await _register(limited_client, email)
     first = await limited_client.post("/auth/login", json={"email": email, "password": PASSWORD})
-    assert first.cookies.get("__Host-login_device")
-    await _drain(policies.LOGIN_ACCOUNT, login_account_key(email))
+    assert first.cookies.get(LOGIN_DEVICE_COOKIE)
+    await _drain(policies.LOGIN_ACCOUNT, key)
 
     owner = await limited_client.post("/auth/login", json={"email": email, "password": PASSWORD})
     async with _client_from(_ip_block(), 1) as stranger:
@@ -638,12 +720,12 @@ async def test_a_device_cookie_for_another_account_buys_no_budget(
 ) -> None:
     attacker, victim = _unique_email(), _unique_email()
     await _register(limited_client, attacker)
-    await _register(limited_client, victim)
+    victim_key = await _register(limited_client, victim)
     signed_in = await limited_client.post(
         "/auth/login", json={"email": attacker, "password": PASSWORD}
     )
-    assert signed_in.cookies.get("__Host-login_device")
-    await _drain(policies.LOGIN_ACCOUNT, login_account_key(victim))
+    assert signed_in.cookies.get(LOGIN_DEVICE_COOKIE)
+    await _drain(policies.LOGIN_ACCOUNT, victim_key)
 
     response = await limited_client.post(
         "/auth/login", json={"email": victim, "password": PASSWORD}
@@ -656,7 +738,7 @@ async def test_a_known_device_spends_its_own_bucket_not_the_accounts(
     client: httpx.AsyncClient, allow_all_limiter: AllowAllLimiter
 ) -> None:
     email = _unique_email()
-    await _register(client, email)
+    key = await _register(client, email)
     await client.post("/auth/login", json={"email": email, "password": PASSWORD})
     allow_all_limiter.calls.clear()
 
@@ -664,7 +746,7 @@ async def test_a_known_device_spends_its_own_bucket_not_the_accounts(
 
     taken = [name for name, _ in allow_all_limiter.calls]
     assert taken == ["login", "login_prefix", "login_device"]
-    assert login_account_key(email) not in {identity for _, identity in allow_all_limiter.calls}
+    assert key not in {identity for _, identity in allow_all_limiter.calls}
 
 
 async def test_a_known_device_has_its_own_failure_cap(limited_client: httpx.AsyncClient) -> None:
@@ -673,7 +755,7 @@ async def test_a_known_device_has_its_own_failure_cap(limited_client: httpx.Asyn
     signed_in = await limited_client.post(
         "/auth/login", json={"email": email, "password": PASSWORD}
     )
-    device = signed_in.cookies["__Host-login_device"]
+    device = signed_in.cookies[LOGIN_DEVICE_COOKIE]
     capacity = policies.LOGIN_DEVICE.capacity
 
     block = _ip_block()
@@ -681,7 +763,7 @@ async def test_a_known_device_has_its_own_failure_cap(limited_client: httpx.Asyn
     for octet in range(capacity + 1):
         async with _client_from(block, octet) as c:
             body = {"email": email, "password": WRONG_PASSWORD}
-            cookie = {"Cookie": f"__Host-login_device={device}"}
+            cookie = {"Cookie": f"{LOGIN_DEVICE_COOKIE}={device}"}
             statuses.append((await c.post("/auth/login", json=body, headers=cookie)).status_code)
 
     assert statuses == [401] * capacity + [429]
@@ -694,7 +776,9 @@ async def test_the_device_cookie_is_host_only_and_httponly(client: httpx.AsyncCl
     response = await client.post("/auth/login", json={"email": email, "password": PASSWORD})
 
     device = next(
-        h for h in response.headers.get_list("set-cookie") if h.startswith("__Host-login_device=")
+        h
+        for h in response.headers.get_list("set-cookie")
+        if h.startswith(f"{LOGIN_DEVICE_COOKIE}=")
     )
     assert "HttpOnly" in device
     assert "Secure" in device
@@ -708,7 +792,7 @@ async def test_a_drained_account_warns_once_without_naming_it(
     limited_client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     email = _unique_email()
-    key = login_account_key(email)
+    key = unregistered_login_key(email)
     await _drain(policies.LOGIN_ACCOUNT, key)
 
     with caplog.at_level(logging.DEBUG, logger="app.deps"):
@@ -717,6 +801,8 @@ async def test_a_drained_account_warns_once_without_naming_it(
 
     refusals = [r for r in caplog.records if policies.LOGIN_ACCOUNT.name in r.getMessage()]
     assert [r.levelno for r in refusals] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
+    assert all("ceiling" not in r.getMessage() for r in refusals)
+    assert "sign-in failure limit" in refusals[0].getMessage()
     assert not any(
         email in r.getMessage() or key in r.getMessage() or "10." in r.getMessage()
         for r in refusals

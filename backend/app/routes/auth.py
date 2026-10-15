@@ -4,13 +4,13 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
 from app.core import policies
 from app.core.config import settings
-from app.core.rate_limiter import Limiter, Policy
-from app.core.security import create_login_device_token, login_account_key, login_device_id
+from app.core.rate_limiter import Limiter
+from app.core.security import LOGIN_DEVICE_COOKIE, create_login_device_token
 from app.deps import (
-    failure_rate_limit,
     get_auth_service,
     get_global_identity,
     get_limiter,
+    login_failure_limit,
     rate_limit,
     reserved_rate_limit,
 )
@@ -20,6 +20,7 @@ from app.services.auth_service import (
     EmailAlreadyRegisteredError,
     InvalidCredentialsError,
     InvalidRefreshTokenError,
+    LoginAccount,
 )
 
 router = APIRouter()
@@ -27,7 +28,6 @@ router = APIRouter()
 # __Host- makes the browser refuse this name with a Domain attribute or a non-root Path,
 # which is what stops a sibling subdomain planting a duplicate. The prefix requires Path=/.
 _REFRESH_COOKIE = "__Host-refresh_token"
-_DEVICE_COOKIE = "__Host-login_device"
 _COOKIE_PATH = "/"
 
 
@@ -52,7 +52,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
 
 def _set_device_cookie(response: Response, account_key: str) -> None:
     response.set_cookie(
-        _DEVICE_COOKIE,
+        LOGIN_DEVICE_COOKIE,
         create_login_device_token(account_key),
         httponly=True,
         secure=True,
@@ -60,15 +60,6 @@ def _set_device_cookie(response: Response, account_key: str) -> None:
         max_age=settings.login_device_expire_days * 24 * 60 * 60,
         path=_COOKIE_PATH,
     )
-
-
-def _login_bucket(account_key: str, device_token: str | None) -> tuple[Policy, str]:
-    # A browser that has signed in to this account before gets its own failure budget, so an
-    # attacker draining the account's shared one cannot lock the owner out of a known device.
-    device_id = None if device_token is None else login_device_id(device_token, account_key)
-    if device_id is None:
-        return policies.LOGIN_ACCOUNT, account_key
-    return policies.LOGIN_DEVICE, device_id
 
 
 def _clear_refresh_cookie(response: Response) -> None:
@@ -123,6 +114,7 @@ async def register(
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
+    # Narrowest first; the account's failure bucket is charged last, by login_failure_limit.
     dependencies=[
         Depends(rate_limit(policies.LOGIN)),
         Depends(rate_limit(policies.LOGIN_PREFIX)),
@@ -130,26 +122,19 @@ async def register(
 )
 async def login(
     data: LoginRequest,
+    account: Annotated[LoginAccount, Depends(login_failure_limit)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
-    limiter: Annotated[Limiter, Depends(get_limiter)],
     response: Response,
-    device_token: Annotated[str | None, Cookie(alias=_DEVICE_COOKIE)] = None,
 ) -> TokenResponse:
-    # Charged for every submitted email, registered or not, so the limit leaks no existence.
-    account_key = login_account_key(data.email)
-    policy, identity = _login_bucket(account_key, device_token)
-    async with failure_rate_limit(policy, identity, limiter):
-        try:
-            access_token, refresh_token = await auth_service.login(
-                email=data.email, password=data.password
-            )
-        except InvalidCredentialsError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password",
-            ) from None
+    try:
+        access_token, refresh_token = await auth_service.login(account, data.password)
+    except InvalidCredentialsError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        ) from None
     _set_refresh_cookie(response, refresh_token)
-    _set_device_cookie(response, account_key)
+    _set_device_cookie(response, account.key)
 
     return TokenResponse(access_token=access_token)
 
