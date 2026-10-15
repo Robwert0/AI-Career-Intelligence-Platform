@@ -33,9 +33,10 @@ def test_every_declared_policy_is_valid() -> None:
         assert policy.refill_per_second > 0
 
 
-def test_register_is_the_strictest_sustained_limit() -> None:
+def test_register_is_the_strictest_sustained_per_ip_limit() -> None:
+    # Per-user daily caps refill slower on purpose; they bound spend, not request bursts.
     assert policies.REGISTER.refill_per_second == min(
-        p.refill_per_second for p in _declared_policies()
+        p.refill_per_second for p in _declared_policies() if p.scope is Scope.IP
     )
 
 

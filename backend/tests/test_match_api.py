@@ -112,7 +112,7 @@ async def test_intake_is_rate_limited_per_user(match_client: MatchFixture) -> No
 
     await client.post("/match/jobs", json={"text": TEXT}, headers=headers)
 
-    assert [name for name, _ in limiter.calls] == ["match_job_user"]
+    assert [name for name, _ in limiter.calls] == ["match_job_user", "match_job_user_daily"]
 
 
 async def test_polling_fires_both_an_ip_policy_and_a_user_policy(
