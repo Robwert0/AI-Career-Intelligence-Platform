@@ -263,7 +263,8 @@ celery -A app.workers.celery_app worker -Q intake,celery -n intake@%h
 celery -A app.workers.celery_app worker -Q analysis -n analysis@%h
 # Beat: schedules the daily purge of accounts inactive past ACCOUNT_RETENTION_DAYS (03:00 UTC)
 # Production must run exactly one beat process, or retention never runs (or runs twice)
-celery -A app.workers.celery_app beat --loglevel=info
+# beat_app shares the schedule but imports no task code (~60 MiB instead of ~450 MiB with torch)
+celery -A app.workers.beat_app:beat_app beat --loglevel=info
 
 # Job Match Analyzer: calibrate the per-source gates (MATCH_PRESELECT_MIN_SIMILARITY[_GITHUB]),
 # then run the eval gate (both need labelled postings under docs/eval/calibration/)
