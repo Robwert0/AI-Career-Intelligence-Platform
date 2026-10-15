@@ -93,15 +93,17 @@ export default function PrivacyPage() {
             So follow-up questions make sense, each question is sent with up to the last three
             questions and answers of the conversation on that page. They are sent to the AI model
             like the question itself and are never stored by this site, on the server or in the
-            browser. The conversation is gone when you leave or reload the page, sign out, or
-            switch accounts.
+            browser. The conversation is gone when you leave or reload the page, sign out, or switch
+            accounts.
           </p>
         </Section>
 
         <Section title="cv match analyses">
           <p className="leading-relaxed">
             When you run a match, the job posting, any CV file you upload and the report are held
-            temporarily and expire automatically within about an hour.
+            temporarily and expire automatically within about an hour. If you give a GitHub profile
+            link, the public profile and repository details read from GitHub are cached on the
+            server for up to an hour as well.
           </p>
           <p className="leading-relaxed">
             So a reload does not lose a running analysis or its report, this browser tab keeps two
@@ -119,8 +121,10 @@ export default function PrivacyPage() {
           <p className="leading-relaxed">
             Chat questions, the conversation sent with them, job postings and CVs you submit for a
             match are sent to OpenAI&apos;s API, which runs the AI model and processes them on
-            Robert&apos;s behalf. What OpenAI keeps, and for how long, is set out in its own API data
-            policy.
+            Robert&apos;s behalf. If you give a GitHub profile link for a match, public details read
+            from that profile and its repositories, such as the bio, repository descriptions and
+            README excerpts, are sent too. What OpenAI keeps, and for how long, is set out in its
+            own API data policy.
           </p>
         </Section>
 
