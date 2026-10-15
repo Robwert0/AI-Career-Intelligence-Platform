@@ -168,6 +168,20 @@ async def test_retrieval_is_scoped_to_the_configured_document() -> None:
     assert retriever.document_ids == [settings.cv_document_id]
 
 
+async def test_retrieval_never_runs_unscoped_when_the_document_id_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "cv_document_id", None)
+    retriever = StubRetriever(hit())
+
+    with pytest.raises(RuntimeError, match="CV_DOCUMENT_ID"):
+        await RagPipeline(scope_over(retriever), FakeGenerator(), asyncio.Semaphore(4)).answer(
+            "what framework?"
+        )
+
+    assert retriever.document_ids == []
+
+
 async def test_the_retriever_scope_closes_before_the_generator_is_called() -> None:
     retriever = StubRetriever(hit())
     witness: list[tuple[int, int]] = []

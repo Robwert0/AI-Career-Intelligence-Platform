@@ -24,6 +24,7 @@ from app.workers.queue import CeleryTaskQueue
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings.require_cv_document_id()
     configure_logging(settings.log_level)
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)

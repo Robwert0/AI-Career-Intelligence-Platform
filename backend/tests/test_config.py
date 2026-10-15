@@ -1,5 +1,8 @@
 import inspect
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -126,11 +129,62 @@ def test_chat_settings_have_the_documented_defaults() -> None:
     assert settings.chat_temperature == 0.0
 
 
-def test_cv_document_id_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_settings_load_without_a_cv_document_id(
+    monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    # Migrations and ingest load Settings before the id exists; ingest is what prints it.
+    if value is None:
+        monkeypatch.delenv("CV_DOCUMENT_ID", raising=False)
+    else:
+        monkeypatch.setenv("CV_DOCUMENT_ID", value)
+
+    assert Settings(_env_file=None).cv_document_id is None
+
+
+def test_chat_refuses_to_read_a_missing_cv_document_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CV_DOCUMENT_ID", raising=False)
 
-    with pytest.raises(ValidationError, match="cv_document_id"):
-        Settings(_env_file=None)
+    with pytest.raises(RuntimeError, match="CV_DOCUMENT_ID"):
+        Settings(_env_file=None).require_cv_document_id()
+
+
+def test_require_cv_document_id_returns_the_configured_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CV_DOCUMENT_ID", "44444444-4444-4444-4444-444444444444")
+
+    assert str(Settings(_env_file=None).require_cv_document_id()) == (
+        "44444444-4444-4444-4444-444444444444"
+    )
+
+
+def test_migrations_and_ingest_start_without_a_cv_document_id(tmp_path: Path) -> None:
+    backend = Path(__file__).resolve().parents[1]
+    # PYTHONPATH pins `app` to this checkout; a shared editable venv may point elsewhere.
+    env = {**os.environ, "CV_DOCUMENT_ID": "", "PYTHONPATH": str(backend)}
+
+    migrate = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
+        cwd=backend,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    ingest = subprocess.run(
+        [sys.executable, "scripts/ingest_cv.py", str(tmp_path / "absent.pdf")],
+        cwd=backend,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert migrate.returncode == 0, migrate.stderr
+    assert "CREATE TABLE" in migrate.stdout
+    assert ingest.returncode == 2, ingest.stderr
+    assert "not a file" in ingest.stderr
 
 
 def test_cv_document_id_rejects_a_non_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -319,7 +373,6 @@ CI_ENV = {
     "DATABASE_URL": "postgresql+asyncpg://test:test@localhost:5432/postgres",
     "REDIS_URL": "redis://localhost:6379/0",
     "SECRET_KEY": "ci-secret-not-real-000000000000000000",
-    "CV_DOCUMENT_ID": "44444444-4444-4444-4444-444444444444",
 }
 
 
@@ -327,6 +380,7 @@ def test_settings_build_from_ci_env_alone(monkeypatch: pytest.MonkeyPatch) -> No
     for name in list(os.environ):
         if name.startswith(("MATCH_", "JOB_", "CELERY_", "GITHUB_", "MAX_UPLOAD")):
             monkeypatch.delenv(name)
+    monkeypatch.delenv("CV_DOCUMENT_ID", raising=False)
     for name, value in CI_ENV.items():
         monkeypatch.setenv(name, value)
 

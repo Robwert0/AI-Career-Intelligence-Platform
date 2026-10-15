@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     generation_timeout_seconds: int = 180
     generation_connect_timeout_seconds: int = 5
-    cv_document_id: uuid.UUID
+    # Optional so migrations and ingest run before the id exists; chat reads it only through
+    # require_cv_document_id, because document_id=None would search every user's uploads.
+    cv_document_id: uuid.UUID | None = None
     retrieval_limit: int = Field(default=5, ge=1, le=20)
     retrieval_similarity_threshold: float = Field(default=0.48, ge=-1.0, le=1.0)
     chat_timeout_seconds: int = Field(default=30, ge=1)
@@ -100,14 +102,24 @@ class Settings(BaseSettings):
             + 2 * self.match_recommend_generation_timeout_seconds
         )
 
+    def require_cv_document_id(self) -> uuid.UUID:
+        if self.cv_document_id is None:
+            raise RuntimeError(
+                "CV_DOCUMENT_ID is not set: run scripts/ingest_cv.py and put the id it prints "
+                "in .env"
+            )
+        return self.cv_document_id
+
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
 
-    @field_validator("github_token", "openai_api_key", "openai_reasoning_effort", mode="before")
+    @field_validator(
+        "github_token", "openai_api_key", "openai_reasoning_effort", "cv_document_id", mode="before"
+    )
     @classmethod
     def _blank_is_none(cls, value: object) -> object:
-        # GITHUB_TOKEN= in .env must mean "no token", not a Bearer header with an empty secret.
+        # A blank .env value means unset: no empty Bearer token, no UUID parse failure.
         return None if isinstance(value, str) and not value.strip() else value
 
     @property

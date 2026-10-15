@@ -184,13 +184,14 @@ class RagPipeline:
 
     async def _retrieve(self, query: str) -> tuple[RetrievalResult, str]:
         # Both reads share one scope, so the connection is released before generation.
+        document_id = settings.require_cv_document_id()
         async with self._retriever_scope() as retriever:
             result = await retriever.retrieve(
                 query,
-                document_id=settings.cv_document_id,
+                document_id=document_id,
                 limit=settings.retrieval_limit,
             )
-            return result, await retriever.document_text(settings.cv_document_id)
+            return result, await retriever.document_text(document_id)
 
     async def standalone_query(
         self, question: str, history: Sequence[Turn], user_id: str | None = None
