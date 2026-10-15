@@ -1,3 +1,4 @@
+import logging
 import time
 import uuid
 
@@ -5,12 +6,15 @@ import httpx
 import pytest
 from fakes import AllowAllLimiter, UnavailableLimiter
 from fastapi.routing import APIRoute
+from redis.exceptions import RedisError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import policies
-from app.core.rate_limiter import Policy
+from app.core.rate_limiter import Decision, Policy
 from app.core.redis import create_redis
 from app.deps import get_global_identity, get_limiter
 from app.main import app
+from app.repositories import UserRepository
 
 EMAIL = "limited@test.dev"
 PASSWORD = "supersecret1"
@@ -150,8 +154,17 @@ async def test_chat_is_capped_per_user_per_day(limited_client: httpx.AsyncClient
     assert int(response.headers["Retry-After"]) > 60
 
 
+async def _global_registrations_spent() -> float:
+    redis = create_redis()
+    try:
+        left = await redis.hget(_bucket(policies.REGISTER_GLOBAL, _global_identity()), "tokens")
+    finally:
+        await redis.aclose()
+    return 0.0 if left is None else policies.REGISTER_GLOBAL.capacity - float(left)
+
+
 async def test_registration_has_a_ceiling_across_every_ip(
-    limited_client: httpx.AsyncClient,
+    limited_client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     await _drain(policies.REGISTER_GLOBAL, _global_identity())
 
@@ -160,6 +173,8 @@ async def test_registration_has_a_ceiling_across_every_ip(
     )
 
     assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) >= 1
+    assert await UserRepository(db_session).get_user_by_email(EMAIL) is None
 
 
 async def test_a_denied_ip_does_not_spend_the_global_registration_budget(
@@ -170,14 +185,98 @@ async def test_a_denied_ip_does_not_spend_the_global_registration_budget(
             "/auth/register", json={"email": f"{attempt}{EMAIL}", "password": PASSWORD}
         )
 
-    redis = create_redis()
-    try:
-        left = await redis.hget(_bucket(policies.REGISTER_GLOBAL, _global_identity()), "tokens")
-    finally:
-        await redis.aclose()
-    assert left is not None
-    spent = policies.REGISTER_GLOBAL.capacity - float(left)
+    spent = await _global_registrations_spent()
     assert spent == pytest.approx(policies.REGISTER.capacity, abs=0.1)
+
+
+async def test_a_created_account_spends_one_global_registration(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    response = await limited_client.post(
+        "/auth/register", json={"email": EMAIL, "password": PASSWORD}
+    )
+
+    assert response.status_code == 201
+    assert await _global_registrations_spent() == pytest.approx(1, abs=0.1)
+
+
+async def test_invalid_bodies_do_not_spend_the_global_registration_budget(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    statuses = [
+        (await limited_client.post("/auth/register", json={"email": EMAIL})).status_code
+        for _ in range(policies.REGISTER.capacity)
+    ]
+
+    assert statuses == [422] * policies.REGISTER.capacity
+    assert await _global_registrations_spent() == 0.0
+
+
+async def test_duplicate_emails_do_not_spend_the_global_registration_budget(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    statuses = [
+        (
+            await limited_client.post("/auth/register", json={"email": EMAIL, "password": PASSWORD})
+        ).status_code
+        for _ in range(policies.REGISTER.capacity)
+    ]
+
+    assert statuses == [201] + [409] * (policies.REGISTER.capacity - 1)
+    assert await _global_registrations_spent() == pytest.approx(1, abs=0.1)
+
+
+async def test_a_full_global_ceiling_warns_once_without_naming_the_registrant(
+    limited_client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    await _drain(policies.REGISTER_GLOBAL, _global_identity())
+
+    with caplog.at_level(logging.DEBUG, logger="app.deps"):
+        for attempt in range(policies.REGISTER.capacity):
+            await limited_client.post(
+                "/auth/register", json={"email": f"{attempt}{EMAIL}", "password": PASSWORD}
+            )
+
+    refusals = [r for r in caplog.records if policies.REGISTER_GLOBAL.name in r.getMessage()]
+    assert [r.levelno for r in refusals] == [logging.WARNING] + [logging.DEBUG] * (
+        policies.REGISTER.capacity - 1
+    )
+    assert not any(EMAIL in r.getMessage() or "10." in r.getMessage() for r in refusals)
+
+
+class _PeekUnavailableLimiter(AllowAllLimiter):
+    async def peek(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        raise RedisError("redis is down")
+
+
+class _ChargeUnavailableLimiter(AllowAllLimiter):
+    async def charge(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        raise RedisError("redis is down")
+
+
+@pytest.mark.parametrize("limiter", [_PeekUnavailableLimiter, _ChargeUnavailableLimiter])
+async def test_redis_down_at_the_global_ceiling_fails_registration_closed(
+    client: httpx.AsyncClient, limiter: type[AllowAllLimiter]
+) -> None:
+    app.dependency_overrides[get_limiter] = limiter
+
+    response = await client.post("/auth/register", json={"email": EMAIL, "password": PASSWORD})
+
+    assert response.status_code == 503
+    assert "redis" not in response.text.lower()
+
+
+async def test_the_global_ceiling_is_peeked_before_and_charged_after_a_success(
+    client: httpx.AsyncClient, allow_all_limiter: AllowAllLimiter
+) -> None:
+    await client.post("/auth/register", json={"email": EMAIL})
+    assert (allow_all_limiter.peeked, allow_all_limiter.charged) == ([], [])
+
+    await client.post("/auth/register", json={"email": EMAIL, "password": PASSWORD})
+    await client.post("/auth/register", json={"email": EMAIL, "password": PASSWORD})
+
+    assert allow_all_limiter.peeked == [policies.REGISTER_GLOBAL.name] * 2
+    assert allow_all_limiter.charged == [policies.REGISTER_GLOBAL.name]
 
 
 async def _login(client: httpx.AsyncClient) -> tuple[str, dict[str, str]]:

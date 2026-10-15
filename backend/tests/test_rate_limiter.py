@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from app.core.rate_limiter import Policy, Scope, TokenBucketLimiter
+from app.core.rate_limiter import REFUSAL_NOTICE_SECONDS, Policy, Scope, TokenBucketLimiter
 from app.core.redis import create_redis
 
 NOW = 1_000_000.0
@@ -142,3 +142,61 @@ async def test_fifty_concurrent_requests_on_capacity_ten_allow_exactly_ten(
     spec = policy(capacity=10, refill=1.0)
     decisions = await asyncio.gather(*(limiter.check(spec, identity, now=NOW) for _ in range(50)))
     assert sum(d.allowed for d in decisions) == 10
+
+
+async def test_a_peek_answers_without_spending(limiter: TokenBucketLimiter, identity: str) -> None:
+    spec = policy(capacity=2)
+    peeks = [(await limiter.peek(spec, identity, now=NOW)).allowed for _ in range(5)]
+    allowed = [(await limiter.check(spec, identity, now=NOW)).allowed for _ in range(3)]
+    assert peeks == [True] * 5
+    assert allowed == [True, True, False]
+
+
+async def test_a_peek_refuses_an_empty_bucket_with_a_retry_after(
+    limiter: TokenBucketLimiter, identity: str
+) -> None:
+    spec = policy(capacity=1, refill=0.5)
+    await limiter.check(spec, identity, now=NOW)
+    denied = await limiter.peek(spec, identity, now=NOW)
+    assert denied.allowed is False
+    assert denied.retry_after_seconds == pytest.approx(2.0)
+
+
+async def test_a_charge_spends_even_an_empty_bucket_and_peeks_wait_out_the_debt(
+    limiter: TokenBucketLimiter, identity: str
+) -> None:
+    spec = policy(capacity=1, refill=1.0)
+    charges = [await limiter.charge(spec, identity, now=NOW) for _ in range(3)]
+    assert [c.allowed for c in charges] == [True] * 3
+    assert charges[-1].remaining == pytest.approx(-2.0)
+    assert (await limiter.peek(spec, identity, now=NOW + 2.0)).allowed is False
+    assert (await limiter.peek(spec, identity, now=NOW + 3.0)).allowed is True
+
+
+async def test_concurrent_charges_are_all_counted(
+    limiter: TokenBucketLimiter, identity: str
+) -> None:
+    spec = policy(capacity=2, refill=1 / 3600)
+    await asyncio.gather(*(limiter.charge(spec, identity, now=NOW) for _ in range(5)))
+    assert (await limiter.peek(spec, identity, now=NOW)).remaining == pytest.approx(-3.0)
+
+
+async def test_the_ttl_outlives_repaying_a_debt(
+    limiter: TokenBucketLimiter, redis_client: Redis, identity: str
+) -> None:
+    spec = policy(capacity=2, refill=1 / 60)
+    for _ in range(5):
+        await limiter.charge(spec, identity, now=NOW)
+    ttl_ms = await redis_client.pttl(f"rl:{spec.name}:{identity}")
+    assert ttl_ms >= (5 / spec.refill_per_second) * 1000
+
+
+async def test_only_the_first_refusal_in_a_notice_window_is_flagged(
+    limiter: TokenBucketLimiter, identity: str
+) -> None:
+    spec = policy(capacity=1, refill=1 / 86400)
+    await limiter.check(spec, identity, now=NOW)
+    flags = [(await limiter.peek(spec, identity, now=NOW + t)).first_refusal for t in (0, 1, 2)]
+    later = await limiter.peek(spec, identity, now=NOW + REFUSAL_NOTICE_SECONDS)
+    assert flags == [True, False, False]
+    assert later.first_refusal is True

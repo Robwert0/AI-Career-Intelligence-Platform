@@ -2,7 +2,7 @@ from app.core.rate_limiter import Policy, Scope
 
 LOGIN = Policy("login", capacity=5, refill_per_second=1 / 60, scope=Scope.IP)
 REGISTER = Policy("register", capacity=3, refill_per_second=3 / 3600, scope=Scope.IP)
-# All IPs combined: rotating proxies multiply REGISTER, never this.
+# All IPs combined: rotating proxies multiply REGISTER, never this. Charged per created account.
 REGISTER_GLOBAL = Policy(
     "register_global", capacity=20, refill_per_second=20 / 3600, scope=Scope.GLOBAL
 )

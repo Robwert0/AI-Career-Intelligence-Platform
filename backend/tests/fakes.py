@@ -167,14 +167,33 @@ class OverflowingGenerator:
 class AllowAllLimiter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.peeked: list[str] = []
+        self.charged: list[str] = []
+
+    def _allow(self, policy: Policy) -> Decision:
+        return Decision(allowed=True, remaining=float(policy.capacity), retry_after_seconds=0.0)
 
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
         self.calls.append((policy.name, identity))
-        return Decision(allowed=True, remaining=float(policy.capacity), retry_after_seconds=0.0)
+        return self._allow(policy)
+
+    async def peek(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        self.peeked.append(policy.name)
+        return self._allow(policy)
+
+    async def charge(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        self.charged.append(policy.name)
+        return self._allow(policy)
 
 
 class UnavailableLimiter:
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        raise RedisError("redis is down")
+
+    async def peek(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        raise RedisError("redis is down")
+
+    async def charge(self, policy: Policy, identity: str, *, now: float) -> Decision:
         raise RedisError("redis is down")
 
 
@@ -273,3 +292,9 @@ class DenyAllLimiter:
     async def check(self, policy: Policy, identity: str, *, now: float) -> Decision:
         self.calls.append((policy.name, identity))
         return Decision(allowed=False, remaining=0.0, retry_after_seconds=30.0)
+
+    async def peek(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        return Decision(allowed=False, remaining=0.0, retry_after_seconds=30.0)
+
+    async def charge(self, policy: Policy, identity: str, *, now: float) -> Decision:
+        return Decision(allowed=True, remaining=-1.0, retry_after_seconds=0.0)
