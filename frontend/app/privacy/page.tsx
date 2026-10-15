@@ -75,6 +75,12 @@ export default function PrivacyPage() {
             days from your last sign-in or session refresh, and is cleared when you sign out.
           </p>
           <p className="leading-relaxed">
+            A second httpOnly cookie marks this browser as one that has signed in to your account
+            before. It holds a random id and a keyed hash of your email, never the email itself,
+            and lets you keep signing in while someone else is locked out for guessing your
+            password. It is not used for tracking and lasts up to 90 days from your last sign-in.
+          </p>
+          <p className="leading-relaxed">
             Robert&apos;s admin page shows your email, company, role, sign-up date and last visit.
             It never shows your password hash or session records.
           </p>

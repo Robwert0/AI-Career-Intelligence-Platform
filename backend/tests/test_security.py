@@ -1,3 +1,4 @@
+import hashlib
 import string
 from datetime import UTC, datetime, timedelta
 
@@ -7,10 +8,13 @@ import pytest
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
+    create_login_device_token,
     decode_token,
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
+    login_account_key,
+    login_device_id,
     verify_password,
 )
 
@@ -126,3 +130,69 @@ def test_token_missing_exp_rejected() -> None:
     )
     with pytest.raises(jwt.InvalidTokenError):
         decode_token(forged, expected_type="access")
+
+
+def test_login_account_key_is_stable_and_never_contains_the_email() -> None:
+    key = login_account_key("alice@example.com")
+    assert key == login_account_key("alice@example.com")
+    assert "alice" not in key
+    assert key != hashlib.sha256(b"alice@example.com").hexdigest()
+
+
+def test_case_variants_of_one_email_share_an_account_key() -> None:
+    assert login_account_key("Alice@Example.com") == login_account_key("alice@example.com")
+
+
+def test_different_emails_get_different_account_keys() -> None:
+    assert login_account_key("alice@example.com") != login_account_key("bob@example.com")
+
+
+def test_a_device_token_identifies_a_device_for_its_own_account() -> None:
+    key = login_account_key("alice@example.com")
+    first, second = create_login_device_token(key), create_login_device_token(key)
+
+    assert login_device_id(first, key) is not None
+    assert login_device_id(first, key) != login_device_id(second, key)
+
+
+def test_a_device_token_is_worthless_for_another_account() -> None:
+    token = create_login_device_token(login_account_key("attacker@example.com"))
+    assert login_device_id(token, login_account_key("victim@example.com")) is None
+
+
+def test_an_access_token_is_not_a_device_token() -> None:
+    key = login_account_key("alice@example.com")
+    assert login_device_id(create_access_token(key), key) is None
+
+
+def test_a_device_token_is_not_an_access_token() -> None:
+    token = create_login_device_token(login_account_key("alice@example.com"))
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_token(token, expected_type="access")
+
+
+@pytest.mark.parametrize("token", ["", "garbage", "a.b.c"])
+def test_a_malformed_device_token_identifies_nothing(token: str) -> None:
+    assert login_device_id(token, login_account_key("alice@example.com")) is None
+
+
+def test_an_expired_device_token_identifies_nothing() -> None:
+    key = login_account_key("alice@example.com")
+    past = datetime.now(UTC) - timedelta(days=1)
+    expired = jwt.encode(
+        {"sub": key, "type": "login_device", "jti": "d", "iat": past, "exp": past},
+        settings.secret_key,
+        algorithm="HS256",
+    )
+    assert login_device_id(expired, key) is None
+
+
+def test_a_forged_device_token_identifies_nothing() -> None:
+    key = login_account_key("alice@example.com")
+    now = datetime.now(UTC)
+    forged = jwt.encode(
+        {"sub": key, "type": "login_device", "jti": "d", "iat": now, "exp": now + timedelta(1)},
+        "x" * 32,
+        algorithm="HS256",
+    )
+    assert login_device_id(forged, key) is None

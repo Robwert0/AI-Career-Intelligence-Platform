@@ -12,6 +12,7 @@ from app.core.rate_limiter import (
     Scope,
     TokenBucketLimiter,
     ip_identity,
+    ip_prefix_identity,
 )
 from app.core.redis import create_redis
 
@@ -253,3 +254,29 @@ def test_a_scoped_ipv6_address_drops_its_zone() -> None:
 @pytest.mark.parametrize("host", ["testclient", "", "unix:/run/api.sock"])
 def test_a_host_that_is_not_an_ip_keeps_its_own_key(host: str) -> None:
     assert ip_identity(host) == host
+
+
+def test_an_ipv6_client_is_keyed_by_its_48_for_prefix_policies() -> None:
+    assert ip_prefix_identity("2001:db8:1:2:aaaa:bbbb:cccc:dddd") == "2001:db8:1::/48"
+
+
+def test_every_64_in_one_48_shares_a_prefix_key() -> None:
+    assert ip_prefix_identity("2001:db8:1:0::1") == ip_prefix_identity("2001:db8:1:ffff::1")
+
+
+def test_different_48s_get_different_prefix_keys() -> None:
+    assert ip_prefix_identity("2001:db8:1::1") != ip_prefix_identity("2001:db8:2::1")
+
+
+def test_ipv4_prefix_keys_are_the_address_itself() -> None:
+    assert ip_prefix_identity("203.0.113.7") == ip_identity("203.0.113.7") == "203.0.113.7"
+    assert ip_prefix_identity("203.0.113.7") != ip_prefix_identity("203.0.113.8")
+
+
+def test_an_ipv4_mapped_client_shares_the_ipv4_prefix_key() -> None:
+    assert ip_prefix_identity("::ffff:203.0.113.7") == "203.0.113.7"
+
+
+@pytest.mark.parametrize("host", ["testclient", "", "unix:/run/api.sock"])
+def test_a_non_ip_host_is_its_own_prefix_key(host: str) -> None:
+    assert ip_prefix_identity(host) == host

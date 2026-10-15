@@ -20,7 +20,14 @@ from app.core.analysis_registry import AnalysisRegistry
 from app.core.config import settings
 from app.core.db import SessionLocal, get_db
 from app.core.job_store import JobStore
-from app.core.rate_limiter import Decision, Limiter, Policy, Scope, ip_identity
+from app.core.rate_limiter import (
+    Decision,
+    Limiter,
+    Policy,
+    Scope,
+    ip_identity,
+    ip_prefix_identity,
+)
 from app.core.retention_marker import RetentionMarker
 from app.models import User
 from app.repositories import ChunkRepository, RefreshTokenRepository, UserRepository
@@ -167,10 +174,10 @@ def get_global_identity() -> str:
     return "all"
 
 
-def _client_ip(request: Request) -> str:
+def _client_host(request: Request) -> str:
     if request.client is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Service unavailable")
-    return ip_identity(request.client.host)
+    return request.client.host
 
 
 def _too_many_requests(decision: Decision) -> HTTPException:
@@ -191,8 +198,9 @@ async def _decide(
 
 
 def _log_ceiling_refusal(policy: Policy, decision: Decision) -> None:
-    # Only global ceilings: per-IP and per-user refusals are routine and would name a client.
-    if policy.scope is not Scope.GLOBAL:
+    # Per-IP and per-user refusals are routine and would name a client. An account refusal is an
+    # attack signal, logged by policy name only: the key is the HMAC'd email.
+    if policy.scope not in (Scope.GLOBAL, Scope.ACCOUNT):
         return
     if decision.first_refusal:
         logger.warning(
@@ -228,6 +236,20 @@ async def reserved_rate_limit(
         raise
 
 
+@asynccontextmanager
+async def failure_rate_limit(
+    policy: Policy, identity: str, limiter: Limiter
+) -> AsyncIterator[None]:
+    # The inverse of reserved_rate_limit: taken up front for the same burst-safety, refunded only
+    # when the block completes, so only failed attempts stay spent.
+    decision = await _decide(partial(limiter.check, now=time.time()), policy, identity)
+    if not decision.allowed:
+        _log_ceiling_refusal(policy, decision)
+        raise _too_many_requests(decision)
+    yield
+    await _refund(policy, identity, limiter)
+
+
 async def _refund(policy: Policy, identity: str, limiter: Limiter) -> None:
     # Swallowed so the caller's original error surfaces; a lost token is the safe direction.
     try:
@@ -240,7 +262,12 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
     # One closure per scope: FastAPI resolves dependencies from the signature, so an IP-scoped
     # policy must not carry the auth dependency or /auth/login would require a login.
     async def by_ip(request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]) -> None:
-        await enforce_rate_limit(policy, _client_ip(request), limiter)
+        await enforce_rate_limit(policy, ip_identity(_client_host(request)), limiter)
+
+    async def by_ip_prefix(
+        request: Request, limiter: Annotated[Limiter, Depends(get_limiter)]
+    ) -> None:
+        await enforce_rate_limit(policy, ip_prefix_identity(_client_host(request)), limiter)
 
     async def by_user(
         user: Annotated[User, Depends(get_current_user)],
@@ -257,6 +284,8 @@ def rate_limit(policy: Policy) -> Callable[..., Awaitable[None]]:
     match policy.scope:
         case Scope.IP:
             return by_ip
+        case Scope.IP_PREFIX:
+            return by_ip_prefix
         case Scope.USER:
             return by_user
         case Scope.GLOBAL:
