@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any
 
 from celery import Celery
@@ -8,9 +9,11 @@ from kombu import Queue
 from app.core.config import settings
 from app.core.log_config import configure_logging
 
+TASK_MODULES = ("app.workers.tasks",)
 
-def create_celery_app(broker_url: str) -> Celery:
-    app = Celery("career_intel", broker=broker_url, include=["app.workers.tasks"])
+
+def create_celery_app(broker_url: str, include: Sequence[str] = TASK_MODULES) -> Celery:
+    app = Celery("career_intel", broker=broker_url, include=list(include))
     app.conf.update(
         task_serializer="json",
         accept_content=["json"],

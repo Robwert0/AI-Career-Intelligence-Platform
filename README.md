@@ -222,7 +222,7 @@ runs it for you, otherwise start it with `ollama serve`.
 ```bash
 uv run uvicorn app.main:app --reload                              # API on :8000
 uv run celery -A app.workers.celery_app worker --loglevel=info    # background jobs (Job Match Analyzer)
-uv run celery -A app.workers.celery_app beat --loglevel=info      # optional locally: daily retention purge
+uv run celery -A app.workers.beat_app:beat_app beat --loglevel=info  # optional locally: daily retention purge
 ```
 
 Then the frontend, from `frontend/`:
