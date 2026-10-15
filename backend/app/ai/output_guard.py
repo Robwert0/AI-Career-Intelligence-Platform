@@ -2,7 +2,7 @@ import functools
 import re
 from dataclasses import dataclass
 
-from app.ai.generation import GenerationResult
+from app.ai.generation import FinishReason, GenerationResult
 from app.ai.prompts import CANARY, INDEXED_PROMPT
 
 NGRAM_SIZE = 8
@@ -34,6 +34,9 @@ def _prompt_ngrams(prompt: str) -> frozenset[tuple[str, ...]]:
 
 
 def validate_output(result: GenerationResult, *, protected_prompt: str = INDEXED_PROMPT) -> Verdict:
+    # First: a refusal or filtered partial is non-empty text that would otherwise pass as an answer.
+    if result.finish_reason not in (FinishReason.STOP, FinishReason.LENGTH):
+        return Verdict(ok=False, failed_check="abnormal_finish")
     if not result.text.strip():
         return Verdict(ok=False, failed_check="empty")
     if result.truncated:

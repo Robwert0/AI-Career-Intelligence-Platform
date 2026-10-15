@@ -112,3 +112,19 @@ def test_the_ngram_check_is_scoped_to_the_protected_prompt() -> None:
     verdict = validate_output(generated(leaked), protected_prompt=JOB_EXTRACT_PROMPT)
     assert not verdict.ok
     assert verdict.failed_check == "ngram"
+
+
+@pytest.mark.parametrize(
+    "finish", [FinishReason.REFUSAL, FinishReason.CONTENT_FILTER, FinishReason.OTHER]
+)
+def test_an_abnormal_finish_fails_even_with_plausible_text(finish: FinishReason) -> None:
+    verdict = validate_output(generated("He worked with FastAPI for four years.", finish))
+
+    assert not verdict.ok
+    assert verdict.failed_check == "abnormal_finish"
+
+
+def test_an_empty_filtered_reply_is_reported_as_abnormal_not_empty() -> None:
+    verdict = validate_output(generated("", FinishReason.CONTENT_FILTER))
+
+    assert verdict.failed_check == "abnormal_finish"

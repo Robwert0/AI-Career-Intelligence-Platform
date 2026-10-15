@@ -150,3 +150,31 @@ async def test_a_leak_check_failure_is_logged_without_the_reply_text(
 
     assert "canary" in caplog.text
     assert CANARY not in caplog.text
+
+
+@pytest.mark.parametrize("finish", [FinishReason.REFUSAL, FinishReason.CONTENT_FILTER])
+async def test_a_declined_reply_fails_without_a_paid_retry(
+    finish: FinishReason, caplog: pytest.LogCaptureFixture
+) -> None:
+    generator = ScriptedGenerator(
+        ["I can't help with SECRET-CV-TEXT.", '{"value": 1}'], finish_reasons=[finish]
+    )
+
+    with pytest.raises(ExtractionError) as caught:
+        await generate_validated(generator, MESSAGES, Answer, SAMPLING)
+
+    assert caught.value.code == "ai_invalid_output"
+    assert len(generator.calls) == 1
+    assert f"finish_reason={finish.value}" in caplog.text
+    assert "SECRET-CV-TEXT" not in caplog.text
+
+
+async def test_an_unknown_finish_is_still_retried() -> None:
+    generator = ScriptedGenerator(
+        ['{"value": 1}', '{"value": 2}'], finish_reasons=[FinishReason.OTHER, FinishReason.STOP]
+    )
+
+    answer = await generate_validated(generator, MESSAGES, Answer, SAMPLING)
+
+    assert answer.value == 2
+    assert "reply was abnormal_finish" in generator.calls[1][-1].content

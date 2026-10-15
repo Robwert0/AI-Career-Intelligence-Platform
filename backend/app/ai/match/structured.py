@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from app.ai.generation import (
+    DECLINED,
     ContextOverflowError,
     GenerationRequestError,
     GenerationResult,
@@ -74,6 +75,12 @@ def _checked(result: GenerationResult, system_prompt: str) -> Verdict:
         logger.warning(
             "structured extraction leak check failed failed_check=%s finish_reason=%s",
             verdict.failed_check,
+            result.finish_reason.value,
+        )
+        raise ExtractionError("ai_invalid_output")
+    if result.finish_reason in DECLINED:
+        logger.warning(
+            "structured extraction declined by the provider finish_reason=%s",
             result.finish_reason.value,
         )
         raise ExtractionError("ai_invalid_output")

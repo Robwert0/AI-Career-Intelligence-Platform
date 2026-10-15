@@ -406,3 +406,112 @@ def test_a_cv_blob_outlives_the_longest_a_job_can_wait_queued(
 
 def test_the_queued_analysis_cap_has_a_default() -> None:
     assert Settings(_env_file=None).match_max_queued_analyses == 20
+
+
+def test_the_generation_provider_defaults_to_local_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("GENERATION_PROVIDER", "OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.generation_provider == "ollama"
+    assert settings.openai_api_key is None
+    assert settings.openai_chat_model == "gpt-6-luna"
+    assert settings.openai_reasoning_effort == "none"
+    assert settings.openai_base_url == "https://api.openai.com/v1"
+
+
+def test_the_openai_provider_without_a_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENERATION_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "  ")
+
+    with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
+        Settings(_env_file=None)
+
+
+def test_the_openai_provider_with_a_key_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENERATION_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.openai_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test"
+
+
+def test_an_unknown_generation_provider_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENERATION_PROVIDER", "anthropic")
+
+    with pytest.raises(ValidationError, match="generation_provider"):
+        Settings(_env_file=None)
+
+
+def test_an_unknown_reasoning_effort_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "turbo")
+
+    with pytest.raises(ValidationError, match="openai_reasoning_effort"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "url", ["https://user:pass@api.openai.com/v1", "https://api.openai.com/v1?key=sk-test"]
+)
+def test_an_openai_base_url_with_credentials_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", url)
+
+    with pytest.raises(ValidationError, match="openai_base_url"):
+        Settings(_env_file=None)
+
+
+def test_a_blank_reasoning_effort_means_none_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "")
+
+    assert Settings(_env_file=None).openai_reasoning_effort is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://api.openai.com/v1",
+        "http://localhost.evil.example/v1",
+        "http://127.0.0.2:8080/v1",
+        "ftp://api.openai.com/v1",
+        "https:///v1",
+    ],
+)
+def test_an_openai_base_url_that_would_send_the_key_in_cleartext_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", url)
+
+    with pytest.raises(ValidationError, match="openai_base_url"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.openai.com/v1",
+        "https://gateway.example.com:8443/openai/v1",
+        "http://localhost:8080/v1",
+        "http://127.0.0.1:8080/v1",
+        "http://[::1]:8080/v1",
+    ],
+)
+def test_an_https_or_loopback_openai_base_url_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", url)
+
+    assert Settings(_env_file=None).openai_base_url == url
+
+
+def test_a_loopback_openai_base_url_still_cannot_carry_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://user:pass@localhost:8080/v1")
+
+    with pytest.raises(ValidationError, match="credentials"):
+        Settings(_env_file=None)

@@ -5,14 +5,14 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from celery.exceptions import SoftTimeLimitExceeded
 
 from app.ai.embeddings import BgeEmbedder
-from app.ai.generation import Generator
+from app.ai.generation import ClosableGenerator
+from app.ai.generators import build_generator
 from app.ai.match.structured import ExtractionError
-from app.ai.ollama import OllamaGenerator
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
 from app.core.job_store import (
@@ -206,7 +206,7 @@ async def _extract_job(store: JobStore, record: JobRecord) -> dict[str, Any]:
     # Pasted text has nothing to read, so it must never be shown as "reading".
     await on_stage("reading" if intake.url is not None else "extracting")
 
-    generator = OllamaGenerator(timeout_seconds=settings.job_extract_generation_timeout_seconds)
+    generator = build_generator(settings.job_extract_generation_timeout_seconds)
     try:
         return await run_job_intake(
             intake, fetcher=SafeFetcher(), generator=generator, on_stage=on_stage
@@ -226,10 +226,6 @@ def extract_job_task(job_id: str) -> None:
 ANALYSIS_BLOBS = ("analysis_input", "sources", "github_url", *CV_BLOBS)
 
 
-class ClosableGenerator(Generator, Protocol):
-    async def aclose(self) -> None: ...
-
-
 @dataclass(frozen=True, slots=True)
 class AnalysisGenerators:
     evidence: ClosableGenerator
@@ -244,13 +240,9 @@ class AnalysisGenerators:
 def build_analysis_generators() -> AnalysisGenerators:
     # One client per stage: each timeout is part of the budget the settings validator checks.
     return AnalysisGenerators(
-        evidence=OllamaGenerator(
-            timeout_seconds=settings.evidence_extract_generation_timeout_seconds
-        ),
-        assess=OllamaGenerator(timeout_seconds=settings.match_assess_generation_timeout_seconds),
-        recommend=OllamaGenerator(
-            timeout_seconds=settings.match_recommend_generation_timeout_seconds
-        ),
+        evidence=build_generator(settings.evidence_extract_generation_timeout_seconds),
+        assess=build_generator(settings.match_assess_generation_timeout_seconds),
+        recommend=build_generator(settings.match_recommend_generation_timeout_seconds),
     )
 
 

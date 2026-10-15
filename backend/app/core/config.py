@@ -19,6 +19,7 @@ ANALYSIS_FIXED_BUDGET_SECONDS = (
     PARSE_BUDGET_SECONDS + GITHUB_BUDGET_SECONDS + EMBED_BUDGET_SECONDS + OVERHEAD_BUDGET_SECONDS
 )
 MAX_ASSESS_CALLS = 8
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 class Settings(BaseSettings):
@@ -36,8 +37,15 @@ class Settings(BaseSettings):
     embedding_model_revision: str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
     embedding_dim: int = 384
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    generation_provider: Literal["ollama", "openai"] = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
     generation_model: str = "qwen3:8b"
+    openai_api_key: SecretStr | None = None
+    openai_chat_model: str = "gpt-6-luna"
+    openai_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = (
+        "none"
+    )
+    openai_base_url: str = "https://api.openai.com/v1"
     generation_timeout_seconds: int = 180
     generation_connect_timeout_seconds: int = 5
     cv_document_id: uuid.UUID
@@ -96,15 +104,21 @@ class Settings(BaseSettings):
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
 
-    @field_validator("github_token", mode="before")
+    @field_validator("github_token", "openai_api_key", "openai_reasoning_effort", mode="before")
     @classmethod
-    def _blank_token_is_none(cls, value: object) -> object:
+    def _blank_is_none(cls, value: object) -> object:
         # GITHUB_TOKEN= in .env must mean "no token", not a Bearer header with an empty secret.
         return None if isinstance(value, str) and not value.strip() else value
 
     @property
     def job_hard_time_limit_seconds(self) -> int:
         return self.job_soft_time_limit_seconds + 30
+
+    @model_validator(mode="after")
+    def _openai_has_a_key(self) -> Settings:
+        if self.generation_provider == "openai" and self.openai_api_key is None:
+            raise ValueError("GENERATION_PROVIDER=openai needs OPENAI_API_KEY")
+        return self
 
     @model_validator(mode="after")
     def _extraction_fits_the_soft_time_limit(self) -> Settings:
@@ -142,7 +156,7 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
-    @field_validator("ollama_base_url")
+    @field_validator("ollama_base_url", "openai_base_url")
     @classmethod
     def _reject_url_credentials(cls, url: str) -> str:
         parsed = urlsplit(url)
@@ -151,6 +165,18 @@ class Settings(BaseSettings):
                 "must not carry credentials, a query or a fragment: httpx logs request URLs"
             )
         return url
+
+    @field_validator("openai_base_url")
+    @classmethod
+    def _openai_url_is_encrypted(cls, url: str) -> str:
+        parsed = urlsplit(url)
+        if not parsed.hostname:
+            raise ValueError("must name a host")
+        if parsed.scheme == "https" or (
+            parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS
+        ):
+            return url
+        raise ValueError("must use https (http only for a loopback host): it carries the API key")
 
     @field_validator("cors_allowed_origins", mode="after")
     @classmethod

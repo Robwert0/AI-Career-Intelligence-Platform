@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.ai.ollama import OllamaGenerator
+from app.ai.generators import build_generator
 from app.core.config import settings
 from app.core.log_config import configure_logging
 from app.core.rate_limiter import TokenBucketLimiter
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis()
     app.state.limiter = TokenBucketLimiter(app.state.redis)
     app.state.task_queue = CeleryTaskQueue()
-    app.state.generator = OllamaGenerator(timeout_seconds=settings.chat_timeout_seconds)
+    app.state.generator = build_generator(settings.chat_timeout_seconds)
     app.state.generation_slots = asyncio.Semaphore(settings.chat_max_concurrent_generations)
     yield
     await app.state.generator.aclose()

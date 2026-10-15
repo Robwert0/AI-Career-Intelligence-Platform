@@ -369,7 +369,7 @@ def _create_intake_job(intake: JobIntakeRequest | None) -> str:
 def test_the_extract_task_turns_pasted_text_into_a_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    monkeypatch.setattr(tasks, "build_generator", lambda _: ScriptedGenerator([_POSTING_REPLY]))
     job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
 
     tasks.extract_job_task.apply(args=(job_id,))
@@ -383,7 +383,7 @@ def test_the_extract_task_turns_pasted_text_into_a_posting(
 
 
 def test_the_extract_task_consumes_its_input_blob(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    monkeypatch.setattr(tasks, "build_generator", lambda _: ScriptedGenerator([_POSTING_REPLY]))
     job_id = _create_intake_job(JobIntakeRequest(text="We build payment systems in Go. " * 5))
 
     tasks.extract_job_task.apply(args=(job_id,))
@@ -444,7 +444,7 @@ def test_an_intake_starts_at_the_stage_its_input_kind_needs(
     _STAGES.clear()
     monkeypatch.setattr(tasks, "JobStore", _StageRecordingStore)
     monkeypatch.setattr(tasks, "SafeFetcher", _PlainTextFetcher)
-    monkeypatch.setattr(tasks, "OllamaGenerator", lambda **_: ScriptedGenerator([_POSTING_REPLY]))
+    monkeypatch.setattr(tasks, "build_generator", lambda _: ScriptedGenerator([_POSTING_REPLY]))
     job_id = _create_intake_job(intake)
 
     tasks.extract_job_task.apply(args=(job_id,))
