@@ -35,7 +35,8 @@ MATCH_ANALYSIS_USER_DAILY = Policy(
     "match_analysis_user_daily", capacity=8, refill_per_second=8 / 86400, scope=Scope.USER
 )
 # A continue finishes an analysis its submit or retry already paid for, and each of those pauses
-# at most once, so this cap stays off the analysis bucket and never binds before it does.
+# at most once. Twice the analysis cap leaves room for a refused (404/409/503) continue to be
+# clicked again without locking a paid-for analysis out.
 MATCH_CONTINUE_USER_DAILY = Policy(
-    "match_continue_user_daily", capacity=8, refill_per_second=8 / 86400, scope=Scope.USER
+    "match_continue_user_daily", capacity=16, refill_per_second=16 / 86400, scope=Scope.USER
 )
