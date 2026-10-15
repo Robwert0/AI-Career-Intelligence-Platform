@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 from fastapi import Request
 
 from app.ai.ollama import OllamaGenerator
@@ -49,3 +50,13 @@ async def test_the_lifespan_owns_a_celery_task_queue() -> None:
 
     async with lifespan(app):
         assert isinstance(app.state.task_queue, CeleryTaskQueue)
+
+
+async def test_the_lifespan_refuses_to_start_without_a_cv_document_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "cv_document_id", None)
+
+    with pytest.raises(RuntimeError, match="CV_DOCUMENT_ID"):
+        async with lifespan(app):
+            pass

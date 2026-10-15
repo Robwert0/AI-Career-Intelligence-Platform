@@ -49,11 +49,12 @@ SEED = [
 
 async def _seed(session: AsyncSession, rows: list[tuple[str, str]], embedder: FakeEmbedder) -> None:
     vectors = embedder.embed_documents([content for _, content in rows])
+    document_id = settings.require_cv_document_id()
     await ChunkRepository(session).replace_document_chunks(
-        settings.cv_document_id,
+        document_id,
         [
             Chunk(
-                document_id=settings.cv_document_id,
+                document_id=document_id,
                 chunk_index=index,
                 content=content,
                 section=section,

@@ -42,7 +42,7 @@ async def measure(questions: list[str]) -> list[tuple[str, float, int]]:
         for question in questions:
             result = await retriever.retrieve(
                 question,
-                document_id=settings.cv_document_id,
+                document_id=settings.require_cv_document_id(),
                 limit=settings.retrieval_limit,
             )
             rows.append((question, result.best_similarity, result.text_hit_count))

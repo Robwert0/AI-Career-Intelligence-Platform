@@ -174,11 +174,10 @@ POSTGRES_DB=career
 POSTGRES_PORT=5432
 # must match the four values above; the password goes into the URL unencoded, hence no symbols
 DATABASE_URL=postgresql+asyncpg://career:<the same password>@localhost:5432/career
-
-# Temporary placeholder. The backend refuses to load config while this is empty, and that includes
-# the migration and ingest commands below. You replace it in step 5.
-CV_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
 ```
+
+Leave `CV_DOCUMENT_ID` empty for now: the migration and ingest commands below do not need it, and
+step 5 tells you what to put there.
 
 If port 5432 is already in use on your machine, change `POSTGRES_PORT` and the port in
 `DATABASE_URL` together. Redis is always published on 6379, so stop any local Redis already using it.
@@ -206,7 +205,7 @@ uv run python scripts/ingest_cv.py /path/to/your-cv.pdf
 ```
 
 The first run downloads the embedding model (`bge-small-en-v1.5`, about 130 MB). Copy the document
-id it prints into `.env`, replacing the placeholder:
+id it prints into `.env`:
 
 ```bash
 CV_DOCUMENT_ID=<the id it printed>
@@ -255,7 +254,7 @@ accepts the `localhost` origin by default.
 
 | Symptom | Likely cause |
 |---|---|
-| `cv_document_id ... Input should be a valid UUID` | `CV_DOCUMENT_ID` is empty; use the placeholder from step 2 |
+| `uvicorn` exits with `CV_DOCUMENT_ID is not set` | the chat needs to know which document to answer from: run step 5 and put the id it printed in `.env` |
 | `Connection refused` on 5432 / 6379 | Docker containers not running: `docker compose up -d database redis` |
 | `password authentication failed` | `DATABASE_URL` does not match `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`; if you changed them after the first start, the old volume keeps the old ones (`docker compose down -v` resets it, **deleting the data**) |
 | Chat returns 503 | Ollama is not running, or the first cold model load exceeded `CHAT_TIMEOUT_SECONDS` (retry), or all generation slots are busy |

@@ -189,7 +189,7 @@ async def run(as_json: bool) -> int:
     async def retrieve(query: str) -> RetrievalResult:
         async with scope() as retriever:
             return await retriever.retrieve(
-                query, document_id=settings.cv_document_id, limit=settings.retrieval_limit
+                query, document_id=settings.require_cv_document_id(), limit=settings.retrieval_limit
             )
 
     rows: list[dict[str, object]] = []
