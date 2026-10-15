@@ -209,3 +209,17 @@ async def test_analyses_are_capped_per_user_per_day(
 
     assert response.status_code == 429
     assert int(response.headers["Retry-After"]) > 3600
+
+
+async def test_continuing_an_analysis_is_capped_per_user_per_day(
+    limited_client: httpx.AsyncClient,
+) -> None:
+    user_id, headers = await _login(limited_client)
+    await _drain(policies.MATCH_CONTINUE_USER_DAILY, user_id)
+
+    response = await limited_client.post(
+        f"/match/analyses/{uuid.uuid4()}/continue", headers=headers
+    )
+
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) > 3600

@@ -111,7 +111,7 @@ export function requestProblem(
   return { message: 'Something went wrong. Please try again.' }
 }
 
-// Retry spends a MATCH_ANALYSIS_USER token (5/hour); continue uses the poll limit and keeps the
+// Retry spends a MATCH_ANALYSIS_USER token (5/hour); continue spends none and keeps the
 // ordinary requestProblem mapping. A 429 from retry needs its own wording so it doesn't read like
 // a transient "too many requests" — the user actually used up a scarce resource.
 export function retryLimitProblem(failure: ApiFailure): Problem {

@@ -120,6 +120,14 @@ def test_the_match_pipeline_has_a_daily_cap_per_user(daily: Policy, hourly: Poli
     assert daily.capacity >= hourly.capacity
 
 
+def test_continues_are_capped_daily_without_binding_before_the_analysis_cap() -> None:
+    daily = policies.MATCH_CONTINUE_USER_DAILY
+    assert daily.scope is Scope.USER
+    assert daily.refill_per_second * 86400 == pytest.approx(daily.capacity)
+    assert daily.capacity >= policies.MATCH_ANALYSIS_USER_DAILY.capacity
+    assert daily.refill_per_second >= policies.MATCH_ANALYSIS_USER_DAILY.refill_per_second
+
+
 def test_a_day_of_analyses_is_a_minority_of_the_analysis_pool() -> None:
     assert policies.MATCH_ANALYSIS_USER_DAILY.capacity == 8
     assert policies.MATCH_JOB_USER_DAILY.capacity == 30

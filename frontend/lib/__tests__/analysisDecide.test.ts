@@ -44,7 +44,7 @@ describe('decideOutcome (useAnalysis.decide, pulled out for unit testing)', () =
     )
   })
 
-  it('gives continue the ordinary rate-limit wording for a 429: it only spends the poll limit', () => {
+  it('gives continue the ordinary rate-limit wording for a 429: it spends no analysis token', () => {
     const outcome = decideOutcome('continue', 'a1', fail({ status: 429, retryAfter: 30 }))
 
     expect(outcome.type).toBe('problem')
