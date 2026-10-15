@@ -82,6 +82,8 @@ scalable and explainable** before it counts as done.
   website id is configured
 - A daily Celery beat task deletes non-admin accounts inactive for `ACCOUNT_RETENTION_DAYS`
   (default 365); `scripts/delete_account.py` handles individual erasure requests
+- `scripts/unlock_login.py <email>` lifts one account's sign-in lockout (its account-wide failure
+  bucket only) when its owner is locked out by someone else's guessing
 
 ## Roadmap
 
