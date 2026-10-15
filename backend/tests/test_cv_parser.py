@@ -7,6 +7,8 @@ from app.integrations.cv_parser import pdf_to_markdown
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REAL_CV = Path(__file__).parents[2] / "files/RobertMirea_CV2026.pdf"
+REAL_CV_ABSENT = "personal CV not present (files/ is gitignored, so CI always skips this)"
+CORE_SECTIONS = ("summary", "experience", "projects", "skills", "education")
 
 # Section counts are the whole heading-detection design in one number. c_twocolumn and d_nobold
 # are expected to under-detect — see fixtures/README.md for why each one is here.
@@ -115,19 +117,18 @@ def test_every_alias_maps_to_a_storable_section() -> None:
     assert set(HEADING_ALIASES.values()) <= set(SECTIONS)
 
 
-@pytest.mark.skipif(not REAL_CV.exists(), reason="personal CV not present")
-def test_the_real_cv_parses_into_its_seven_sections() -> None:
-    # Couples to Robert's actual CV: update this if the document's headings change.
-    markdown = pdf_to_markdown(REAL_CV.read_bytes())
+@pytest.mark.skipif(not REAL_CV.exists(), reason=REAL_CV_ABSENT)
+def test_the_real_cv_parses_into_its_known_sections() -> None:
+    # Structural on purpose: the PDF is personal and gets edited, so pin the invariants
+    # (core sections found, no spurious headings mid-document) rather than its exact layout.
+    found = headings(pdf_to_markdown(REAL_CV.read_bytes()))
+    first_section = next(i for i, h in enumerate(found) if h.lower() in HEADING_ALIASES)
+    body = [h.lower() for h in found[first_section:]]
 
-    assert headings(markdown) == [
-        "Robert Mirea",
-        "SUMMARY",
-        "EXPERIENCE",
-        "PROJECTS",
-        "SKILLS",
-        "EDUCATION",
-        "LANGUAGES",
-    ]
-    assert "Languages Java, Python, SQL, TypeScript, C++" in markdown
-    assert "(cid:" not in markdown
+    assert all(h in HEADING_ALIASES for h in body)
+    assert set(CORE_SECTIONS) <= {HEADING_ALIASES[h] for h in body}
+
+
+@pytest.mark.skipif(not REAL_CV.exists(), reason=REAL_CV_ABSENT)
+def test_the_real_cv_has_no_unmapped_glyphs() -> None:
+    assert "(cid:" not in pdf_to_markdown(REAL_CV.read_bytes())

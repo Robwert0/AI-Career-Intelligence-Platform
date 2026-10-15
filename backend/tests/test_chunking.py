@@ -125,17 +125,15 @@ def test_pack_keeps_a_single_over_budget_unit_rather_than_dropping_it() -> None:
     assert "".join(groups).count("x") == 4000
 
 
-@pytest.mark.skipif(not REAL_CV.exists(), reason="personal CV not present")
+@pytest.mark.skipif(
+    not REAL_CV.exists(),
+    reason="personal CV not present (files/ is gitignored, so CI always skips this)",
+)
 def test_the_parser_and_chunker_compose_on_a_real_pdf() -> None:
     chunks = chunk_cv(pdf_to_markdown(REAL_CV.read_bytes()))
 
-    assert [c.section for c in chunks] == [
-        "other",
-        "summary",
-        "experience",
-        "projects",
-        "skills",
-        "education",
-        "languages",
-    ]
+    assert {"summary", "experience", "projects", "skills", "education"} <= {
+        c.section for c in chunks
+    }
+    assert all(c.content.strip() for c in chunks)
     assert all(count_tokens(c.content) <= token_budget() for c in chunks)
