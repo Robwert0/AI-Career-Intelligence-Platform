@@ -24,6 +24,7 @@ _INTAKE_WORKER_CODES = [
     "worker_lost",
     "timeout",
     "ai_unavailable",
+    "ai_budget_exhausted",
     "ai_invalid_output",
     "input_too_long",
     "not_a_job_posting",
@@ -65,6 +66,13 @@ def test_a_reset_time_is_added_to_the_message_in_utc() -> None:
 
     assert described.message.endswith("You can retry after 14:13 UTC.")
     assert described.recovery == describe_failure("github_rate_limited").recovery
+
+
+def test_an_exhausted_ai_budget_says_when_it_resets_and_asks_the_user_to_wait() -> None:
+    failure = describe_failure("ai_budget_exhausted")
+
+    assert failure.recovery == "wait"
+    assert failure.message.endswith("You can try again after 00:00 UTC.")
 
 
 _ANALYSIS_CODES = [

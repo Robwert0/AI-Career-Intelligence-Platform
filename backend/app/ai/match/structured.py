@@ -17,6 +17,7 @@ from app.ai.generation import (
 )
 from app.ai.match.prompts import correction_message
 from app.ai.output_guard import Verdict, validate_output
+from app.ai.spend_guard import SpendBudgetExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,9 @@ async def _generate(
 ) -> GenerationResult:
     try:
         return await generator.generate(messages, sampling=sampling, response_schema=schema)
+    except SpendBudgetExceededError as exc:
+        logger.warning("structured extraction refused by the llm budget pool=%s", exc.pool)
+        raise ExtractionError("ai_budget_exhausted") from None
     except GeneratorUnavailableError as exc:
         _log_provider_failure(exc, "ai_unavailable")
         raise ExtractionError("ai_unavailable") from None

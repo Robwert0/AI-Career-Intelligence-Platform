@@ -1,12 +1,18 @@
 from typing import Any
 
 import pytest
-from fakes import RejectingGenerator, ScriptedGenerator, UnavailableGenerator
+from fakes import (
+    BudgetSpentGenerator,
+    RejectingGenerator,
+    ScriptedGenerator,
+    UnavailableGenerator,
+)
 from pydantic import BaseModel, ConfigDict
 
 from app.ai.generation import (
     FinishReason,
     GenerationRequestError,
+    Generator,
     Message,
     Role,
     SamplingSettings,
@@ -93,16 +99,31 @@ async def test_a_call_without_a_system_prompt_is_a_programming_error() -> None:
 
 @pytest.mark.parametrize(
     ("generator", "code"),
-    [(UnavailableGenerator(), "ai_unavailable"), (RejectingGenerator(), "internal_error")],
+    [
+        (UnavailableGenerator(), "ai_unavailable"),
+        (BudgetSpentGenerator(), "ai_budget_exhausted"),
+        (RejectingGenerator(), "internal_error"),
+    ],
 )
 async def test_provider_failures_map_to_codes_without_chaining(
-    generator: UnavailableGenerator | RejectingGenerator, code: str
+    generator: Generator, code: str
 ) -> None:
     with pytest.raises(ExtractionError) as caught:
         await generate_validated(generator, MESSAGES, Answer, SAMPLING)
 
     assert caught.value.code == code
     assert caught.value.__suppress_context__ is True
+
+
+async def test_a_budget_refusal_logs_its_pool_and_nothing_else(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"), pytest.raises(ExtractionError):
+        await generate_validated(BudgetSpentGenerator(), MESSAGES, Answer, SAMPLING)
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "structured extraction refused by the llm budget pool=analysis"
+    ]
 
 
 class _StatusFailingGenerator:

@@ -85,6 +85,10 @@ class RedisSpendLedger:
         self._prefix = key_prefix
         self._clock = clock
 
+    @property
+    def pool(self) -> SpendPool:
+        return self._pool
+
     def _keys(self) -> tuple[str, str, str]:
         # One hash tag per day keeps every pool's keys in one cluster slot, as Lua requires.
         tag = f"{{{self._prefix}:{self._clock().date().isoformat()}}}"

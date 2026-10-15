@@ -25,10 +25,17 @@ MESSAGE_OVERHEAD_TOKENS = 8
 
 
 class SpendBudgetExceededError(GeneratorUnavailableError):
-    """The global daily LLM budget is spent; callers treat it like any provider outage."""
+    """The pool's daily LLM budget is spent; a caller that can't tell it apart sees an outage."""
+
+    def __init__(self, pool: SpendPool) -> None:
+        super().__init__("daily LLM budget exhausted")
+        self.pool = pool
 
 
 class SpendLedger(Protocol):
+    @property
+    def pool(self) -> SpendPool: ...
+
     async def reserve(self, micro_usd: int) -> Reservation | None: ...
 
     async def settle(self, reservation: Reservation, actual_micro_usd: int) -> None: ...
@@ -104,7 +111,7 @@ class BudgetedGenerator:
             logger.warning("llm spend ledger unavailable; refusing the call")
             raise GeneratorUnavailableError("spend ledger unavailable") from None
         if reservation is None:
-            raise SpendBudgetExceededError("daily LLM budget exhausted")
+            raise SpendBudgetExceededError(self._ledger.pool)
         return reservation
 
     async def _settle(self, reservation: Reservation, actual_micro_usd: int) -> None:

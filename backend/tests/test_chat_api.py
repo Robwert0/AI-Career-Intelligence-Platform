@@ -26,7 +26,7 @@ from app.ai.retriever import Retriever
 from app.ai.spend_guard import BudgetedGenerator
 from app.core.config import settings
 from app.core.db import get_db
-from app.core.spend_ledger import Reservation, seconds_until_reset
+from app.core.spend_ledger import Reservation, SpendPool, seconds_until_reset
 from app.deps import (
     get_embedder,
     get_generation_slots,
@@ -162,6 +162,8 @@ async def test_an_unavailable_generator_returns_503(chat_client: ChatFixture) ->
 
 
 class _SpentLedger:
+    pool = SpendPool.CHAT
+
     async def reserve(self, micro_usd: int) -> Reservation | None:
         return None
 

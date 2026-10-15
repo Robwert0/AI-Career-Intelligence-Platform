@@ -72,6 +72,8 @@ def worst_case() -> int:
 
 
 class RecordingLedger:
+    pool = SpendPool.ANALYSIS
+
     def __init__(self) -> None:
         self.reserved: list[int] = []
         self.settled: list[int] = []
@@ -85,6 +87,8 @@ class RecordingLedger:
 
 
 class DownLedger:
+    pool = SpendPool.ANALYSIS
+
     async def reserve(self, micro_usd: int) -> Reservation | None:
         raise RedisConnectionError("redis is down")
 
@@ -226,11 +230,17 @@ def test_a_refusal_is_a_provider_outage_to_every_caller() -> None:
     assert issubclass(SpendBudgetExceededError, GeneratorUnavailableError)
 
 
-async def test_a_refusal_maps_to_ai_unavailable_in_structured_extraction() -> None:
+async def test_a_refusal_maps_to_its_own_code_in_structured_extraction() -> None:
     guard = BudgetedGenerator(FakeGenerator(), RefusingLedger())
     with pytest.raises(ExtractionError) as caught:
         await _generate(guard, MESSAGES, SAMPLING, {"type": "object"})
-    assert caught.value.code == "ai_unavailable"
+    assert caught.value.code == "ai_budget_exhausted"
+
+
+async def test_a_refusal_names_the_ledger_pool() -> None:
+    with pytest.raises(SpendBudgetExceededError) as caught:
+        await BudgetedGenerator(FakeGenerator(), RefusingLedger()).generate(MESSAGES)
+    assert caught.value.pool is SpendPool.ANALYSIS
 
 
 async def test_concurrent_reservations_never_overshoot_the_budget(redis_client: Redis) -> None:

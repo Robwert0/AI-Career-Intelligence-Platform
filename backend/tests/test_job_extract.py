@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 from fakes import (
+    BudgetSpentGenerator,
     OverflowingGenerator,
     RejectingGenerator,
     ScriptedGenerator,
@@ -168,7 +169,11 @@ async def test_an_overlong_posting_is_truncated_and_flagged() -> None:
 
 @pytest.mark.parametrize(
     ("generator", "code"),
-    [(UnavailableGenerator(), "ai_unavailable"), (RejectingGenerator(), "internal_error")],
+    [
+        (UnavailableGenerator(), "ai_unavailable"),
+        (BudgetSpentGenerator(), "ai_budget_exhausted"),
+        (RejectingGenerator(), "internal_error"),
+    ],
 )
 async def test_provider_failures_map_to_codes(generator: Any, code: str) -> None:
     with pytest.raises(ExtractionError) as caught:
