@@ -41,9 +41,12 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # Same digests as docker-compose.yml, so CI tests the images production runs. Dependabot's
+    # github-actions updater only bumps `uses:` lines, not these: when it moves the compose
+    # digests, copy them here in the same PR.
     services:
       database:
-        image: pgvector/pgvector:pg18
+        image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
@@ -56,7 +59,7 @@ jobs:
           --health-timeout 3s
           --health-retries 5
       redis:
-        image: redis:8-alpine
+        image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
         ports:
           - 6379:6379
         options: >-
