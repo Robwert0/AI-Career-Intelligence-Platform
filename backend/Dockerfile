@@ -5,7 +5,7 @@
 # Base images are pinned by digest (Dependabot bumps them); keep the two python lines identical.
 FROM ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 AS uv
 
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS builder
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS builder
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -40,7 +40,7 @@ RUN DATABASE_URL=postgresql+asyncpg://build:build@localhost/build \
     /app/.venv/bin/python -c "from app.ai.embeddings import BgeEmbedder; BgeEmbedder().embed_query('offline check')"
 
 
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS runtime
 RUN groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --create-home --home-dir /home/app app \
  && mkdir -p /var/lib/celerybeat \
